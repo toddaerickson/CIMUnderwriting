@@ -15,27 +15,33 @@
 - [x] 6-tab assumptions editor (Property, Size, Unit Mix, Income & Expenses, Scenarios, Demographics)
 - [x] Percentage inputs as whole numbers (type 6 for 6%)
 - [x] Per-analysis scenario overrides (don't mutate global config)
+- [x] Per-deal replacement cost overrides ($/SF per facility type)
+- [x] Required field indicators (red ! for IRR-critical fields)
+- [x] Clickable CIM tile (opens PDF in new browser tab via Blob URL)
+- [x] Duplicate detection on upload (comp DB + deal folder search)
 - [x] Deal tracker with persistent folders
 - [x] Comp database (SQLite)
 - [x] Batch analysis
+- [x] Sidebar redesign (New Analysis, Deal Pipeline, Comps, Settings)
 - [x] Docker + docker-compose deployment
-- [x] GitHub Actions CI (pytest + Docker build)
+- [x] GitHub Actions CI (pytest + Docker build + health check)
 - [x] Environment variable externalization
 - [x] Security audit and sanitization
+- [x] SQLite WAL mode for concurrent reads
+- [x] Temp file cleanup after analysis
+- [x] DB backup script (scripts/backup_db.sh)
 
 ## Next Up
 
-### Web Deployment (Phase 2)
+### Web Deployment
 - [ ] Deploy to Railway or VPS
 - [ ] Cloudflare Tunnel + Access for authentication
-- [ ] Custom domain (cim.your-domain.com)
-- [ ] SQLite WAL mode for concurrent reads
-- [ ] Temp file cleanup after analysis
-- [ ] Weekly database backup script
+- [ ] Custom domain
 
 ### Levered Returns / LP Waterfall
 - [ ] Add debt layer (senior/junior with term, IO, amort, rate)
 - [ ] GP/LP distribution waterfall (pref return + promote tiers)
+- [ ] Show both levered (8% pref) and unlevered (6% pref) analyses
 - [ ] LP net IRR as primary screening metric (target 15%+)
 - [ ] Solver targets LP net IRR instead of unlevered IRR
 
@@ -43,7 +49,6 @@
 - [ ] Extraction confidence indicators per field (green/yellow/red)
 - [ ] Inline validation (flag when inputs violate gate thresholds)
 - [ ] Comp overlay on unit mix tab (show nearby comps alongside inputs)
-- [ ] Dark/light theme toggle
 
 ### Analysis Enhancements
 - [ ] Property tax reassessment modeling (post-acquisition revaluation)
