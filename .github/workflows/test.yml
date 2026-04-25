@@ -17,10 +17,10 @@ jobs:
           python-version: "3.12"
 
       - name: Install dependencies
-        run: pip install -r requirements.txt
+        run: pip install -r requirements.txt pytest
 
       - name: Run tests
-        run: pytest tests/ -v
+        run: python -m pytest tests/ -v
 
   docker:
     runs-on: ubuntu-latest
