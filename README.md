@@ -1,6 +1,6 @@
-# CIM Analyst
+# CIM Underwriting
 
-Self-storage investment screening tool. Upload a CIM (Confidential Information Memorandum), review extracted data, adjust assumptions, and generate investment memos, returns models, and pre-filled underwriting templates.
+Self-storage investment screening and underwriting tool. Upload a CIM (Confidential Information Memorandum), review extracted data, adjust assumptions, and generate investment memos, returns models, and pre-filled underwriting templates.
 
 ## Features
 
