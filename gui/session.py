@@ -40,5 +40,6 @@ def set_cim_overrides(overrides: dict):
 
 def clear_analysis():
     """Clear analysis results (keeps config)."""
-    for key in ("current_result", "cim_overrides", "uploaded_pdf_path"):
+    for key in ("current_result", "cim_overrides", "uploaded_pdf_path",
+                "unit_mix_editor", "assumptions_unit_mix"):
         st.session_state.pop(key, None)

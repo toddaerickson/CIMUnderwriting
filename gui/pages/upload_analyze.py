@@ -16,26 +16,32 @@ from gui.deal_manager import (
 
 
 def render():
-    st.header("Upload & Analyze")
-
-    # ── File uploaders ───────────────────────────────────────────────
     st.subheader("Upload Documents")
 
-    cim_file = st.file_uploader(
-        "CIM / Offering Memorandum (required)",
-        type=["pdf"],
-        key="upload_cim",
+    # ── File uploaders (3-column row) ──────────────────────────────
+
+    # Hide the "Limit 200MB..." helper text on file uploaders
+    st.markdown(
+        "<style>div[data-testid='stFileUploader'] section > span {display:none;}</style>",
+        unsafe_allow_html=True,
     )
-    col1, col2 = st.columns(2)
-    with col1:
+
+    c1, c2, c3 = st.columns(3)
+    with c1:
+        cim_file = st.file_uploader(
+            "CIM",
+            type=["pdf"],
+            key="upload_cim",
+        )
+    with c2:
         rent_roll_file = st.file_uploader(
             "Rent Roll (optional)",
             type=["pdf", "xlsx", "xls", "csv"],
             key="upload_rent_roll",
         )
-    with col2:
+    with c3:
         financials_file = st.file_uploader(
-            "Financial Statement (optional)",
+            "Financials (optional)",
             type=["pdf", "xlsx", "xls", "csv"],
             key="upload_financials",
         )
@@ -95,10 +101,10 @@ def render():
         for err in result.errors:
             st.warning(err)
 
-    # ── Override form ────────────────────────────────────────────────
-    st.subheader("Review & Override Data")
-    from gui.components.cim_data_editor import render_cim_editor
-    overrides = render_cim_editor(cim_data)
+    # ── Assumptions editor ────────────────────────────────────────────
+    st.subheader("Review & Edit Assumptions")
+    from gui.components.assumptions_editor import render_assumptions_editor
+    assumptions = render_assumptions_editor(cim_data, report)
 
     # ── Run Analysis ─────────────────────────────────────────────────
     st.divider()
@@ -106,9 +112,10 @@ def render():
         apply_config()
 
         # Apply GUI form overrides
-        if overrides:
+        cim_overrides = assumptions.get("cim_overrides", {})
+        if cim_overrides:
             from gui.engine import _apply_overrides
-            _apply_overrides(cim_data, overrides)
+            _apply_overrides(cim_data, cim_overrides)
 
         # Create deal folder using the property name (after overrides applied)
         property_name = cim_data.property_name or "Unknown_Property"
@@ -140,8 +147,11 @@ def render():
             progress_bar.progress(step / total, text=msg)
 
         from gui.engine import run_analysis
-        final_result = run_analysis(result, progress=_progress,
-                                     output_dir=deal_folder)
+        final_result = run_analysis(
+            result, progress=_progress, output_dir=deal_folder,
+            custom_scenarios=assumptions.get("scenario_overrides"),
+            custom_va_scenarios=assumptions.get("va_scenario_overrides"),
+        )
         progress_bar.progress(1.0, text="Analysis complete!")
 
         # Write deal metadata
@@ -265,17 +275,11 @@ def _render_financials(result):
     adjustments = fin.get("adjustments", [])
     if adjustments:
         st.subheader("Expense Adjustments")
-        import pandas as pd
-        rows = []
         for a in adjustments:
-            rows.append({
-                "Category": a.get("category", ""),
-                "CIM Amount": f"${a.get('cim_amount', 0):,.0f}",
-                "Benchmark": f"${a.get('benchmark', 0):,.0f}",
-                "Adjusted": f"${a.get('adjusted', 0):,.0f}",
-                "Flag": a.get("flag", ""),
-            })
-        st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+            if isinstance(a, str):
+                st.write(f"- {a}")
+            elif isinstance(a, dict):
+                st.write(f"- {a.get('category', '')}: {a.get('flag', '')}")
 
 
 def _render_risks(result):

@@ -116,7 +116,7 @@ def _run_single_va_scenario(name: str, params: dict,
                              capex: float) -> dict:
     """Compute a single value-add scenario with monthly granularity."""
 
-    months_to_stab = params["months_to_stabilize"]
+    months_to_stab = int(params["months_to_stabilize"])
     target_occ = params["target_occupancy"]
     rent_capture = params["rent_growth_to_market"]
     exit_cap = params["exit_cap"]
@@ -167,7 +167,7 @@ def _run_single_va_scenario(name: str, params: dict,
         annual_noi.append(sum(monthly_noi[start:end]))
 
     # Stabilized NOI (first full year at stabilization)
-    stab_month = min(months_to_stab, 59)
+    stab_month = int(min(months_to_stab, 59))
     # Use the 12 months centered around stabilization for stabilized NOI
     stab_start = max(0, stab_month)
     stab_end = min(60, stab_start + 12)

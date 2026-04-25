@@ -117,13 +117,17 @@ def extract_pdf_data(pdf_path: str, cim_overrides: dict = None,
 
 
 def run_analysis(result: AnalysisResult, progress: Callable = None,
-                  output_dir: str = None) -> AnalysisResult:
+                  output_dir: str = None,
+                  custom_scenarios: dict = None,
+                  custom_va_scenarios: dict = None) -> AnalysisResult:
     """
     Run full analysis pipeline on an already-extracted CIMData.
 
     Args:
         result: AnalysisResult from extract_pdf_data()
         progress: callable(step, total, message)
+        custom_scenarios: per-analysis Bear/Base/Bull overrides
+        custom_va_scenarios: per-analysis value-add scenario overrides
 
     Returns:
         Updated AnalysisResult with all analysis fields populated
@@ -174,6 +178,7 @@ def run_analysis(result: AnalysisResult, progress: Callable = None,
             asking_price=asking,
             nrsf=nrsf,
             capex=capex,
+            custom_scenarios=custom_scenarios,
             expense_ratio=result.expense_ratio,
         )
         result.scenario_results = model["scenarios"]
@@ -188,6 +193,7 @@ def run_analysis(result: AnalysisResult, progress: Callable = None,
                 financial_analysis=result.financial_analysis,
                 asking_price=asking,
                 capex=capex,
+                custom_scenarios=custom_va_scenarios,
             )
 
         # Step 7: Max price solver

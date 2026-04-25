@@ -28,14 +28,14 @@ init_config()
 
 # ── Navigation ──────────────────────────────────────────────────────
 pages = [
-    "Upload & Analyze",
+    "Home",
     "Deal Tracker",
     "Default Inputs",
     "Comp Database",
 ]
 
 st.sidebar.title("CIM Analyst")
-st.sidebar.markdown("Self-Storage Investment Analysis")
+st.sidebar.markdown("Self Storage")
 st.sidebar.divider()
 
 selection = st.sidebar.radio("Navigation", pages, label_visibility="collapsed")
@@ -44,7 +44,7 @@ st.sidebar.divider()
 st.sidebar.caption("CIM Analyst v1.0")
 
 # ── Route to selected page ──────────────────────────────────────────
-if selection == "Upload & Analyze":
+if selection == "Home":
     from gui.pages.upload_analyze import render
     render()
 elif selection == "Deal Tracker":
