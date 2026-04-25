@@ -29,11 +29,13 @@ def render_assumptions_editor(cim_data, extraction_report: dict) -> dict:
     missing = set(extraction_report.get("missing", []))
     missing_count = len(missing)
 
+    required_missing = missing & REQUIRED_FIELDS
     if missing_count > 0:
-        st.info(
-            f"{missing_count} fields not found in CIM. "
-            "Fields marked with \u2139\ufe0f need manual entry."
-        )
+        msg = f"{missing_count} fields not found in CIM."
+        if required_missing:
+            msg += (f" **{len(required_missing)} required** for IRR modeling"
+                    " (marked with :red[**!**]).")
+        st.info(msg)
 
     tabs = st.tabs([
         "Property",
@@ -50,7 +52,8 @@ def render_assumptions_editor(cim_data, extraction_report: dict) -> dict:
         overrides.update(_render_property_tab(cim_data, missing))
 
     with tabs[1]:
-        overrides.update(_render_size_tab(cim_data, missing))
+        size_ov, repl_cost_ov = _render_size_tab(cim_data, missing)
+        overrides.update(size_ov)
 
     with tabs[2]:
         unit_mix = _render_unit_mix_tab(cim_data)
@@ -71,6 +74,7 @@ def render_assumptions_editor(cim_data, extraction_report: dict) -> dict:
         "scenario_overrides": scenario_overrides,
         "va_scenario_overrides": va_overrides,
         "solver_target_irr": target_irr,
+        "replacement_cost_overrides": repl_cost_ov,
     }
 
 
@@ -128,7 +132,8 @@ def _render_property_tab(cim_data, missing: set) -> dict:
 
 # ── Tab 2: Size & Occupancy ─────────────────────────────────────────
 
-def _render_size_tab(cim_data, missing: set) -> dict:
+def _render_size_tab(cim_data, missing: set) -> tuple[dict, dict]:
+    """Returns (cim_overrides, replacement_cost_overrides)."""
     o = {}
 
     # Row 1: NRSF, Total Units, CC%
@@ -188,7 +193,75 @@ def _render_size_tab(cim_data, missing: set) -> dict:
     if v and v > 0:
         o["brv_open_sf"] = v
 
-    return o
+    # Replacement Cost Benchmarks (per-deal overrides)
+    repl = _render_replacement_cost_overrides()
+
+    return o, repl
+
+
+def _render_replacement_cost_overrides() -> dict:
+    """Editable replacement cost benchmarks for this deal."""
+    from config import REPLACEMENT_COST, FACILITY_TYPES
+
+    st.divider()
+    st.caption("Replacement Cost Benchmarks ($/SF — override per deal)")
+
+    overrides = {}
+
+    # Hard cost + site work per facility type
+    for hard_key, site_key, display_name in FACILITY_TYPES:
+        hard_low, hard_high = REPLACEMENT_COST[hard_key]
+        site_low, site_high = REPLACEMENT_COST[site_key]
+
+        st.markdown(f"**{display_name}**")
+        c1, c2, c3, c4 = st.columns(4)
+        with c1:
+            hl = st.number_input("Hard $/SF Low", value=float(hard_low),
+                                 step=5.0, format="%.0f",
+                                 key=f"rc_{hard_key}_low")
+        with c2:
+            hh = st.number_input("Hard $/SF High", value=float(hard_high),
+                                 step=5.0, format="%.0f",
+                                 key=f"rc_{hard_key}_high")
+        with c3:
+            sl = st.number_input("Site $/SF Low", value=float(site_low),
+                                 step=1.0, format="%.0f",
+                                 key=f"rc_{site_key}_low")
+        with c4:
+            sh = st.number_input("Site $/SF High", value=float(site_high),
+                                 step=1.0, format="%.0f",
+                                 key=f"rc_{site_key}_high")
+
+        overrides[hard_key] = (hl, hh)
+        overrides[site_key] = (sl, sh)
+
+    # Soft costs & dev profit
+    st.markdown("**Soft Costs & Developer Profit**")
+    soft_low, soft_high = REPLACEMENT_COST["soft_cost_pct"]
+    dev_low, dev_high = REPLACEMENT_COST["dev_profit_pct"]
+
+    c1, c2, c3, c4 = st.columns(4)
+    with c1:
+        scl = st.number_input("Soft Cost % Low", value=soft_low * 100,
+                              step=1.0, format="%.0f",
+                              key="rc_soft_low")
+    with c2:
+        sch = st.number_input("Soft Cost % High", value=soft_high * 100,
+                              step=1.0, format="%.0f",
+                              key="rc_soft_high")
+    with c3:
+        dpl = st.number_input("Dev Profit % Low", value=dev_low * 100,
+                              step=1.0, format="%.0f",
+                              key="rc_dev_low")
+    with c4:
+        dph = st.number_input("Dev Profit % High", value=dev_high * 100,
+                              step=1.0, format="%.0f",
+                              key="rc_dev_high")
+
+    overrides["soft_cost_pct"] = (scl / 100, sch / 100)
+    overrides["dev_profit_pct"] = (dpl / 100, dph / 100)
+
+    return overrides
 
 
 # ── Tab 3: Unit Mix ──────────────────────────────────────────────────
@@ -497,18 +570,40 @@ def _render_demographics_tab(cim_data, missing: set) -> dict:
     return o
 
 
+# ── Required Fields (must be populated for IRR modeling) ─────────────
+
+REQUIRED_FIELDS = {
+    "asking_price",
+    "nrsf",
+    "total_units",
+    "ttm_noi",
+    "physical_occupancy",
+    "state",
+    "ttm_egr",
+}
+
+
 # ── Input Helpers ────────────────────────────────────────────────────
+
+def _label(label: str, field_name: str, missing: set) -> str:
+    """Add red exclamation to label if field is required and missing."""
+    if field_name in missing and field_name in REQUIRED_FIELDS:
+        return f":red[**!**] {label}"
+    return label
+
 
 def _help_text(field_name: str, missing: set) -> str | None:
     """Return help tooltip if field is missing from extraction."""
-    if field_name in missing:
-        return "Not found in CIM \u2014 enter manually"
-    return None
+    if field_name not in missing:
+        return None
+    if field_name in REQUIRED_FIELDS:
+        return "Required for IRR modeling \u2014 enter manually"
+    return "Not found in CIM \u2014 enter manually"
 
 
 def _text(label: str, value, field_name: str, missing: set, **kwargs) -> str:
     return st.text_input(
-        label,
+        _label(label, field_name, missing),
         value=value or "",
         help=_help_text(field_name, missing),
         **kwargs,
@@ -522,7 +617,8 @@ def _num(label: str, value, field_name: str, missing: set,
               help=_help_text(field_name, missing))
     if max_value is not None:
         kw["max_value"] = max_value
-    return st.number_input(label, value=float(value or 0), **kw)
+    return st.number_input(_label(label, field_name, missing),
+                           value=float(value or 0), **kw)
 
 
 def _pct(label: str, value, field_name: str, missing: set,
@@ -532,7 +628,8 @@ def _pct(label: str, value, field_name: str, missing: set,
     display_val = float(value or 0) * 100
     kw = dict(min_value=0.0, max_value=max_pct, step=step, format=fmt,
               help=_help_text(field_name, missing))
-    v = st.number_input(f"{label} (%)", value=display_val, **kw)
+    v = st.number_input(_label(f"{label} (%)", field_name, missing),
+                        value=display_val, **kw)
     return v / 100.0
 
 
@@ -542,4 +639,5 @@ def _int(label: str, value, field_name: str, missing: set,
               help=_help_text(field_name, missing))
     if max_value is not None:
         kw["max_value"] = max_value
-    return st.number_input(label, value=int(value or 0), **kw)
+    return st.number_input(_label(label, field_name, missing),
+                           value=int(value or 0), **kw)

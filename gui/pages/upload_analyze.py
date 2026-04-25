@@ -33,6 +33,41 @@ def render():
             type=["pdf"],
             key="upload_cim",
         )
+        # Make the uploaded-file tile clickable to open the PDF
+        if cim_file is not None:
+            cim_file.seek(0)
+            pdf_bytes = cim_file.read()
+            byte_list = ",".join(str(b) for b in pdf_bytes)
+            st.html(f"""
+                <style>
+                /* Hide the document placeholder icon */
+                [data-testid="stFileUploaderFile"] svg:first-of-type {{
+                    display: none !important;
+                }}
+                /* Pointer cursor on the file tile */
+                [data-testid="stFileUploaderFile"] {{
+                    cursor: pointer;
+                }}
+                [data-testid="stFileUploaderFile"]:hover {{
+                    opacity: 0.8;
+                }}
+                </style>
+                <script>
+                (function() {{
+                    var bytes = new Uint8Array([{byte_list}]);
+                    var blob = new Blob([bytes], {{type: 'application/pdf'}});
+                    var url = URL.createObjectURL(blob);
+                    function attach() {{
+                        var tiles = document.querySelectorAll('[data-testid="stFileUploaderFile"]');
+                        if (tiles.length === 0) {{ setTimeout(attach, 300); return; }}
+                        tiles[0].addEventListener('click', function(e) {{
+                            if (!e.target.closest('button')) {{ window.open(url, '_blank'); }}
+                        }});
+                    }}
+                    attach();
+                }})();
+                </script>
+            """)
     with c2:
         rent_roll_file = st.file_uploader(
             "Rent Roll (optional)",
@@ -62,6 +97,67 @@ def render():
         st.session_state.pop("extracted_result", None)
         st.session_state.pop("current_result", None)
         st.session_state.pop("deal_folder", None)
+        st.session_state.pop("dupe_resolved", None)
+
+    # ── Duplicate check ─────────────────────────────────────────────
+    if not st.session_state.get("dupe_resolved"):
+        from data.comp_db import CompDatabase
+        comp_db = CompDatabase()
+
+        # Extract a rough property name from filename for fuzzy matching
+        fname_stem = os.path.splitext(cim_file.name)[0]
+        dupes = comp_db.find_duplicates(
+            filename=cim_file.name,
+            property_name=fname_stem,
+        )
+
+        # Also check deal folders
+        from gui.deal_manager import list_all_deals
+        existing_deals = list_all_deals()
+        for deal in existing_deals:
+            deal_inputs = deal.get("input_files", [])
+            if cim_file.name in deal_inputs:
+                if not any(d["pdf_filename"] == cim_file.name for d in dupes):
+                    dupes.append({
+                        "property_name": deal.get("property_name", ""),
+                        "city": deal.get("city", ""),
+                        "state": deal.get("state", ""),
+                        "analysis_date": deal.get("analysis_date", ""),
+                        "pdf_filename": cim_file.name,
+                        "match_type": "deal_folder",
+                    })
+
+        if dupes:
+            st.warning(f"This file or property may already exist in the database "
+                       f"({len(dupes)} match{'es' if len(dupes) > 1 else ''} found).")
+            import pandas as pd
+            st.dataframe(
+                pd.DataFrame(dupes)[["property_name", "city", "state",
+                                      "analysis_date", "match_type"]],
+                use_container_width=True, hide_index=True,
+            )
+            c1, c2 = st.columns(2)
+            with c1:
+                if st.button("Load Existing Record", use_container_width=True):
+                    # Find the matching deal folder and load its result
+                    for deal in existing_deals:
+                        if cim_file.name in deal.get("input_files", []):
+                            st.session_state["deal_folder"] = deal["deal_folder"]
+                            st.info(f"Loaded: {deal.get('property_name', cim_file.name)}")
+                            break
+                    st.session_state["dupe_resolved"] = True
+                    st.rerun()
+            with c2:
+                if st.button("Continue as New (v2)", type="primary",
+                             use_container_width=True):
+                    # Append v2 to the tracked name so deal folder gets a new name
+                    base, ext = os.path.splitext(cim_file.name)
+                    st.session_state["uploaded_pdf_name"] = f"{base} v2{ext}"
+                    st.session_state["dupe_resolved"] = True
+                    st.rerun()
+            return  # Wait for user choice before proceeding
+        else:
+            st.session_state["dupe_resolved"] = True
 
     # ── Extract ──────────────────────────────────────────────────────
     if "extracted_result" not in st.session_state:
@@ -111,6 +207,14 @@ def render():
     if st.button("Run Analysis", type="primary", use_container_width=True):
         apply_config()
 
+        # Apply replacement cost overrides to config before analysis
+        repl_overrides = assumptions.get("replacement_cost_overrides", {})
+        if repl_overrides:
+            from gui.config_manager import set_config, get_config
+            rc = get_config("REPLACEMENT_COST").copy()
+            rc.update(repl_overrides)
+            set_config("REPLACEMENT_COST", rc)
+
         # Apply GUI form overrides
         cim_overrides = assumptions.get("cim_overrides", {})
         if cim_overrides:
@@ -158,6 +262,14 @@ def render():
         meta = build_deal_meta(cim_data, final_result, deal_folder,
                                input_files=input_files)
         write_deal_meta(deal_folder, meta)
+
+        # Clean up temp PDF
+        tmp_path = st.session_state.get("uploaded_pdf_path")
+        if tmp_path:
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
 
         restore_config()
         set_current_result(final_result)

@@ -55,6 +55,7 @@ class CompDatabase:
     def _init_db(self):
         """Create tables if they don't exist."""
         with self._connect() as conn:
+            conn.execute("PRAGMA journal_mode=WAL")
             conn.executescript("""
                 CREATE TABLE IF NOT EXISTS properties (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -442,6 +443,45 @@ class CompDatabase:
         }
 
     # ── Summary / Info ────────────────────────────────────────────
+
+    def find_duplicates(self, filename: str = None,
+                        property_name: str = None) -> list[dict]:
+        """Search for existing records matching a filename or property name.
+
+        Returns list of matching property dicts (may be empty).
+        """
+        results = []
+        with self._connect() as conn:
+            if filename:
+                rows = conn.execute(
+                    "SELECT property_name, city, state, analysis_date, pdf_filename "
+                    "FROM properties WHERE pdf_filename = ?",
+                    (filename,)
+                ).fetchall()
+                for r in rows:
+                    results.append({
+                        "property_name": r[0], "city": r[1], "state": r[2],
+                        "analysis_date": r[3], "pdf_filename": r[4],
+                        "match_type": "filename",
+                    })
+
+            if property_name:
+                # Fuzzy match: check if the property name appears as a substring
+                rows = conn.execute(
+                    "SELECT property_name, city, state, analysis_date, pdf_filename "
+                    "FROM properties WHERE LOWER(property_name) LIKE ?",
+                    (f"%{property_name.lower()}%",)
+                ).fetchall()
+                for r in rows:
+                    # Avoid duplicating filename matches
+                    if not any(d["pdf_filename"] == r[4] and d["match_type"] == "filename"
+                               for d in results):
+                        results.append({
+                            "property_name": r[0], "city": r[1], "state": r[2],
+                            "analysis_date": r[3], "pdf_filename": r[4],
+                            "match_type": "name",
+                        })
+        return results
 
     def get_comp_count(self) -> int:
         """Return total number of properties in database."""
