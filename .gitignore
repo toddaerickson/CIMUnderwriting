@@ -1,0 +1,50 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+dist/
+build/
+
+# Environment
+.env
+.venv/
+venv/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Confidential deal data — NEVER commit
+*.pdf
+deals/
+overrides/*.json
+
+# Database (local instance — not committed)
+data/cim_comps.db
+
+# Logs
+*.log
+logs/
+
+# Temp files
+tmp*
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Generated output files
+SS_Investment_Memo_*.docx
+SS_Returns_Model_*.xlsx
+
+# Excel macro files (includes UW template with deal data)
+*.xlsm
+
+# Dropbox extended attributes
+*.pdf:com.dropbox.attrs
+
+# Claude Code local state
+.claude/

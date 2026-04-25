@@ -1,0 +1,16 @@
+services:
+  cim-analyst:
+    build: .
+    ports:
+      - "8501:8501"
+    volumes:
+      - cim_data:/data
+    environment:
+      - COMP_DB_PATH=/data/cim_comps.db
+      - CIM_DEALS_DIR=/data/deals
+      - CIM_OVERRIDES_DIR=/data/overrides
+      - CENSUS_API_KEY=${CENSUS_API_KEY:-}
+    restart: unless-stopped
+
+volumes:
+  cim_data:

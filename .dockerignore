@@ -1,0 +1,13 @@
+__pycache__/
+*.pyc
+.git/
+.github/
+deals/
+data/cim_comps.db
+overrides/*.json
+*.pdf
+logs/
+.env
+tmp*
+*.log
+.claude/

@@ -1,0 +1,100 @@
+SS INVESTMENT MEMO — TEMPLATE REFERENCE
+========================================
+
+This file documents the target structure for the generated .docx memo.
+The memo_writer.py module uses this structure programmatically.
+
+
+SECTION 1: INVESTMENT SUMMARY
+------------------------------
+- Property name, address, city/state
+- Key metrics table: asking price, NRSF, units, occupancy, price/SF, year built
+- Screening gates table (7 gates: PASS / FAIL / TBD)
+- Returns snapshot table (Bear / Base / Bull: YoC, IRR, MOIC)
+- Maximum offer price headline
+
+SECTION 2: MARKET OVERVIEW
+---------------------------
+- Demographics: 1/3/5-mile population, median HHI
+- MSA classification (top-50 check)
+- Supply assessment (new construction pipeline)
+- Demand drivers (positives and negatives)
+- Overall market rating: Strong / Moderate / Weak
+
+SECTION 3: PROPERTY DESCRIPTION
+---------------------------------
+- Physical attributes: year built, acreage, NRSF, units, CC%
+- Age narrative and condition assessment
+- Replacement cost build-up table:
+    Non-CC hard cost
+    CC hard cost
+    Site work
+    Soft costs
+    Developer profit
+    Total replacement cost
+- Price vs. replacement cost comparison
+
+SECTION 4: FINANCIAL ANALYSIS
+-------------------------------
+- Income summary: GPR, vacancy, EGR, other income, total revenue
+- Expense benchmarking table:
+    Each line: category | CIM value | $/NRSF | benchmark range | flag
+    Categories: property tax, insurance, utilities, R&M, advertising,
+                payroll, G&A, management fee, capital reserve
+- Analyst adjustments list (where CIM < benchmark)
+- Adjusted TTM NOI with narrative
+- Expense ratio check: OpEx/Revenue, OpEx/NRSF
+
+SECTION 5: UNIT MIX & RENT ANALYSIS
+-------------------------------------
+- Unit mix table: size | count | SF | rate/mo | $/SF/mo | CC?
+- Weighted average rent per SF
+- Rent gap to market comps (if data available)
+- Revenue concentration analysis
+
+SECTION 6: VALUATION & RETURNS
+--------------------------------
+- For each scenario (Bear / Base / Bull):
+    5-year NOI projection table
+    Entry cap, exit cap, exit value
+    5-year IRR, MOIC, yield on cost
+    Cash flow summary
+- Maximum offer price derivation
+
+SECTION 7: VALUE-ADD OPPORTUNITIES
+------------------------------------
+- Ranked opportunity table: # | opportunity | est. annual impact | timeline
+- Categories: revenue management (ECRI), occupancy, expense reduction,
+              ancillary revenue, physical improvements
+- Total estimated NOI uplift
+
+SECTION 8: RISK ANALYSIS
+--------------------------
+- "Why This Deal Could Fail" — top 3-5 high-severity risks
+- Full risk register table: risk | category | severity | mitigation
+- Categories: market, financial, operational, screening gate, data gap, valuation
+- Overall risk rating
+
+SECTION 9: DUE DILIGENCE ITEMS
+---------------------------------
+Checklist:
+- Actual T-12 P&L
+- Population / demographic verification
+- Supply pipeline confirmation
+- Physical inspection
+- Rent roll with move-in dates
+- Property tax reassessment analysis
+- Independent competitor rent survey
+- Insurance quotes
+- Lease agreement review
+- Environmental Phase I
+- Title and survey
+- Zoning verification
+
+SECTION 10: RECOMMENDATION
+----------------------------
+- PURSUE / DECLINE / PURSUE CONTINGENT ON
+- Rationale: which gates passed/failed/TBD
+- Pricing guidance: max offer vs. asking
+- Key contingencies
+- Disclaimer: CIM-based analysis, verify in due diligence
