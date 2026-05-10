@@ -77,6 +77,16 @@ Key environment variables:
 | CIM Yr1 NOI Step-Up | <= 15% vs TTM |
 | Exit Cap | >= Entry Cap (base case) |
 
+## Developer Setup
+
+```bash
+git clone https://github.com/toddaerickson/CIMUnderwriting.git
+cd CIMUnderwriting
+python -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt
+cp .env.example .env  # fill in CENSUS_API_KEY, GP_* values
+```
+
 ## Tests
 
 ```bash
