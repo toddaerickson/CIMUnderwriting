@@ -93,6 +93,7 @@ def _build_inputs_tab(ws, cim_data, fin):
         ("NRSF", cim_data.nrsf, CURRENCY_FORMAT),
         ("Total Units", cim_data.total_units, CURRENCY_FORMAT),
         ("Physical Occupancy", cim_data.physical_occupancy, PCT_FORMAT),
+        ("Economic Occupancy", cim_data.economic_occupancy, PCT_FORMAT),
         ("CC %", cim_data.cc_pct, PCT_FORMAT),
         ("Year Built", cim_data.year_built, None),
         ("Price / SF", cim_data.price_per_sf, '$#,##0.00'),

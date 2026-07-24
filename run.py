@@ -136,7 +136,7 @@ def stage_analyze(ctx: AnalysisContext, comp_db):
     # Value-add ops and risks are computed after valuation (need scenarios),
     # but we store the functions for later use
     ctx._analyze_value_add = lambda: identify_value_add(ctx.cim_data, ctx.financial_analysis, ctx.rent_analysis)
-    ctx._analyze_risks = lambda: identify_risks(ctx.cim_data, ctx.gate_results, ctx.financial_analysis, ctx.scenario_results)
+    ctx._analyze_risks = lambda: identify_risks(ctx.cim_data, ctx.gate_results, ctx.financial_analysis, ctx.scenario_results, ctx.rent_analysis)
 
 
 def stage_valuate(ctx: AnalysisContext):
@@ -392,7 +392,11 @@ def _print_summary(ctx: AnalysisContext):
         print(f"  Asking Price: ${cim_data.asking_price:,.0f}")
     if cim_data.nrsf:
         units_str = f" | Units: {cim_data.total_units}" if cim_data.total_units else ""
-        occ_str = f" | Occupancy: {cim_data.physical_occupancy:.1%}" if cim_data.physical_occupancy else ""
+        occ_str = ""
+        if cim_data.physical_occupancy is not None:
+            occ_str = f" | Occupancy: {cim_data.physical_occupancy:.1%} phys"
+            if cim_data.economic_occupancy is not None:
+                occ_str += f" / {cim_data.economic_occupancy:.1%} econ"
         print(f"  NRSF: {cim_data.nrsf:,.0f} SF{units_str}{occ_str}")
     print("-" * 57)
 

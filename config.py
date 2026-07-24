@@ -9,7 +9,16 @@ import os
 
 GATES = {
     "population_3mi": 50_000,
-    "min_occupancy": 0.85,
+    # "No unproven demand" gate (formerly "no lease-up"):
+    # exclude deals that have never demonstrated demand — sub-75% physical
+    # occupancy, or a post-2020 vintage still in ramp. Deals with proven
+    # demand but weak economics (high physical / low economic occupancy)
+    # deliberately pass: mismanagement is the target value-add profile.
+    "min_physical_occupancy": 0.75,   # hard floor — below this, demand is unproven
+    "stabilized_occupancy": 0.85,     # ramp test threshold for new-vintage builds
+    "unproven_vintage_year": 2021,    # post-2020 builds must have stabilized
+    "econ_phys_spread_flag": 0.10,    # econ occ this far below phys → mismanagement value-add
+    "rate_bridge_gap_threshold": 0.10,  # in-place this far below market + stabilized occ → ECRI-only bridge flag
     "max_noi_step_up": 0.15,       # CIM Yr1 NOI vs TTM — flag if exceeded
     "min_irr_5yr": 0.10,
     "min_yield_on_cost": 0.08,

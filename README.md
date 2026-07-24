@@ -70,7 +70,7 @@ Key environment variables:
 | Gate | Threshold |
 |------|-----------|
 | Population (3-mi) | >= 50,000 |
-| Physical Occupancy | >= 85% |
+| No Unproven Demand | Physical occupancy >= 75%, and no post-2020 vintage still in ramp (< 85%) |
 | Asking Price | <= Replacement Cost |
 | Base Case 5-yr IRR | >= 10% |
 | MSA Quality | Top-50 or strong secondary |

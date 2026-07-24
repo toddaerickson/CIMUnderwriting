@@ -12,13 +12,30 @@ def edit_gates():
         gates["population_3mi"] = st.number_input(
             "Min Population (3-mi radius)", value=gates["population_3mi"],
             min_value=0, step=5000)
-        gates["min_occupancy"] = st.number_input(
-            "Min Physical Occupancy", value=gates["min_occupancy"],
+        gates["min_physical_occupancy"] = st.number_input(
+            "Min Physical Occupancy (unproven-demand floor)",
+            value=gates["min_physical_occupancy"],
+            min_value=0.0, max_value=1.0, step=0.01, format="%.2f")
+        gates["stabilized_occupancy"] = st.number_input(
+            "Stabilized Occupancy (ramp test for new vintage)",
+            value=gates["stabilized_occupancy"],
             min_value=0.0, max_value=1.0, step=0.01, format="%.2f")
         gates["max_noi_step_up"] = st.number_input(
             "Max CIM Yr1 NOI Step-Up", value=gates["max_noi_step_up"],
             min_value=0.0, max_value=1.0, step=0.01, format="%.2f")
     with col2:
+        gates["unproven_vintage_year"] = st.number_input(
+            "Unproven Vintage Year (builds this year or later must be stabilized)",
+            value=gates["unproven_vintage_year"],
+            min_value=2000, max_value=2100, step=1)
+        gates["econ_phys_spread_flag"] = st.number_input(
+            "Econ/Phys Spread Flag (mismanagement value-add)",
+            value=gates["econ_phys_spread_flag"],
+            min_value=0.0, max_value=0.50, step=0.01, format="%.2f")
+        gates["rate_bridge_gap_threshold"] = st.number_input(
+            "Rate-Bridge Gap Threshold (ECRI-only flag)",
+            value=gates["rate_bridge_gap_threshold"],
+            min_value=0.0, max_value=0.50, step=0.01, format="%.2f")
         gates["min_irr_5yr"] = st.number_input(
             "Min 5-Year IRR", value=gates["min_irr_5yr"],
             min_value=0.0, max_value=0.50, step=0.005, format="%.3f")

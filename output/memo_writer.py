@@ -118,7 +118,8 @@ def _add_section_1(doc, cim_data, gate_results, scenario_results, max_offer):
         ("Asking Price", _fmt_currency(cim_data.asking_price)),
         ("NRSF", _fmt_number(cim_data.nrsf, suffix=" SF")),
         ("Total Units", str(cim_data.total_units or "TBD")),
-        ("Occupancy", _fmt_pct(cim_data.physical_occupancy)),
+        ("Physical Occupancy", _fmt_pct(cim_data.physical_occupancy)),
+        ("Economic Occupancy", _fmt_pct(cim_data.economic_occupancy)),
         ("Price / SF", _fmt_currency(cim_data.price_per_sf)),
         ("Year Built", str(cim_data.year_built or "TBD")),
     ]
@@ -126,6 +127,8 @@ def _add_section_1(doc, cim_data, gate_results, scenario_results, max_offer):
         row = table.add_row().cells
         row[0].text = label
         row[1].text = val
+
+    _add_occupancy_spread_note(doc, cim_data)
 
     doc.add_paragraph()
 
@@ -180,6 +183,52 @@ def _add_section_1(doc, cim_data, gate_results, scenario_results, max_offer):
         ).bold = True
 
 
+def _add_occupancy_spread_note(doc, cim_data):
+    """Economic-vs-physical occupancy read — the fastest value-add screen
+    and the most common place a CIM hides weakness."""
+    from config import GATES
+
+    phys = cim_data.physical_occupancy
+    econ = cim_data.economic_occupancy
+    if phys is None and econ is None:
+        return
+
+    doc.add_paragraph()
+    if econ is None:
+        doc.add_paragraph(
+            "Occupancy check: the CIM quotes physical occupancy only. Request "
+            "economic occupancy (collected rent vs gross potential at street "
+            "rates) before proceeding — a broker quoting a single occupancy "
+            "figure is almost always quoting physical, and the spread between "
+            "the two is where CIMs hide weakness."
+        )
+        return
+    if phys is None:
+        doc.add_paragraph(
+            f"Occupancy check: economic occupancy of {econ:.1%} stated without "
+            f"physical occupancy — request the physical figure to compute the spread."
+        )
+        return
+
+    spread = phys - econ
+    if spread >= GATES["econ_phys_spread_flag"]:
+        doc.add_paragraph(
+            f"Occupancy check: economic occupancy trails physical by "
+            f"{spread * 100:.0f} pts ({phys:.1%} physical vs {econ:.1%} economic). "
+            f"A spread this wide signals revenue leakage — concessions, "
+            f"delinquency, or in-place rents below street — and is the primary "
+            f"mismanagement value-add screen. Decompose the spread from the "
+            f"rent roll during diligence."
+        )
+    else:
+        doc.add_paragraph(
+            f"Occupancy check: economic occupancy of {econ:.1%} vs physical of "
+            f"{phys:.1%} ({spread * 100:.0f}-pt spread) — within normal operating "
+            f"range; upside must come from rate growth or expense control rather "
+            f"than collections recovery."
+        )
+
+
 def _add_section_2(doc, market):
     doc.add_heading("2. Market Overview", level=1)
 
@@ -219,7 +268,8 @@ def _add_section_3(doc, physical):
                        ("city_state", "City/State"), ("year_built", "Year Built"),
                        ("acreage", "Acreage"), ("nrsf", "NRSF"),
                        ("total_units", "Total Units"), ("cc_pct", "Climate-Controlled %"),
-                       ("physical_occupancy", "Physical Occupancy")]:
+                       ("physical_occupancy", "Physical Occupancy"),
+                       ("economic_occupancy", "Economic Occupancy")]:
         val = profile.get(key)
         if val is not None:
             if isinstance(val, float) and val < 1:
@@ -533,6 +583,11 @@ def _add_section_9(doc):
         "Confirm new supply pipeline with local planning/permitting records",
         "Conduct physical property inspection and condition assessment",
         "Obtain rent roll with move-in dates and rate history",
+        "Reconcile economic vs physical occupancy from the rent roll "
+        "(concessions, delinquency, below-street in-place rates)",
+        "Verify competitor street-rate trend over trailing 6-12 months — "
+        "confirm the in-place-to-market gap is closing from below (market "
+        "rising), not from above (street rates falling)",
         "Verify property tax assessment and potential reassessment at sale price",
         "Review competitor rent survey (independent of CIM data)",
         "Confirm insurance quotes for the specific property",

@@ -228,7 +228,7 @@ def run_analysis(result: AnalysisResult, progress: Callable = None,
         cim_data, result.financial_analysis, result.rent_analysis)
     result.risk_analysis = identify_risks(
         cim_data, result.gate_results, result.financial_analysis,
-        result.scenario_results)
+        result.scenario_results, result.rent_analysis)
 
     # Step 9: Generate output files
     _progress(9, 9, "Generating memo & model...")
