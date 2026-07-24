@@ -48,3 +48,8 @@ SS_Returns_Model_*.xlsx
 
 # Claude Code local state
 .claude/
+.superpowers/
+
+# Django front end
+db.sqlite3
+staticfiles/
