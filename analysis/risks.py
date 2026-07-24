@@ -5,13 +5,21 @@ Systematically identifies and categorizes risks based on
 CIM data and analysis outputs.
 """
 
+from typing import Optional
+
+from config import GATES
 from registry import ScenarioType
 
 
 def identify_risks(cim_data, gate_results: list, financial_analysis: dict,
-                   scenario_results: dict) -> dict:
+                   scenario_results: dict,
+                   rent_analysis: Optional[dict] = None) -> dict:
     """
     Identify and categorize investment risks.
+
+    Args:
+        rent_analysis: output of analyze_rents() — enables the rate-bridge
+            (ECRI vs street-rate trend) check when provided
 
     Returns:
         - risks: list of risk items with severity and mitigation
@@ -22,6 +30,9 @@ def identify_risks(cim_data, gate_results: list, financial_analysis: dict,
 
     # Market risks
     risks.extend(_market_risks(cim_data))
+
+    # Rate-bridge risks (ECRI against falling street rates)
+    risks.extend(_rate_bridge_risks(cim_data, rent_analysis))
 
     # Financial risks
     risks.extend(_financial_risks(cim_data, financial_analysis))
@@ -89,6 +100,36 @@ def _market_risks(cim_data) -> list:
     return risks
 
 
+def _rate_bridge_risks(cim_data, rent_analysis: Optional[dict]) -> list:
+    """Flag deals whose entire value-add bridge is ECRI/rate push.
+
+    When occupancy is already stabilized and in-place rents sit well below
+    market, the NOI bridge is rate capture alone. That only works if street
+    rates hold: in a falling-rate market the in-place-to-market gap closes
+    from above, not below, and the value-add evaporates.
+    """
+    if not rent_analysis:
+        return []
+    gap = rent_analysis.get("rent_gap_analysis", {}).get("gap_pct")
+    occ = cim_data.physical_occupancy
+    if gap is None or occ is None:
+        return []
+    if gap <= -GATES["rate_bridge_gap_threshold"] and occ >= GATES["stabilized_occupancy"]:
+        return [{
+            "category": "Market",
+            "risk": "Rate-driven bridge — street-rate trend unverified",
+            "description": f"In-place rents are {abs(gap):.0%} below market with "
+                           f"occupancy already at {occ:.1%} — the NOI bridge is "
+                           f"almost entirely ECRI/rate push.",
+            "severity": "High",
+            "mitigation": "Verify competitor street rates are flat-to-rising over "
+                          "the trailing 6-12 months. If street rates are falling, "
+                          "the in-place-to-market gap closes from above and the "
+                          "value-add evaporates — re-underwrite with zero rate capture.",
+        }]
+    return []
+
+
 def _financial_risks(cim_data, fin) -> list:
     risks = []
 
@@ -138,12 +179,30 @@ def _operational_risks(cim_data) -> list:
     risks = []
 
     occ = cim_data.physical_occupancy
-    if occ and occ < 0.85:
+    econ = cim_data.economic_occupancy
+    vintage_ramp = (cim_data.year_built is not None
+                    and cim_data.year_built >= GATES["unproven_vintage_year"]
+                    and occ is not None and occ < GATES["stabilized_occupancy"])
+    if occ and occ < GATES["min_physical_occupancy"]:
+        risks.append({
+            "category": "Operational",
+            "risk": "Unproven demand",
+            "description": f"Physical occupancy at {occ:.1%} — below the "
+                           f"{GATES['min_physical_occupancy']:.0%} floor; demand "
+                           f"at this site has never been demonstrated.",
+            "severity": "High",
+            "mitigation": "Decline absent independent evidence of demand "
+                          "(waitlists, competitor occupancy, absorption comps).",
+        })
+    elif occ and occ < GATES["stabilized_occupancy"] and not vintage_ramp:
+        # vintage_ramp deals fail Gate 2 and get their High risk from
+        # _gate_risks — a "demand proven" note here would contradict it
         risks.append({
             "category": "Operational",
             "risk": "Below-stabilized occupancy",
-            "description": f"Physical occupancy at {occ:.1%} — lease-up risk.",
-            "severity": "High",
+            "description": f"Physical occupancy at {occ:.1%} — demand proven but "
+                           f"lease-up execution required to stabilize.",
+            "severity": "Medium",
             "mitigation": "Budget for extended lease-up period. Assess marketing spend required.",
         })
     elif occ and occ > 0.95:
@@ -153,6 +212,21 @@ def _operational_risks(cim_data) -> list:
             "description": f"Occupancy at {occ:.1%} may indicate below-market rents.",
             "severity": "Low",
             "mitigation": "Implement ECRI program to push rates. Some churn acceptable.",
+        })
+
+    if (occ is not None and econ is not None
+            and occ - econ >= GATES["econ_phys_spread_flag"]):
+        risks.append({
+            "category": "Operational",
+            "risk": "Wide economic/physical occupancy spread",
+            "description": f"Economic occupancy of {econ:.1%} trails physical of "
+                           f"{occ:.1%} by {(occ - econ) * 100:.0f} pts — revenue "
+                           f"leakage from concessions, delinquency, or below-street "
+                           f"in-place rents.",
+            "severity": "Medium",
+            "mitigation": "This spread is the value-add thesis — decompose it from "
+                          "the rent roll and verify collections and concession "
+                          "burn-off assumptions in diligence.",
         })
 
     year_built = cim_data.year_built

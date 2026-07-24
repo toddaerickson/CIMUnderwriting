@@ -39,17 +39,53 @@ def evaluate_gates(cim_data, scenario_results=None, va_results=None,
         "source": pop_source if pop_source else None,
     })
 
-    # Gate 2: No lease-up risk (occupancy ≥ 85%)
+    # Gate 2: No unproven demand
+    # FAIL only when demand itself is unproven: sub-75% physical occupancy,
+    # or a post-2020 vintage that has never stabilized. High-physical /
+    # low-economic deals PASS with a mismanagement value-add flag.
     occ = cim_data.physical_occupancy
+    econ = cim_data.economic_occupancy
+    vintage = cim_data.year_built
+    floor = GATES["min_physical_occupancy"]
+    stabilized = GATES["stabilized_occupancy"]
+
+    if occ is None:
+        occ_result = "TBD"
+        occ_note = "Occupancy not found in CIM"
+    elif occ < floor:
+        occ_result = "FAIL"
+        occ_note = f"Unproven demand — physical occupancy below {floor:.0%} floor"
+    elif vintage and vintage >= GATES["unproven_vintage_year"] and occ < stabilized:
+        occ_result = "FAIL"
+        occ_note = (f"Unproven demand — {vintage} vintage still in ramp at "
+                    f"{occ:.1%}; facility has never demonstrated stabilized demand")
+    else:
+        occ_result = "PASS"
+        notes = []
+        if econ is not None and occ - econ >= GATES["econ_phys_spread_flag"]:
+            notes.append(f"{(occ - econ) * 100:.0f}-pt economic/physical spread — "
+                         "mismanagement value-add candidate")
+        elif econ is None:
+            notes.append("Economic occupancy not stated — request it; a single "
+                         "quoted occupancy figure is almost always physical")
+        if occ < stabilized:
+            notes.append(f"Sub-{stabilized:.0%} physical but demand proven — "
+                         "underwrite as value-add lease-up")
+        occ_note = ". ".join(notes)
+
+    occ_actual = "N/A"
+    if occ is not None:
+        occ_actual = f"{occ:.1%} phys"
+        if econ is not None:
+            occ_actual += f" / {econ:.1%} econ"
+
     gates.append({
         "gate": 2,
-        "name": "Occupancy ≥ 85%",
-        "threshold": f"≥ {GATES['min_occupancy']:.0%}",
-        "actual": f"{occ:.1%}" if occ else "N/A",
-        "result": _eval(occ, GATES["min_occupancy"], ">=") if occ else "TBD",
-        "note": "" if (occ and occ >= GATES["min_occupancy"]) else
-                "Lease-up risk — occupancy below threshold" if occ else
-                "Occupancy not found in CIM",
+        "name": "No Unproven Demand",
+        "threshold": f"Phys ≥ {floor:.0%}; no post-{GATES['unproven_vintage_year'] - 1} ramp",
+        "actual": occ_actual,
+        "result": occ_result,
+        "note": occ_note,
     })
 
     # Gate 3: Price ≤ Replacement cost

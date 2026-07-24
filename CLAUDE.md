@@ -45,7 +45,13 @@ output/
 
 ## Investment criteria (non-negotiable)
 - Population ≥ 50,000 within 3-mile radius
-- Physical occupancy ≥ 85% (no lease-up deals)
+- No unproven demand: physical occupancy ≥ 75%, and no post-2020 vintage
+  still in ramp (< 85% physical). High-physical/low-economic occupancy
+  (spread ≥ 10 pts) is the target mismanagement value-add profile, not an
+  exclusion — always compare economic vs physical occupancy; a broker
+  quoting one occupancy number is almost always quoting physical.
+- Watch: deals whose entire bridge is ECRI in a falling street-rate market —
+  the in-place-to-market gap closes from above; verify street-rate trend.
 - Asking price ≤ replacement cost
 - Base case 5-year unlevered IRR ≥ 10%
 - Top-50 MSA or strong secondary market

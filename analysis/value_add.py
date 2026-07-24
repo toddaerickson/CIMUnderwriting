@@ -5,7 +5,7 @@ Identifies value-add opportunities based on the gap between
 current operations and benchmark performance.
 """
 
-from config import EXPENSE_BENCHMARKS
+from config import EXPENSE_BENCHMARKS, GATES
 
 
 def identify_value_add(cim_data, financial_analysis: dict, rent_analysis: dict = None) -> dict:
@@ -60,12 +60,36 @@ def _revenue_opportunities(cim_data, fin) -> list:
                 "risk": "Moderate — market dependent",
             })
 
+    # Economic occupancy recovery (mismanagement)
+    econ = cim_data.economic_occupancy
+    if (occ is not None and econ is not None
+            and occ - econ >= GATES["econ_phys_spread_flag"]):
+        gpr = fin.get("income_summary", {}).get("gpr", 0) or 0
+        if gpr > 0:
+            # Assume half the spread is recoverable through concession burn-off,
+            # collections, and repricing below-street in-place rents.
+            recoverable = gpr * (occ - econ) * 0.5
+            ops.append({
+                "category": "Economic Occupancy Recovery",
+                "description": f"Economic occupancy of {econ:.1%} trails physical of "
+                               f"{occ:.1%} by {(occ - econ) * 100:.0f} pts. Burn off "
+                               f"concessions, tighten collections, and reprice "
+                               f"below-street in-place rents (assumes half the "
+                               f"spread is recoverable).",
+                "est_annual_impact": recoverable,
+                "timeline": "6-12 months",
+                "risk": "Low-Moderate — controllable operations, not market dependent",
+            })
+
     # Rate management / ECRI
     if occ and occ >= 0.88:
         ops.append({
             "category": "Revenue Management / ECRI",
             "description": "Implement systematic existing-customer rate increases (ECRI) "
-                           "targeting 8-10% annual increases for tenants > 6 months.",
+                           "targeting 8-10% annual increases for tenants > 6 months. "
+                           "Confirm street rates are flat-to-rising first — ECRI "
+                           "against falling street rates closes the in-place-to-market "
+                           "gap from above.",
             "est_annual_impact": (fin.get("income_summary", {}).get("egr", 0) or 0) * 0.03,
             "timeline": "Immediate",
             "risk": "Low — industry standard practice",
