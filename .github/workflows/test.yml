@@ -19,6 +19,9 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt pytest
 
+      - name: Django checks
+        run: python manage.py check && python manage.py makemigrations --check --dry-run
+
       - name: Run tests
         run: python -m pytest tests/ -v
 
