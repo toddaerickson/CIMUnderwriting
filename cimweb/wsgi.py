@@ -11,5 +11,5 @@ application = get_wsgi_application()
 # import wsgi, so dev/CI are unaffected.
 from django.conf import settings  # noqa: E402
 
-if not settings.DEBUG and settings.SECRET_KEY == "dev-only-insecure-key":
+if not settings.DEBUG and settings.SECRET_KEY == settings.INSECURE_DEFAULT_SECRET_KEY:
     raise ImproperlyConfigured("DJANGO_SECRET_KEY must be set when DEBUG=False")

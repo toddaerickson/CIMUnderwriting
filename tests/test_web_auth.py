@@ -84,6 +84,28 @@ def test_bootstrap_operator_password_and_flags(settings, monkeypatch):
 
 
 @pytest.mark.django_db
+def test_operator_can_log_in_end_to_end(client, settings, monkeypatch):
+    """Pins the auth composition: bootstrap_operator-created account +
+    allauth email login (which falls back to User.email lookup — no
+    EmailAddress row exists) must actually authenticate."""
+    from django.core.management import call_command
+
+    settings.ALLOWED_EMAILS = ["terickson@marathoncre.com"]
+    monkeypatch.setenv("OPERATOR_PASSWORD", "s3cret-pw")
+    call_command("bootstrap_operator")
+
+    resp = client.post("/accounts/login/", {
+        "login": "terickson@marathoncre.com",
+        "password": "s3cret-pw",
+    })
+    assert resp.status_code == 302
+    assert resp.url == "/deals/"
+
+    resp = client.get("/")
+    assert resp.status_code == 200
+
+
+@pytest.mark.django_db
 def test_bootstrap_operator_reconciles_flags(settings):
     """A pre-existing row (createsuperuser, interrupted run) gets its
     privilege flags re-asserted on the next run — the command is
