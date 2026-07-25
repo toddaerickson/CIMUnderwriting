@@ -40,3 +40,48 @@ def test_health_reports_db_failure(client, monkeypatch):
     resp = client.get("/health/")
     assert resp.status_code == 503
     assert resp.json()["db"] is False
+
+
+@pytest.mark.django_db
+def test_bootstrap_operator_idempotent(settings):
+    from django.contrib.auth.models import User
+    from django.core.management import call_command
+
+    settings.ALLOWED_EMAILS = ["terickson@marathoncre.com"]
+    call_command("bootstrap_operator")
+    call_command("bootstrap_operator")  # second run: no dupes, no error
+    assert User.objects.filter(email="terickson@marathoncre.com").count() == 1
+
+
+@pytest.mark.django_db
+def test_bootstrap_operator_password_and_flags(settings, monkeypatch):
+    from django.contrib.auth.models import User
+    from django.core.management import call_command
+
+    settings.ALLOWED_EMAILS = ["terickson@marathoncre.com"]
+    call_command("bootstrap_operator")
+    user = User.objects.get(email="terickson@marathoncre.com")
+    assert user.has_usable_password() is False
+    assert user.is_staff and user.is_superuser
+
+    User.objects.all().delete()
+    monkeypatch.setenv("OPERATOR_PASSWORD", "s3cret-pw")
+    call_command("bootstrap_operator")
+    user = User.objects.get(email="terickson@marathoncre.com")
+    assert user.check_password("s3cret-pw")
+
+
+@pytest.mark.django_db
+def test_bootstrap_operator_reconciles_flags(settings):
+    """A pre-existing row (createsuperuser, interrupted run) gets its
+    privilege flags re-asserted on the next run — the command is
+    idempotently-enforcing, not create-once."""
+    from django.contrib.auth.models import User
+    from django.core.management import call_command
+
+    settings.ALLOWED_EMAILS = ["terickson@marathoncre.com"]
+    User.objects.create_user(username="terickson@marathoncre.com",
+                             email="terickson@marathoncre.com")
+    call_command("bootstrap_operator")
+    user = User.objects.get(username="terickson@marathoncre.com")
+    assert user.is_staff and user.is_superuser
