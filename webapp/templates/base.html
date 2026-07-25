@@ -5,6 +5,15 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{% block title %}CIM Analyst{% endblock %}</title>
 
+  {% comment %} Deliberate type system — Fraunces (display) + Public Sans
+     (body); ported from managertools (templates/base.html) so the
+     font-display/font-sans tokens already defined in tailwind.config.js
+     actually load a real typeface instead of silently falling back to
+     the system font. {% endcomment %}
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600&family=Public+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+
   {% comment %} Compiled Tailwind — design tokens live in tailwind.config.js;
      rebuild after class changes:
        TAILWINDCSS_VERSION=v3.4.17 tailwindcss -c tailwind.config.js \
@@ -12,6 +21,12 @@
      (ported from managertools; same pinned-CLI rationale — see
      tailwind.config.js header comment.) {% endcomment %}
   <link rel="stylesheet" href="{% static 'css/tw.css' %}">
+
+  {% comment %} Page-specific <head> additions (currently just the
+     allauth chrome's scoped login-form CSS — see
+     webapp/templates/allauth/layouts/base.html). Empty by default; safe
+     to leave unoverridden on every other page. {% endcomment %}
+  {% block extra_head %}{% endblock %}
 </head>
 <body class="bg-slate-50 text-slate-900">
   {# Mobile hamburger toggle #}

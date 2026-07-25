@@ -9,9 +9,65 @@ this one, so re-pointing it at our own base.html threads the sidebar
 touching allauth's per-page templates. Block names below (head_title,
 content) match what allauth's templates already override — see
 .venv/lib/*/site-packages/allauth/templates/allauth/layouts/base.html
-and account/login.html for the originals. allauth's own form/element
-rendering ({% element %} tags) emits bare, unstyled HTML — visual
-polish of the login form itself is a follow-on pass, not this file.
+and account/login.html for the originals.
+
+This file intentionally omits the real allauth/layouts/base.html's own
+extra_head / body / extra_body blocks (it defines a <head> menu plus
+those three hooks; we skip straight to our own base.html's title/
+content blocks instead) — revisit if allauth sub-apps (mfa,
+socialaccount, usersessions) are ever installed, since their bundled
+templates inject JS/markup via extra_body/extra_head and would
+silently lose it here.
+
+allauth's own form/element rendering ({% element %} tags, plus plain
+Django form.as_p() for the login/signup fields) emits no CSS classes
+to hook — see allauth/templates/allauth/elements/*.html. The <style>
+block below (via our base.html's `extra_head` block) is the fix: it
+only renders on allauth pages (no other page overrides extra_head),
+so the broad tag selectors below (main form input, main h1, ...) are
+safe without a wrapping class or leaking into other pages' forms.
 {% endcomment %}
 {% block title %}{% block head_title %}{% endblock %}{% endblock %}
+{% block extra_head %}
+<style>
+  /* Login/logout/password-management form styling. Values mirror the
+     Tailwind tokens in tailwind.config.js (accent-700 #0f766e,
+     accent-800 #115e59, slate-300/700/900) — hand-written because this
+     inline block isn't run through the Tailwind CLI; only class
+     attributes in webapp/templates/**/*.html are scanned/compiled. */
+  main h1 {
+    font-family: "Fraunces", ui-serif, Georgia, serif;
+    font-size: 1.375rem; font-weight: 600; color: #0f172a;
+    margin: 0 0 0.75rem;
+  }
+  main p { font-size: 0.875rem; color: #475569; margin: 0 0 0.875rem; }
+  main a { color: #0f766e; text-decoration: underline; }
+  main a:hover { color: #115e59; }
+  main form p { margin: 0 0 0.75rem; font-size: 0.875rem; }
+  main form label { font-size: 0.8rem; font-weight: 600; color: #334155; }
+  main form .helptext { display: block; margin-top: 0.25rem; font-size: 0.8rem; color: #64748b; }
+  main form input[type="text"],
+  main form input[type="email"],
+  main form input[type="password"] {
+    display: block; width: 100%; max-width: 22rem; box-sizing: border-box;
+    margin-top: 0.25rem;
+    border: 1px solid #cbd5e1; border-radius: 0.375rem;
+    padding: 0.5rem 0.625rem; font-size: 0.875rem; color: #0f172a;
+    background: #fff;
+  }
+  main form input:focus {
+    outline: none; border-color: #0d9488; box-shadow: 0 0 0 1px #0d9488;
+  }
+  main form input[type="checkbox"] {
+    width: auto; margin-left: 0.375rem; vertical-align: middle;
+  }
+  main form button[type="submit"] {
+    margin-top: 0.25rem;
+    background: #0f766e; color: #fff; font-size: 0.875rem; font-weight: 600;
+    padding: 0.5rem 1.125rem; border: none; border-radius: 0.375rem;
+    cursor: pointer;
+  }
+  main form button[type="submit"]:hover { background: #115e59; }
+</style>
+{% endblock %}
 {% block content %}{% endblock %}

@@ -20,6 +20,18 @@ def test_home_requires_login(client):
 
 
 @pytest.mark.django_db
+def test_login_page_is_styled(client):
+    """Pins the allauth chrome override: the login page must render
+    through webapp/templates/allauth/layouts/base.html (sidebar +
+    compiled Tailwind), not allauth's bare bundled template. settings_test
+    uses plain StaticFilesStorage (no manifest hash), so the static tag
+    resolves to the literal filename."""
+    resp = client.get("/accounts/login/")
+    assert resp.status_code == 200
+    assert b"css/tw." in resp.content
+
+
+@pytest.mark.django_db
 def test_signup_is_closed(client):
     resp = client.get("/accounts/signup/")
     assert resp.status_code == 200
