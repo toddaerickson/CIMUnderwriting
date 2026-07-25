@@ -34,10 +34,14 @@ INSTALLED_APPS = [
     "django.contrib.sessions",
     "django.contrib.messages",
     "django.contrib.staticfiles",
+    # webapp precedes allauth so its templates/allauth/... overrides
+    # (chrome for login/logout/signup-closed pages) win over allauth's
+    # own bundled templates — app_directories.Loader resolves by
+    # INSTALLED_APPS order.
+    "webapp",
     "allauth",
     "allauth.account",
     "django_htmx",
-    "webapp",
 ]
 
 MIDDLEWARE = [

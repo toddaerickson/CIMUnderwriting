@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+{% comment %}
+Chrome for every allauth account page (login, logout, signup-closed,
+password management) — this file's path/name shadows allauth's own
+allauth/layouts/base.html (webapp precedes allauth in INSTALLED_APPS,
+see cimweb/settings.py). Every allauth template ultimately extends
+this one, so re-pointing it at our own base.html threads the sidebar
++ compiled Tailwind (static/css/tw.css) around all of them without
+touching allauth's per-page templates. Block names below (head_title,
+content) match what allauth's templates already override — see
+.venv/lib/*/site-packages/allauth/templates/allauth/layouts/base.html
+and account/login.html for the originals. allauth's own form/element
+rendering ({% element %} tags) emits bare, unstyled HTML — visual
+polish of the login form itself is a follow-on pass, not this file.
+{% endcomment %}
+{% block title %}{% block head_title %}{% endblock %}{% endblock %}
+{% block content %}{% endblock %}

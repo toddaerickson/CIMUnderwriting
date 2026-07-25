@@ -1,0 +1,124 @@
+{% load static %}<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}CIM Analyst{% endblock %}</title>
+
+  {% comment %} Compiled Tailwind — design tokens live in tailwind.config.js;
+     rebuild after class changes:
+       TAILWINDCSS_VERSION=v3.4.17 tailwindcss -c tailwind.config.js \
+         -i static/src/input.css -o static/css/tw.css --minify
+     (ported from managertools; same pinned-CLI rationale — see
+     tailwind.config.js header comment.) {% endcomment %}
+  <link rel="stylesheet" href="{% static 'css/tw.css' %}">
+</head>
+<body class="bg-slate-50 text-slate-900">
+  {# Mobile hamburger toggle #}
+  <button id="sidebar-toggle" aria-label="Toggle sidebar navigation" title="Toggle sidebar navigation"
+          class="md:hidden fixed top-3 left-3 z-50 bg-slate-900 text-white p-2 rounded-lg shadow-lg"
+          onclick="document.getElementById('sidebar').classList.toggle('-translate-x-full')">
+    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"/>
+    </svg>
+  </button>
+
+  <div class="flex min-h-screen">
+    <aside id="sidebar"
+           class="w-36 bg-white text-slate-900 border-r border-slate-200 flex flex-col shrink-0
+                  fixed md:static inset-y-0 left-0 z-40
+                  -translate-x-full md:translate-x-0
+                  transition-transform duration-200 ease-in-out
+                  shadow-lg md:shadow-none">
+      <div class="px-3 py-3 border-b border-slate-200">
+        <div class="font-display text-xl font-semibold tracking-tight whitespace-nowrap">CIM Analyst</div>
+      </div>
+
+      {% comment %}
+      Sidebar IA per CLAUDE.md's phased build-out. New Analysis (Phase 3),
+      Deal Pipeline (Phase 2), Comps (Phase 5), Settings (Phase 5) don't
+      have routes yet — rendered as muted, non-navigating spans (not
+      {% url %} calls, which would 500 on an unregistered name). When a
+      phase lands its route, convert the span to the same pattern Log out
+      already uses below:
+        <a href="{% url 'name' %}"
+           class="block px-2 py-1.5 md:py-0.5 rounded {% if request.resolver_match.url_name == 'name' %}bg-accent-700 text-white{% else %}hover:bg-slate-100{% endif %}">Label</a>
+      {% endcomment %}
+      <nav class="flex-1 overflow-y-auto px-2 py-4 space-y-4 text-[13px] text-slate-900/90">
+        <div>
+          <div class="px-2 text-xs font-bold uppercase tracking-wider text-slate-500 mb-1">Underwrite</div>
+          <span class="flex items-center justify-between px-2 py-1.5 md:py-0.5 rounded text-slate-400 cursor-not-allowed">
+            New Analysis
+            <span class="text-[10px] uppercase tracking-wide text-slate-300">soon</span>
+          </span>
+          <span class="flex items-center justify-between px-2 py-1.5 md:py-0.5 rounded text-slate-400 cursor-not-allowed">
+            Deal Pipeline
+            <span class="text-[10px] uppercase tracking-wide text-slate-300">soon</span>
+          </span>
+        </div>
+
+        <div>
+          <div class="px-2 text-xs font-bold uppercase tracking-wider text-slate-500 mb-1">Reference</div>
+          <span class="flex items-center justify-between px-2 py-1.5 md:py-0.5 rounded text-slate-400 cursor-not-allowed">
+            Comps
+            <span class="text-[10px] uppercase tracking-wide text-slate-300">soon</span>
+          </span>
+          <span class="flex items-center justify-between px-2 py-1.5 md:py-0.5 rounded text-slate-400 cursor-not-allowed">
+            Settings
+            <span class="text-[10px] uppercase tracking-wide text-slate-300">soon</span>
+          </span>
+        </div>
+      </nav>
+
+      <div class="px-2 py-3 border-t border-slate-200">
+        <a href="{% url 'account_logout' %}"
+           class="block px-2 py-1.5 md:py-0.5 rounded {% if request.resolver_match.url_name == 'account_logout' %}bg-accent-700 text-white{% else %}hover:bg-slate-100{% endif %}">Log out</a>
+      </div>
+    </aside>
+
+    {# Overlay backdrop for mobile sidebar #}
+    <div id="sidebar-backdrop"
+         class="fixed inset-0 bg-black/40 z-30 hidden md:hidden"
+         onclick="document.getElementById('sidebar').classList.add('-translate-x-full'); this.classList.add('hidden')"></div>
+
+    <main class="flex-1 px-2 py-3 md:px-4 pt-14 md:pt-3">
+      {% if messages %}
+        <div class="max-w-3xl mb-4 space-y-2">
+          {% for m in messages %}
+            <div class="rounded-md px-4 py-2 text-sm border
+              {% if m.tags == 'success' %}bg-emerald-50 border-emerald-200 text-emerald-800
+              {% elif m.tags == 'error' %}bg-red-50 border-red-200 text-red-800
+              {% elif m.tags == 'warning' %}bg-amber-50 border-amber-200 text-amber-800
+              {% else %}bg-slate-50 border-slate-200 text-slate-800{% endif %}">
+              {{ m }}
+            </div>
+          {% endfor %}
+        </div>
+      {% endif %}
+      {% block content %}{% endblock %}
+    </main>
+  </div>
+
+  <script>
+    // Show/hide backdrop when sidebar toggles
+    const sidebar = document.getElementById('sidebar');
+    const backdrop = document.getElementById('sidebar-backdrop');
+    const toggle = document.getElementById('sidebar-toggle');
+    if (toggle && sidebar && backdrop) {
+      toggle.addEventListener('click', function() {
+        const isOpen = !sidebar.classList.contains('-translate-x-full');
+        backdrop.classList.toggle('hidden', !isOpen);
+      });
+      // Close sidebar when clicking a nav link on mobile
+      sidebar.querySelectorAll('a').forEach(function(a) {
+        a.addEventListener('click', function() {
+          if (window.innerWidth < 768) {
+            sidebar.classList.add('-translate-x-full');
+            backdrop.classList.add('hidden');
+          }
+        });
+      });
+    }
+  </script>
+</body>
+</html>
