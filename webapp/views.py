@@ -6,7 +6,7 @@ from django.conf import settings
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.db import connection
-from django.http import HttpResponse, JsonResponse
+from django.http import FileResponse, Http404, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils import timezone
@@ -14,8 +14,9 @@ from django.views.decorators.http import require_POST
 from django_htmx.http import HttpResponseClientRedirect
 
 from webapp import forms as assumptions_forms
+from webapp import results as results_ctx
 from webapp import services
-from webapp.models import Deal
+from webapp.models import AnalysisRun, Deal
 
 logger = logging.getLogger("cim_analyst.web")
 
@@ -134,6 +135,14 @@ def deal_assumptions(request, pk):
             deal.assumption_overrides = assumptions_forms.build_overrides(
                 form.cleaned_data, request.POST, deal)
             deal.save(update_fields=["assumption_overrides", "updated_at"])
+            if "run" in request.POST:
+                if _run_state(deal.runs.first()) == "running":
+                    messages.error(
+                        request, "An analysis is already running for this deal.")
+                    return redirect("deal-detail", pk=deal.pk)
+                run = AnalysisRun.objects.create(deal=deal)
+                services.start_analysis(run)
+                return redirect("deal-detail", pk=deal.pk)
             messages.success(request, "Assumptions saved.")
             return redirect("deal-assumptions", pk=deal.pk)
         rows = assumptions_forms.parse_unit_mix(request.POST) or []
@@ -224,3 +233,114 @@ def deal_discard(request, pk):
     deal.delete()
     messages.success(request, f"Discarded upload “{name}”.")
     return redirect("deal-list")
+
+
+# ── Phase 4: analysis runs ──────────────────────────────────────────
+
+def _run_state(run):
+    """None | 'running' | 'failed' | 'done' — a running row older than
+    the timeout counts as failed so the UI never spins forever."""
+    if run is None:
+        return None
+    if run.status in ("done", "failed"):
+        return run.status
+    if (timezone.now() - run.created_at).total_seconds() > \
+            services.ANALYSIS_TIMEOUT_SECONDS:
+        return "failed"
+    return "running"
+
+
+@login_required
+@require_POST
+def deal_run(request, pk):
+    deal = get_object_or_404(Deal, pk=pk)
+    if not deal.cim_json:
+        messages.error(request, "No extraction snapshot — upload the CIM "
+                                "under New Analysis first.")
+        return redirect("deal-detail", pk=deal.pk)
+    if _run_state(deal.runs.first()) == "running":
+        messages.error(request, "An analysis is already running for this deal.")
+        return redirect("deal-detail", pk=deal.pk)
+    run = AnalysisRun.objects.create(deal=deal)
+    services.start_analysis(run)
+    return redirect("deal-detail", pk=deal.pk)
+
+
+@login_required
+def run_status(request, pk):
+    deal = get_object_or_404(Deal, pk=pk)
+    run = deal.runs.first()
+    state = _run_state(run)
+    if state == "done":
+        return HttpResponseClientRedirect(reverse("deal-detail", args=[deal.pk]))
+    return render(request, "webapp/_run_status.html",
+                  {"deal": deal, "run": run, "failed": state == "failed"})
+
+
+TAB_NAMES = ("summary", "returns", "financials", "risks")
+
+
+@login_required
+def deal_detail(request, pk):
+    deal = get_object_or_404(Deal, pk=pk)
+    latest = deal.runs.first()
+    state = _run_state(latest)
+    done_run = latest if state == "done" else \
+        deal.runs.filter(status="done").exclude(result_json=None).first()
+    tab = request.GET.get("tab", "summary")
+    if tab not in TAB_NAMES:
+        tab = "summary"
+    ctx = {
+        "deal": deal, "run": latest, "done_run": done_run,
+        "state": state, "tab": tab,
+        "has_snapshot": bool(deal.cim_json),
+        "show_progress": state in ("running", "failed") and latest and
+                         latest.pk != (done_run.pk if done_run else None),
+        "run_failed": state == "failed",
+    }
+    if done_run:
+        r = done_run.result_json or {}
+        ctx["header"] = results_ctx.header_metrics(deal, r)
+        ctx["run_warnings"] = r.get("errors") or []
+        if tab == "summary":
+            ctx.update(results_ctx.summary_context(r))
+        elif tab == "returns":
+            ctx.update(results_ctx.returns_context(r))
+        elif tab == "financials":
+            ctx.update(results_ctx.financials_context(r))
+            ctx["benchmark_rows"] = services.expense_benchmark_rows(deal)
+        elif tab == "risks":
+            ctx.update(results_ctx.risks_context(r))
+    return render(request, "webapp/deal_detail.html", ctx)
+
+
+DOWNLOAD_KINDS = {
+    "memo": ("memo_filename",
+             "application/vnd.openxmlformats-officedocument"
+             ".wordprocessingml.document"),
+    "excel": ("excel_filename",
+              "application/vnd.openxmlformats-officedocument"
+              ".spreadsheetml.sheet"),
+    "template": ("template_filename",
+                 "application/vnd.ms-excel.sheet.macroEnabled.12"),
+}
+
+
+@login_required
+def deal_download(request, pk, kind):
+    deal = get_object_or_404(Deal, pk=pk)
+    if kind not in DOWNLOAD_KINDS:
+        raise Http404
+    field, mime = DOWNLOAD_KINDS[kind]
+    run = deal.runs.filter(status="done").first()
+    filename = (getattr(run, field, "") if run else "") or \
+        getattr(deal, field, "")  # Deal has no template_filename → ""
+    filename = os.path.basename(filename or "")
+    if not filename or not deal.deal_dir:
+        raise Http404
+    path = os.path.realpath(os.path.join(deal.deal_dir, filename))
+    deals_root = os.path.realpath(settings.CIM_DEALS_DIR)
+    if not path.startswith(deals_root + os.sep) or not os.path.isfile(path):
+        raise Http404
+    return FileResponse(open(path, "rb"), as_attachment=True,
+                        filename=filename, content_type=mime)

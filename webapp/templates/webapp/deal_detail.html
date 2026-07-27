@@ -1,0 +1,94 @@
+{% extends "base.html" %}
+{% block title %}{{ deal.property_name }}{% endblock %}
+{% block content %}
+<div class="max-w-5xl">
+  <div class="flex flex-wrap items-start justify-between gap-2 mb-1">
+    <div>
+      <h1 class="font-display text-xl font-semibold">{{ deal.property_name }}</h1>
+      <p class="text-xs text-slate-500">
+        {% if deal.city or deal.state %}{{ deal.city }}{% if deal.city and deal.state %}, {% endif %}{{ deal.state }}{% endif %}
+        {% if deal.nrsf %} &middot; {{ deal.nrsf|floatformat:0 }} SF{% endif %}
+        {% if deal.asset_type %} &middot; {{ deal.asset_type }}{% endif %}
+        {% if deal.asking_price %} &middot; Asking ${{ deal.asking_price|floatformat:0 }}{% endif %}
+      </p>
+    </div>
+    <div class="flex items-center gap-2">
+      {% if has_snapshot %}
+      <a href="{% url 'deal-assumptions' deal.pk %}"
+         class="text-sm px-3 py-1.5 rounded border border-slate-300 text-slate-700 hover:bg-slate-50">Assumptions</a>
+      {% if state != "running" %}
+      <form method="post" action="{% url 'deal-run' deal.pk %}">
+        {% csrf_token %}
+        <button type="submit" class="bg-accent-700 text-white text-sm px-3 py-1.5 rounded">
+          {% if done_run %}Re-run Analysis{% else %}Run Analysis{% endif %}</button>
+      </form>
+      {% endif %}
+      {% endif %}
+    </div>
+  </div>
+
+  {% if done_run %}
+  <div class="grid grid-cols-2 sm:grid-cols-4 gap-2 my-3">
+    <div class="rounded-md border border-slate-200 bg-white px-3 py-2">
+      <div class="text-xs uppercase tracking-wide text-slate-500">Recommendation</div>
+      <div class="text-sm font-semibold">{{ header.recommendation }}</div>
+    </div>
+    <div class="rounded-md border border-slate-200 bg-white px-3 py-2">
+      <div class="text-xs uppercase tracking-wide text-slate-500">Base Case IRR</div>
+      <div class="text-sm font-semibold">{{ header.base_irr }}</div>
+    </div>
+    <div class="rounded-md border border-slate-200 bg-white px-3 py-2">
+      <div class="text-xs uppercase tracking-wide text-slate-500">Max Offer</div>
+      <div class="text-sm font-semibold">{{ header.max_price }}</div>
+    </div>
+    <div class="rounded-md border border-slate-200 bg-white px-3 py-2">
+      <div class="text-xs uppercase tracking-wide text-slate-500">Discount to Asking</div>
+      <div class="text-sm font-semibold">{{ header.discount_to_asking }}</div>
+    </div>
+  </div>
+  {% endif %}
+
+  {% if show_progress %}
+  <div class="my-3">{% include "webapp/_run_status.html" with failed=run_failed %}</div>
+  {% endif %}
+
+  {% if not has_snapshot and not done_run %}
+  <div class="my-3 rounded-md border border-slate-200 bg-white px-4 py-3 text-sm text-slate-600">
+    This deal was imported from a completed analysis folder — there is no extraction snapshot to run. Downloads below cover the original outputs where present.
+  </div>
+  {% endif %}
+
+  {% if run_warnings %}
+  <div class="my-3 rounded-md border border-amber-200 bg-amber-50 px-4 py-2 text-sm text-amber-800">
+    <ul class="list-disc pl-4">{% for w in run_warnings %}<li>{{ w }}</li>{% endfor %}</ul>
+  </div>
+  {% endif %}
+
+  {% if deal.memo_filename or done_run %}
+  <div class="flex flex-wrap gap-2 my-3">
+    <a href="{% url 'deal-download' deal.pk 'memo' %}" class="text-sm px-3 py-1.5 rounded border border-slate-300 text-slate-700 hover:bg-slate-50">Memo (.docx)</a>
+    <a href="{% url 'deal-download' deal.pk 'excel' %}" class="text-sm px-3 py-1.5 rounded border border-slate-300 text-slate-700 hover:bg-slate-50">Returns Model (.xlsx)</a>
+    {% if done_run.template_filename %}
+    <a href="{% url 'deal-download' deal.pk 'template' %}" class="text-sm px-3 py-1.5 rounded border border-slate-300 text-slate-700 hover:bg-slate-50">UW Template (.xlsm)</a>
+    {% endif %}
+  </div>
+  {% endif %}
+
+  {% if done_run %}
+  <nav class="flex gap-1 border-b border-slate-200 mb-3 text-sm">
+    <a href="{% url 'deal-detail' deal.pk %}?tab=summary"
+       class="px-3 py-1.5 rounded-t {% if tab == 'summary' %}bg-white border border-b-white border-slate-200 font-medium{% else %}text-slate-500 hover:text-slate-700{% endif %}">Summary</a>
+    <a href="{% url 'deal-detail' deal.pk %}?tab=returns"
+       class="px-3 py-1.5 rounded-t {% if tab == 'returns' %}bg-white border border-b-white border-slate-200 font-medium{% else %}text-slate-500 hover:text-slate-700{% endif %}">Returns</a>
+    <a href="{% url 'deal-detail' deal.pk %}?tab=financials"
+       class="px-3 py-1.5 rounded-t {% if tab == 'financials' %}bg-white border border-b-white border-slate-200 font-medium{% else %}text-slate-500 hover:text-slate-700{% endif %}">Financials</a>
+    <a href="{% url 'deal-detail' deal.pk %}?tab=risks"
+       class="px-3 py-1.5 rounded-t {% if tab == 'risks' %}bg-white border border-b-white border-slate-200 font-medium{% else %}text-slate-500 hover:text-slate-700{% endif %}">Risks</a>
+  </nav>
+  {% if tab == "summary" %}{% include "webapp/_tab_summary.html" %}
+  {% elif tab == "returns" %}{% include "webapp/_tab_returns.html" %}
+  {% elif tab == "financials" %}{% include "webapp/_tab_financials.html" %}
+  {% elif tab == "risks" %}{% include "webapp/_tab_risks.html" %}{% endif %}
+  {% endif %}
+</div>
+{% endblock %}

@@ -19,3 +19,6 @@ SECURE_SSL_REDIRECT = False
 # transaction (same reasoning as managertools' COACHING_ENABLED note —
 # spawned-thread writes can leak past rollback into unrelated tests).
 EXTRACT_USE_THREAD = False
+
+# Same reasoning as EXTRACT_USE_THREAD: analysis runs inline in tests.
+ANALYSIS_USE_THREAD = False

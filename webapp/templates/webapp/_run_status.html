@@ -1,0 +1,23 @@
+{% if failed %}
+<div id="run-status" class="max-w-xl rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
+  <p class="font-medium">Analysis failed{% if run.error %}: {{ run.error }}{% else %} or timed out.{% endif %}</p>
+  <form method="post" action="{% url 'deal-run' deal.pk %}" class="mt-2">
+    {% csrf_token %}
+    <button type="submit" class="bg-accent-700 text-white text-sm px-3 py-1.5 rounded">Re-run analysis</button>
+  </form>
+</div>
+{% else %}
+<div id="run-status"
+     hx-get="{% url 'run-status' deal.pk %}"
+     hx-trigger="load delay:2s" hx-swap="outerHTML"
+     class="max-w-xl rounded-md border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700">
+  <div class="flex items-center justify-between mb-1.5">
+    <span>{{ run.progress_msg|default:"Starting analysis…" }}</span>
+    <span class="text-xs text-slate-500">{{ run.progress_step }}/{{ run.progress_total }}</span>
+  </div>
+  <div class="h-1.5 w-full rounded bg-slate-100">
+    <div class="h-1.5 rounded bg-accent-700"
+         style="width: {% widthratio run.progress_step run.progress_total 100 %}%"></div>
+  </div>
+</div>
+{% endif %}

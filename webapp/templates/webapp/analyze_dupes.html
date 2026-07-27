@@ -28,7 +28,7 @@
           <td class="py-1.5 pr-3 whitespace-nowrap">{{ d.analysis_date }}</td>
           <td class="py-1.5 pr-3">{{ d.match_type }}</td>
           <td class="py-1.5 pr-3">
-            {% if d.deal_pk %}<a href="{% url 'deal-assumptions' d.deal_pk %}" class="text-accent-700 hover:underline">Open</a>{% endif %}
+            {% if d.deal_pk %}<a href="{% url 'deal-detail' d.deal_pk %}" class="text-accent-700 hover:underline">Open</a>{% endif %}
           </td>
         </tr>
         {% endfor %}

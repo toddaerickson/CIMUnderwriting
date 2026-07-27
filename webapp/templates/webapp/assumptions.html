@@ -2,6 +2,7 @@
 {% block title %}{{ deal.property_name }} — Assumptions{% endblock %}
 {% block content %}
 <div class="max-w-5xl">
+  <a href="{% url 'deal-detail' deal.pk %}" class="block mb-1 text-xs text-slate-500 hover:underline">&larr; {{ deal.property_name }}</a>
   <div class="flex flex-wrap items-baseline gap-x-4 gap-y-1 mb-1">
     <h1 class="font-display text-xl font-semibold">{{ deal.property_name }}</h1>
     <span class="text-sm text-slate-500">{{ deal.city }}{% if deal.city and deal.state %}, {% endif %}{{ deal.state }}</span>
@@ -205,9 +206,10 @@
       </div>
     </details>
 
-    <div class="flex items-center gap-3">
-      <button type="submit" class="bg-accent-700 text-white text-sm px-4 py-1.5 rounded">Save Assumptions</button>
-      <span class="text-xs text-slate-500">Run Analysis lands in Phase 4 — saved assumptions will feed it.</span>
+    <div class="flex items-center gap-2">
+      <button type="submit" name="run" value="1"
+              class="bg-accent-700 text-white text-sm px-4 py-1.5 rounded">Save &amp; Run Analysis</button>
+      <button type="submit" class="border border-slate-300 text-slate-700 hover:bg-slate-50 text-sm px-4 py-1.5 rounded">Save Assumptions</button>
     </div>
   </form>
 </div>
