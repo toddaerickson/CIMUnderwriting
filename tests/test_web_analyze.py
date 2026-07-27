@@ -61,3 +61,79 @@ def test_cim_from_dict_ignores_unknown_keys():
     d = cim_to_dict(_sample_cim())
     d["some_removed_field"] = 1
     assert cim_from_dict(d).property_name == "Expo Storage"
+
+
+@pytest.fixture
+def fake_extract(monkeypatch):
+    from gui.engine import AnalysisResult
+
+    def _fake(pdf_path, cim_overrides=None, progress=None):
+        cim = _sample_cim()
+        r = AnalysisResult(pdf_path=pdf_path)
+        r.cim_data = cim
+        r.extraction_report = cim.extraction_report()
+        r.errors = ["Enrichment skipped: test"]
+        return r
+
+    monkeypatch.setattr("webapp.services.extract_pdf_data", _fake)
+    return _fake
+
+
+def _make_upload_deal(deals_dir, slug="expo-cim"):
+    from webapp.models import Deal
+    folder = deals_dir / slug
+    (folder / "inputs").mkdir(parents=True)
+    (folder / "inputs" / "expo.pdf").write_bytes(b"%PDF-1.4 fake")
+    return Deal.objects.create(deal_id=slug, property_name="expo",
+                               deal_dir=str(folder), input_files=["expo.pdf"],
+                               extract_status="pending")
+
+
+@pytest.mark.django_db
+def test_start_extract_success(deals_dir, fake_extract):
+    from webapp import services
+    deal = _make_upload_deal(deals_dir)
+    services.start_extract(deal)
+    deal.refresh_from_db()
+    assert deal.extract_status == "done"
+    assert deal.cim_json["property_name"] == "Expo Storage"
+    assert deal.extraction_report["populated"] > 0
+    assert deal.extract_warnings == ["Enrichment skipped: test"]
+    # extraction refreshes display metadata on the row
+    assert deal.property_name == "Expo Storage"
+    assert deal.state == "TX"
+    assert deal.asset_type != ""
+    assert deal.nrsf == 45000.0
+
+
+@pytest.mark.django_db
+def test_start_extract_failure_records_error(deals_dir, monkeypatch):
+    from webapp import services
+
+    def boom(pdf_path, cim_overrides=None, progress=None):
+        raise RuntimeError("pdf is garbage")
+
+    monkeypatch.setattr("webapp.services.extract_pdf_data", boom)
+    deal = _make_upload_deal(deals_dir)
+    services.start_extract(deal)
+    deal.refresh_from_db()
+    assert deal.extract_status == "failed"
+    assert "pdf is garbage" in deal.extract_error
+
+
+@pytest.mark.django_db
+def test_stale_extract_worker_is_dropped(deals_dir, fake_extract):
+    """A worker holding an old stamp must not overwrite a retried extract."""
+    from django.utils import timezone
+
+    from webapp import services
+    deal = _make_upload_deal(deals_dir)
+    old_stamp = timezone.now()
+    deal.extract_status = "running"
+    deal.extract_requested_at = timezone.now()  # newer stamp = a retry happened
+    deal.save()
+    services._extract_worker(deal.pk, os.path.join(deal.deal_dir, "inputs", "expo.pdf"),
+                             old_stamp)
+    deal.refresh_from_db()
+    assert deal.extract_status == "running"  # stale write dropped
+    assert deal.cim_json is None

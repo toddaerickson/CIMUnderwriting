@@ -36,3 +36,64 @@ def cim_from_dict(d: dict):
     data["income_lines"] = [FinancialLine(**l) for l in data.get("income_lines") or []]
     data["expense_lines"] = [FinancialLine(**l) for l in data.get("expense_lines") or []]
     return CIMData(**data)
+
+
+# ── Background extraction ───────────────────────────────────────────
+
+EXTRACT_TIMEOUT_SECONDS = 180  # poll partial flips to failed/retry after this
+
+
+def start_extract(deal) -> None:
+    """Stamp the deal and run extraction (thread in prod, inline in tests).
+
+    The stamp is a CAS token: a retry writes a new stamp, so a stale
+    still-running worker's final update matches zero rows (managertools
+    PR 8 stale-thread lesson).
+    """
+    pdf_path = os.path.join(deal.deal_dir, "inputs", deal.input_files[0])
+    stamp = timezone.now()
+    Deal.objects.filter(pk=deal.pk).update(
+        extract_status="running", extract_requested_at=stamp, extract_error="")
+    if getattr(settings, "EXTRACT_USE_THREAD", True):
+        threading.Thread(target=_extract_worker,
+                         args=(deal.pk, pdf_path, stamp), daemon=True).start()
+    else:
+        _extract_worker(deal.pk, pdf_path, stamp)
+
+
+def _extract_worker(deal_pk, pdf_path, stamp):
+    try:
+        result = extract_pdf_data(pdf_path)
+        cim = result.cim_data
+        updates = {
+            "cim_json": cim_to_dict(cim),
+            "extraction_report": result.extraction_report,
+            "extract_warnings": list(result.errors),
+            "extract_status": "done",
+            "extract_error": "",
+            "asset_type": detect_asset_type(cim),
+        }
+        if cim.property_name:
+            updates["property_name"] = cim.property_name[:200]
+        if cim.city:
+            updates["city"] = cim.city[:100]
+        if cim.state:
+            updates["state"] = cim.state[:2].upper()
+        if cim.nrsf:
+            updates["nrsf"] = cim.nrsf
+        if cim.acreage:
+            updates["acreage"] = cim.acreage
+        if cim.asking_price:
+            updates["asking_price"] = cim.asking_price
+        matched = Deal.objects.filter(
+            pk=deal_pk, extract_requested_at=stamp).update(**updates)
+        if not matched:
+            logger.warning("extract worker: stale thread for deal %s dropped", deal_pk)
+    except Exception as e:
+        logger.exception("extract worker failed for deal %s", deal_pk)
+        Deal.objects.filter(pk=deal_pk, extract_requested_at=stamp).update(
+            extract_status="failed", extract_error=str(e)[:2000])
+    finally:
+        if getattr(settings, "EXTRACT_USE_THREAD", True):
+            from django.db import connections
+            connections.close_all()
