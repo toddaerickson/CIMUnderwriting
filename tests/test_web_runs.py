@@ -150,3 +150,154 @@ def test_engine_end_to_end_with_overrides(tmp_path, monkeypatch):
     assert os.path.isfile(result.memo_path)
     assert os.path.isfile(result.excel_path)
     assert result.gate_summary["recommendation"]
+
+
+@pytest.fixture
+def fake_run(monkeypatch):
+    """Stand-in for gui.engine.run_analysis: fills the result fields the
+    worker consumes, writes the three output files, captures kwargs."""
+    calls = {}
+
+    def _fake(result, progress=None, output_dir=None, custom_scenarios=None,
+              custom_va_scenarios=None, solver_target_irr=None):
+        calls["cim_data"] = result.cim_data
+        calls["output_dir"] = output_dir
+        calls["custom_scenarios"] = custom_scenarios
+        calls["custom_va_scenarios"] = custom_va_scenarios
+        calls["solver_target_irr"] = solver_target_irr
+        if progress:
+            progress(9, 9, "Generating memo & model...")
+        name = result.cim_data.property_name.replace(" ", "_")
+        for attr, suffix in [("memo_path", "_memo.docx"),
+                             ("excel_path", "_model.xlsx"),
+                             ("template_path", "_uw.xlsm")]:
+            path = os.path.join(output_dir, f"{name}{suffix}")
+            with open(path, "wb") as f:
+                f.write(b"fake-office-bytes")
+            setattr(result, attr, path)
+        result.gate_results = [
+            {"gate": 1, "name": "Population (3-mi ≥ 50K)", "threshold": "≥ 50,000",
+             "actual": "62,000", "result": "PASS", "note": "", "source": None},
+            {"gate": 2, "name": "No unproven demand", "threshold": "phys ≥ 75%",
+             "actual": "92%", "result": "PASS", "note": "", "source": None},
+        ]
+        result.gate_summary = {"passed": 2, "failed": 0, "tbd": 0, "total": 2,
+                               "recommendation": "PURSUE",
+                               "failed_gates": [], "tbd_gates": []}
+        result.scenario_results = {
+            "bear": {"irr": 0.06, "moic": 1.3, "yield_on_cost": 0.065},
+            "base": {"irr": float("nan"), "moic": 1.6, "yield_on_cost": 0.075},
+            "bull": {"irr": 0.14, "moic": 1.9, "yield_on_cost": 0.085},
+        }
+        result.sensitivity = {"prices": [3_325_000.0, 3_500_000.0, 3_675_000.0],
+                              "exit_caps": [0.055, 0.06, 0.065],
+                              "grid": [[0.11, 0.10, 0.09],
+                                       [0.10, 0.09, 0.08],
+                                       [0.09, 0.08, 0.07]]}
+        result.va_results = {
+            "base": {"irr": 0.13, "moic": 1.7, "yield_on_cost": 0.08,
+                     "development_spread": 0.02, "stabilized_noi": 300_000.0}}
+        result.max_offer = {"max_price": 3_100_000.0, "achieved_irr": 0.10,
+                            "converged": True}
+        result.va_max_offer = {"max_price": 3_300_000.0, "achieved_irr": 0.10,
+                               "converged": True}
+        result.financial_analysis = {
+            "adjusted_ttm_noi": {"cim_ttm_noi": 250_000.0,
+                                 "analyst_adjusted_noi": 230_000.0},
+            "adjustments": ["Property tax adjusted to benchmark",
+                            {"category": "Insurance", "flag": "understated"}],
+            "expense_ratio_check": {"opex_revenue_ratio": 0.42},
+        }
+        result.risk_analysis = {"risks": [
+            {"risk": "ECRI bridge", "severity": "HIGH",
+             "detail": "Street rates falling", "mitigation": "Verify trend"}]}
+        result.adjusted_noi = 230_000.0
+        result.expense_ratio = 0.42
+        result.errors = ["Template generation failed: test-only"]
+        return result
+
+    monkeypatch.setattr("webapp.services.run_analysis", _fake)
+    return calls
+
+
+def _start_run(deal):
+    from webapp import services
+    from webapp.models import AnalysisRun
+    run = AnalysisRun.objects.create(deal=deal)
+    services.start_analysis(run)
+    run.refresh_from_db()
+    return run
+
+
+@pytest.mark.django_db
+def test_worker_success_updates_run_and_deal(deals_dir, fake_run):
+    deal = _make_extracted_deal(deals_dir)
+    deal.assumption_overrides = {
+        "cim_overrides": {"asking_price": 3_400_000.0},
+        "scenario_overrides": {"base": {"exit_cap": 0.06}},
+        "va_scenario_overrides": {"base": {"target_occupancy": 0.9}},
+        "replacement_cost_overrides": {"ss_driveup_per_sf": [100, 120]},
+        "solver_target_irr": 0.12,
+    }
+    deal.save()
+    run = _start_run(deal)
+
+    assert run.status == "done"
+    assert run.finished_at is not None
+    assert run.memo_filename == "Expo_Storage_memo.docx"
+    assert run.excel_filename == "Expo_Storage_model.xlsx"
+    assert run.template_filename == "Expo_Storage_uw.xlsm"
+    # NaN scrubbed for Postgres JSONB
+    assert run.result_json["scenario_results"]["base"]["irr"] is None
+    assert run.result_json["gate_summary"]["recommendation"] == "PURSUE"
+    assert run.result_json["errors"] == ["Template generation failed: test-only"]
+    # overrides all reached the engine
+    assert fake_run["cim_data"].asking_price == 3_400_000.0
+    assert fake_run["custom_scenarios"] == {"base": {"exit_cap": 0.06}}
+    assert fake_run["custom_va_scenarios"] == {"base": {"target_occupancy": 0.9}}
+    assert fake_run["solver_target_irr"] == 0.12
+    assert fake_run["output_dir"] == deal.deal_dir
+
+    deal.refresh_from_db()
+    assert deal.recommendation == "PURSUE"
+    assert deal.estimated_fair_value == 3_300_000.0  # VA max offer preferred
+    assert deal.analysis_date is not None
+    assert deal.memo_filename == "Expo_Storage_memo.docx"
+    assert deal.excel_filename == "Expo_Storage_model.xlsx"
+
+
+@pytest.mark.django_db
+def test_worker_writes_meta_with_row_deal_id(deals_dir, fake_run):
+    # Slug came from the FILENAME (Phase 3 decision #2); property name
+    # differs. deal_meta.json must carry the row's slug so import_deals
+    # round-trips onto the same row instead of forking a duplicate.
+    deal = _make_extracted_deal(deals_dir, slug="expo-cim-v2")
+    _start_run(deal)
+    with open(os.path.join(deal.deal_dir, "deal_meta.json")) as f:
+        meta = json.load(f)
+    assert meta["deal_id"] == "expo-cim-v2"
+    assert meta["property_name"] == "Expo Storage"
+    assert meta["memo_path"] == "Expo_Storage_memo.docx"
+    assert meta["input_files"] == ["expo.pdf"]
+
+
+@pytest.mark.django_db
+def test_worker_failure_records_error(deals_dir, monkeypatch):
+    def boom(result, **kwargs):
+        raise RuntimeError("solver exploded")
+
+    monkeypatch.setattr("webapp.services.run_analysis", boom)
+    deal = _make_extracted_deal(deals_dir)
+    run = _start_run(deal)
+    assert run.status == "failed"
+    assert "solver exploded" in run.error
+    deal.refresh_from_db()
+    assert deal.recommendation == "N/A"  # deal row untouched on failure
+
+
+@pytest.mark.django_db
+def test_worker_progress_updates_row(deals_dir, fake_run):
+    deal = _make_extracted_deal(deals_dir)
+    run = _start_run(deal)
+    assert run.progress_step == 9
+    assert run.progress_msg == "Generating memo & model..."

@@ -6,6 +6,7 @@ copying them, so there is one source of truth until gui/ retires.
 """
 import copy
 import dataclasses
+import datetime
 import logging
 import math
 import numbers
@@ -18,8 +19,10 @@ from django.conf import settings
 from django.utils import timezone
 
 import config as cfg
-from gui.deal_manager import detect_asset_type, sanitize_name
-from gui.engine import extract_pdf_data
+from gui.deal_manager import (build_deal_meta, detect_asset_type,
+                              sanitize_name, write_deal_meta)
+from gui.engine import (AnalysisResult, _apply_overrides, extract_pdf_data,
+                        run_analysis)
 from webapp.models import Deal
 
 logger = logging.getLogger("cim_analyst.web")
@@ -274,3 +277,114 @@ def expense_benchmark_rows(deal) -> list[dict]:
         rows.append({"category": cat.display_name, "cim": cim_val,
                      "low": low, "high": high})
     return rows
+
+
+# ── Background analysis runs ────────────────────────────────────────
+
+def start_analysis(run) -> None:
+    """Run the pipeline for an AnalysisRun (thread in prod, inline in
+    tests). The worker writes only to its own row, so late/stale threads
+    are harmless by construction — no CAS stamp needed."""
+    if getattr(settings, "ANALYSIS_USE_THREAD", True):
+        threading.Thread(target=_analysis_worker, args=(run.pk,),
+                         daemon=True).start()
+    else:
+        _analysis_worker(run.pk)
+
+
+def _analysis_worker(run_pk):
+    from webapp.models import AnalysisRun
+
+    try:
+        run = AnalysisRun.objects.select_related("deal").get(pk=run_pk)
+        deal = run.deal
+        overrides = deal.assumption_overrides or {}
+
+        cim = cim_from_dict(deal.cim_json)
+        cim_o = overrides.get("cim_overrides")
+        if cim_o:
+            _apply_overrides(cim, copy.deepcopy(cim_o))
+
+        pdf_path = ""
+        if deal.input_files:
+            pdf_path = os.path.join(deal.deal_dir, "inputs", deal.input_files[0])
+        result = AnalysisResult(pdf_path=pdf_path)
+        result.cim_data = cim
+        result.extraction_report = deal.extraction_report or {}
+
+        def _progress(step, total, msg):
+            AnalysisRun.objects.filter(pk=run_pk).update(
+                progress_step=step, progress_total=total,
+                progress_msg=str(msg)[:200])
+
+        with _ANALYSIS_LOCK:
+            with _patched_replacement_cost(
+                    overrides.get("replacement_cost_overrides")):
+                result = run_analysis(
+                    result, progress=_progress, output_dir=deal.deal_dir,
+                    custom_scenarios=overrides.get("scenario_overrides"),
+                    custom_va_scenarios=overrides.get("va_scenario_overrides"),
+                    solver_target_irr=overrides.get("solver_target_irr"),
+                )
+
+        meta = build_deal_meta(cim, result, deal.deal_dir,
+                               input_files=deal.input_files)
+        meta["deal_id"] = deal.deal_id  # row slug, never property-name derived
+        write_deal_meta(deal.deal_dir, meta)
+
+        payload = json_safe({
+            "gate_results": result.gate_results,
+            "gate_summary": result.gate_summary,
+            "scenario_results": result.scenario_results,
+            "sensitivity": result.sensitivity,
+            "va_results": result.va_results,
+            "max_offer": result.max_offer,
+            "va_max_offer": result.va_max_offer,
+            "financial_analysis": result.financial_analysis,
+            "market_analysis": result.market_analysis,
+            "physical_analysis": result.physical_analysis,
+            "rent_analysis": result.rent_analysis,
+            "value_add": result.value_add,
+            "risk_analysis": result.risk_analysis,
+            "adjusted_noi": result.adjusted_noi,
+            "expense_ratio": result.expense_ratio,
+            "errors": result.errors,
+        })
+        AnalysisRun.objects.filter(pk=run_pk).update(
+            status="done", finished_at=timezone.now(), result_json=payload,
+            error="",
+            memo_filename=os.path.basename(result.memo_path or ""),
+            excel_filename=os.path.basename(result.excel_path or ""),
+            template_filename=os.path.basename(result.template_path or ""),
+        )
+
+        deal_updates = {
+            "recommendation": (meta.get("recommendation") or "N/A")[:40],
+            "estimated_fair_value": meta.get("estimated_fair_value"),
+            "analysis_date": datetime.date.fromisoformat(meta["analysis_date"]),
+            "memo_filename": os.path.basename(result.memo_path or ""),
+            "excel_filename": os.path.basename(result.excel_path or ""),
+            "asset_type": detect_asset_type(cim),
+        }
+        if cim.property_name:
+            deal_updates["property_name"] = cim.property_name[:200]
+        if cim.city:
+            deal_updates["city"] = cim.city[:100]
+        if cim.state:
+            deal_updates["state"] = cim.state[:2].upper()
+        if cim.nrsf:
+            deal_updates["nrsf"] = cim.nrsf
+        if cim.acreage:
+            deal_updates["acreage"] = cim.acreage
+        if cim.asking_price:
+            deal_updates["asking_price"] = cim.asking_price
+        Deal.objects.filter(pk=deal.pk).update(**deal_updates)
+    except Exception as e:
+        logger.exception("analysis worker failed for run %s", run_pk)
+        AnalysisRun.objects.filter(pk=run_pk).update(
+            status="failed", finished_at=timezone.now(),
+            error=str(e)[:2000])
+    finally:
+        if getattr(settings, "ANALYSIS_USE_THREAD", True):
+            from django.db import connections
+            connections.close_all()
