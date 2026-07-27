@@ -1,0 +1,214 @@
+{% extends "base.html" %}
+{% block title %}{{ deal.property_name }} — Assumptions{% endblock %}
+{% block content %}
+<div class="max-w-5xl">
+  <div class="flex flex-wrap items-baseline gap-x-4 gap-y-1 mb-1">
+    <h1 class="font-display text-xl font-semibold">{{ deal.property_name }}</h1>
+    <span class="text-sm text-slate-500">{{ deal.city }}{% if deal.city and deal.state %}, {% endif %}{{ deal.state }}</span>
+  </div>
+
+  <div class="flex flex-wrap gap-2 mb-2 text-xs">
+    <span class="rounded-full bg-slate-100 px-2.5 py-1 text-slate-700">Confidence {{ report.confidence_pct }}%</span>
+    <span class="rounded-full bg-slate-100 px-2.5 py-1 text-slate-700">Fields {{ report.populated }}/{{ report.total_fields }}</span>
+    <span class="rounded-full bg-slate-100 px-2.5 py-1 text-slate-700">Missing {{ missing_fields|length }}</span>
+  </div>
+
+  {% if warnings %}
+  <div class="mb-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-1.5 text-xs text-amber-800">
+    {% for w in warnings %}<div>{{ w }}</div>{% endfor %}
+  </div>
+  {% endif %}
+
+  {% if missing_fields %}
+  <details class="mb-3 text-xs text-slate-600">
+    <summary class="cursor-pointer select-none">Missing fields ({{ missing_fields|length }})</summary>
+    <p class="mt-1">{{ missing_fields|join:", " }}</p>
+  </details>
+  {% endif %}
+
+  <form method="post" class="space-y-3">
+    {% csrf_token %}
+    {% if form.errors %}
+    <div class="rounded-md border border-red-200 bg-red-50 px-4 py-2 text-sm text-red-800">
+      Some fields could not be saved — check the highlighted values.
+      {{ form.errors }}
+    </div>
+    {% endif %}
+
+    <details open class="bg-white border border-slate-200 rounded-lg">
+      <summary class="cursor-pointer select-none px-4 py-2 text-sm font-semibold">Property</summary>
+      <div class="px-4 pb-3 grid gap-x-4 gap-y-2 sm:grid-cols-3">
+        {% for it in sec_property %}
+        <label class="block text-xs text-slate-600">
+          {% if it.flag %}<span class="required-flag text-red-600 font-bold" title="Required for IRR modeling">!</span> {% endif %}{{ it.label }}
+          {{ it.bf }}
+        </label>
+        {% endfor %}
+      </div>
+    </details>
+
+    <details open class="bg-white border border-slate-200 rounded-lg">
+      <summary class="cursor-pointer select-none px-4 py-2 text-sm font-semibold">Size &amp; Occupancy</summary>
+      <div class="px-4 pb-3 grid gap-x-4 gap-y-2 sm:grid-cols-3">
+        {% for it in sec_size %}
+        <label class="block text-xs text-slate-600">
+          {% if it.flag %}<span class="required-flag text-red-600 font-bold" title="Required for IRR modeling">!</span> {% endif %}{{ it.label }}
+          {{ it.bf }}
+        </label>
+        {% endfor %}
+      </div>
+      <div class="px-4 pb-3">
+        <div class="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1">Replacement Cost Benchmarks ($/SF)</div>
+        <div class="overflow-x-auto">
+          <table class="text-sm border-collapse">
+            <thead>
+              <tr class="text-left text-xs text-slate-600 border-b border-slate-200">
+                <th class="py-1 pr-3">Facility Type</th>
+                <th class="py-1 pr-2">Hard Low</th><th class="py-1 pr-2">Hard High</th>
+                <th class="py-1 pr-2">Site Low</th><th class="py-1 pr-2">Site High</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for r in rc_rows %}
+              <tr class="border-b border-slate-100">
+                <td class="py-1 pr-3 whitespace-nowrap text-xs text-slate-600">{{ r.label }}</td>
+                {% for cell in r.cells %}<td class="py-1 pr-2 w-28">{{ cell }}</td>{% endfor %}
+              </tr>
+              {% endfor %}
+              <tr>
+                <td class="py-1 pr-3 whitespace-nowrap text-xs text-slate-600">Soft Cost % / Dev Profit %</td>
+                {% for cell in rc_soft %}<td class="py-1 pr-2 w-28">{{ cell }}</td>{% endfor %}
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </details>
+
+    <details class="bg-white border border-slate-200 rounded-lg">
+      <summary class="cursor-pointer select-none px-4 py-2 text-sm font-semibold">Unit Mix</summary>
+      <div class="px-4 pb-3">
+        <div class="overflow-x-auto">
+          <table class="text-sm border-collapse">
+            <thead>
+              <tr class="text-left text-xs text-slate-600 border-b border-slate-200">
+                <th class="py-1 pr-2">Unit Size</th><th class="py-1 pr-2">Count</th>
+                <th class="py-1 pr-2">Sq Ft</th><th class="py-1 pr-2">Rent/Mo ($)</th>
+                <th class="py-1 pr-2">Climate Ctrl</th><th class="py-1"></th>
+              </tr>
+            </thead>
+            <tbody id="um-body">
+              {% for row in unit_rows %}{% include "webapp/_unit_mix_row.html" %}{% endfor %}
+            </tbody>
+          </table>
+        </div>
+        <button type="button" hx-get="{% url 'unit-mix-row' %}" hx-target="#um-body" hx-swap="beforeend"
+                class="mt-2 text-sm text-accent-700 hover:underline">+ Add row</button>
+        <p class="mt-1 text-xs text-slate-500">Rows with a zero count are dropped on save.</p>
+      </div>
+    </details>
+
+    <details open class="bg-white border border-slate-200 rounded-lg">
+      <summary class="cursor-pointer select-none px-4 py-2 text-sm font-semibold">Income &amp; Expenses</summary>
+      <div class="px-4 pb-3 grid gap-4 lg:grid-cols-2">
+        <div class="grid gap-x-4 gap-y-2 sm:grid-cols-2 content-start">
+          {% for it in sec_income %}
+          <label class="block text-xs text-slate-600">
+            {% if it.flag %}<span class="required-flag text-red-600 font-bold" title="Required for IRR modeling">!</span> {% endif %}{{ it.label }}
+            {{ it.bf }}
+          </label>
+          {% endfor %}
+        </div>
+        <div>
+          <div class="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1">Expense Benchmarks (state-adjusted, $/NRSF/yr)</div>
+          <div class="overflow-x-auto">
+            <table class="w-full text-sm border-collapse">
+              <thead>
+                <tr class="text-left text-xs text-slate-600 border-b border-slate-200">
+                  <th class="py-1 pr-3">Category</th><th class="py-1 pr-2 text-right">CIM $/SF</th>
+                  <th class="py-1 pr-2 text-right">Low</th><th class="py-1 text-right">High</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for r in benchmark_rows %}
+                <tr class="border-b border-slate-100">
+                  <td class="py-1 pr-3 whitespace-nowrap text-xs text-slate-600">{{ r.category }}</td>
+                  <td class="py-1 pr-2 text-right">{% if r.cim %}${{ r.cim|floatformat:2 }}{% else %}&mdash;{% endif %}</td>
+                  <td class="py-1 pr-2 text-right">${{ r.low|floatformat:2 }}</td>
+                  <td class="py-1 text-right">${{ r.high|floatformat:2 }}</td>
+                </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </details>
+
+    <details class="bg-white border border-slate-200 rounded-lg">
+      <summary class="cursor-pointer select-none px-4 py-2 text-sm font-semibold">Scenarios</summary>
+      <div class="px-4 pb-3 space-y-4">
+        <div class="overflow-x-auto">
+          <table class="text-sm border-collapse">
+            <thead>
+              <tr class="text-left text-xs text-slate-600 border-b border-slate-200">
+                <th class="py-1 pr-3">Scenario Parameter</th>
+                <th class="py-1 pr-2">Bear</th><th class="py-1 pr-2">Base</th><th class="py-1 pr-2">Bull</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for r in scenario_rows %}
+              <tr class="border-b border-slate-100">
+                <td class="py-1 pr-3 whitespace-nowrap text-xs text-slate-600">{{ r.label }}</td>
+                {% for cell in r.cells %}<td class="py-1 pr-2 w-32">{{ cell }}</td>{% endfor %}
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        <details>
+          <summary class="cursor-pointer select-none text-sm font-medium text-slate-700">Value-Add Assumptions</summary>
+          <div class="overflow-x-auto mt-2">
+            <table class="text-sm border-collapse">
+              <thead>
+                <tr class="text-left text-xs text-slate-600 border-b border-slate-200">
+                  <th class="py-1 pr-3">VA Parameter</th>
+                  <th class="py-1 pr-2">Bear</th><th class="py-1 pr-2">Base</th><th class="py-1 pr-2">Bull</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for r in va_rows %}
+                <tr class="border-b border-slate-100">
+                  <td class="py-1 pr-3 whitespace-nowrap text-xs text-slate-600">{{ r.label }}</td>
+                  {% for cell in r.cells %}<td class="py-1 pr-2 w-32">{{ cell }}</td>{% endfor %}
+                </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        </details>
+        <label class="block text-xs text-slate-600 max-w-[12rem]">Solver Target IRR (%)
+          {{ solver_field }}
+        </label>
+      </div>
+    </details>
+
+    <details open class="bg-white border border-slate-200 rounded-lg">
+      <summary class="cursor-pointer select-none px-4 py-2 text-sm font-semibold">Demographics</summary>
+      <div class="px-4 pb-3 grid gap-x-4 gap-y-2 sm:grid-cols-3">
+        {% for it in sec_demo %}
+        <label class="block text-xs text-slate-600">
+          {% if it.flag %}<span class="required-flag text-red-600 font-bold" title="Required for IRR modeling">!</span> {% endif %}{{ it.label }}
+          {{ it.bf }}
+        </label>
+        {% endfor %}
+      </div>
+    </details>
+
+    <div class="flex items-center gap-3">
+      <button type="submit" class="bg-accent-700 text-white text-sm px-4 py-1.5 rounded">Save Assumptions</button>
+      <span class="text-xs text-slate-500">Run Analysis lands in Phase 4 — saved assumptions will feed it.</span>
+    </div>
+  </form>
+</div>
+{% endblock %}

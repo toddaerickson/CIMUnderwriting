@@ -13,3 +13,9 @@ STORAGES = {
 # behavior) is reachable. Same override managertools' settings_test.py makes
 # via IS_PROD.
 SECURE_SSL_REDIRECT = False
+
+# Extraction runs inline: a daemon thread opens its own connection to the
+# shared in-memory test DB and its writes commit outside the test
+# transaction (same reasoning as managertools' COACHING_ENABLED note —
+# spawned-thread writes can leak past rollback into unrelated tests).
+EXTRACT_USE_THREAD = False

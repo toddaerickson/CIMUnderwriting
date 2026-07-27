@@ -1,10 +1,21 @@
 import logging
 import os
+import shutil
 
+from django.conf import settings
+from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.db import connection
-from django.http import JsonResponse
-from django.shortcuts import render
+from django.http import HttpResponse, JsonResponse
+from django.shortcuts import get_object_or_404, redirect, render
+from django.urls import reverse
+from django.utils import timezone
+from django.views.decorators.http import require_POST
+from django_htmx.http import HttpResponseClientRedirect
+
+from webapp import forms as assumptions_forms
+from webapp import services
+from webapp.models import Deal
 
 logger = logging.getLogger("cim_analyst.web")
 
@@ -37,8 +48,6 @@ def health(request):
 
 @login_required
 def home(request):
-    from django.shortcuts import redirect
-
     return redirect("deal-list")
 
 
@@ -68,3 +77,150 @@ def deal_list(request):
         "recommendation_options": _options("recommendation"),
         "asset_type_options": _options("asset_type"),
     })
+
+
+# ── Phase 3: extraction status polling ──────────────────────────────
+
+def _extract_state(deal) -> str:
+    """'done' | 'failed' | 'running' — a stamp older than the timeout counts
+    as failed so the UI never shows an eternal spinner."""
+    if deal.extract_status == "done":
+        return "done"
+    if deal.extract_status == "failed":
+        return "failed"
+    if deal.extract_requested_at and (
+            timezone.now() - deal.extract_requested_at
+    ).total_seconds() > services.EXTRACT_TIMEOUT_SECONDS:
+        return "failed"
+    return "running"
+
+
+@login_required
+def extract_status(request, pk):
+    deal = get_object_or_404(Deal, pk=pk)
+    state = _extract_state(deal)
+    if state == "done":
+        return HttpResponseClientRedirect(reverse("deal-assumptions", args=[deal.pk]))
+    return render(request, "webapp/_extract_status.html",
+                  {"deal": deal, "failed": state == "failed"})
+
+
+@login_required
+@require_POST
+def extract_retry(request, pk):
+    deal = get_object_or_404(Deal, pk=pk)
+    if deal.extract_status == "" or not deal.input_files:
+        messages.error(request, "No uploaded CIM to re-extract.")
+        return redirect("deal-list")
+    services.start_extract(deal)
+    return redirect("deal-assumptions", pk=deal.pk)
+
+
+@login_required
+def deal_assumptions(request, pk):
+    deal = get_object_or_404(Deal, pk=pk)
+    if deal.extract_status == "" and not deal.cim_json:
+        return render(request, "webapp/assumptions_wait.html",
+                      {"deal": deal, "unavailable": True})
+    state = _extract_state(deal)
+    if state != "done":
+        return render(request, "webapp/assumptions_wait.html",
+                      {"deal": deal, "failed": state == "failed"})
+    report = deal.extraction_report or {}
+    missing_required = set(report.get("missing", [])) & assumptions_forms.REQUIRED_FIELDS
+    if request.method == "POST":
+        form = assumptions_forms.AssumptionsForm(request.POST)
+        if form.is_valid():
+            deal.assumption_overrides = assumptions_forms.build_overrides(
+                form.cleaned_data, request.POST, deal)
+            deal.save(update_fields=["assumption_overrides", "updated_at"])
+            messages.success(request, "Assumptions saved.")
+            return redirect("deal-assumptions", pk=deal.pk)
+        rows = assumptions_forms.parse_unit_mix(request.POST) or []
+        status = 422
+    else:
+        form = assumptions_forms.AssumptionsForm(
+            initial=assumptions_forms.build_initial(deal))
+        rows = assumptions_forms.unit_mix_rows(deal)
+        status = 200
+    f = assumptions_forms
+    return render(request, "webapp/assumptions.html", {
+        "deal": deal, "form": form, "report": report,
+        "missing_fields": report.get("missing", []),
+        "warnings": deal.extract_warnings,
+        "unit_rows": rows,
+        "benchmark_rows": services.expense_benchmark_rows(deal),
+        "sec_property": f.section_fields(form, f.SECTION_PROPERTY, missing_required),
+        "sec_size": f.section_fields(form, f.SECTION_SIZE, missing_required),
+        "sec_income": f.section_fields(form, f.SECTION_INCOME, missing_required),
+        "sec_demo": f.section_fields(form, f.SECTION_DEMOGRAPHICS, missing_required),
+        "scenario_rows": f.scenario_grid(form),
+        "va_rows": f.va_grid(form),
+        "rc_rows": f.rc_grid(form),
+        "rc_soft": [form["rc_soft_cost_pct_low"], form["rc_soft_cost_pct_high"],
+                    form["rc_dev_profit_pct_low"], form["rc_dev_profit_pct_high"]],
+        "solver_field": form["solver_target_irr"],
+    }, status=status)
+
+
+@login_required
+def unit_mix_row(request):
+    return render(request, "webapp/_unit_mix_row.html", {"row": {}})
+
+
+# ── Phase 3: upload flow ─────────────────────────────────────────────
+
+@login_required
+def analyze(request):
+    if request.method != "POST":
+        return render(request, "webapp/analyze.html")
+    errors = []
+    cim = request.FILES.get("cim")
+    if not cim:
+        errors.append("A CIM PDF is required.")
+    elif not cim.name.lower().endswith(".pdf"):
+        errors.append("The CIM must be a .pdf file.")
+    optional = {}
+    for key, label in (("rent_roll", "Rent roll"), ("financials", "Financials")):
+        f = request.FILES.get(key)
+        optional[key] = f
+        if f is not None:
+            ext = os.path.splitext(f.name)[1].lower()
+            if ext not in services.ALLOWED_DOC_EXTS:
+                errors.append(f"{label}: unsupported file type {ext or '(none)'}.")
+    for f in [f for f in (cim, optional["rent_roll"], optional["financials"]) if f]:
+        if f.size > services.MAX_UPLOAD_BYTES:
+            errors.append(f"{f.name} is larger than 200 MB.")
+    if errors:
+        return render(request, "webapp/analyze.html", {"errors": errors}, status=422)
+    dupes = services.find_upload_duplicates(os.path.basename(cim.name))
+    try:
+        deal = services.create_deal_from_upload(
+            cim, rent_roll=optional["rent_roll"], financials=optional["financials"])
+    except ValueError as e:
+        return render(request, "webapp/analyze.html", {"errors": [str(e)]}, status=422)
+    services.start_extract(deal)
+    if dupes:
+        return render(request, "webapp/analyze_dupes.html",
+                      {"deal": deal, "dupes": dupes})
+    return redirect("deal-assumptions", pk=deal.pk)
+
+
+@login_required
+@require_POST
+def deal_discard(request, pk):
+    """Delete a just-uploaded deal (dupe-confirm page). Refuses imported
+    deals (no extraction state) and anything that already produced
+    analysis outputs — those folders hold real history."""
+    deal = get_object_or_404(Deal, pk=pk)
+    deals_root = os.path.realpath(settings.CIM_DEALS_DIR)
+    target = os.path.realpath(deal.deal_dir) if deal.deal_dir else ""
+    if (deal.extract_status == "" or deal.memo_filename or deal.excel_filename
+            or not target.startswith(deals_root + os.sep)):
+        messages.error(request, "This deal can't be discarded from here.")
+        return redirect("deal-list")
+    shutil.rmtree(target, ignore_errors=True)
+    name = deal.property_name
+    deal.delete()
+    messages.success(request, f"Discarded upload “{name}”.")
+    return redirect("deal-list")

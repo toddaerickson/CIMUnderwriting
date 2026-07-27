@@ -46,7 +46,10 @@
         <tbody>
           {% for d in deals %}
           <tr class="border-b border-slate-100 hover:bg-slate-50">
-            <td class="py-1.5 pl-3 pr-3 font-medium">{{ d.property_name }}</td>
+            <td class="py-1.5 pl-3 pr-3 font-medium">
+              {% if d.cim_json %}<a href="{% url 'deal-assumptions' d.pk %}" class="text-accent-700 hover:underline">{{ d.property_name }}</a>
+              {% else %}{{ d.property_name }}{% endif %}
+            </td>
             <td class="py-1.5 pr-3">{{ d.city }}</td>
             <td class="py-1.5 pr-3">{{ d.state }}</td>
             <td class="py-1.5 pr-3">{{ d.asset_type }}</td>

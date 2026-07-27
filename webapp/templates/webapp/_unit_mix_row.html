@@ -1,0 +1,13 @@
+<tr class="border-b border-slate-100">
+  <td class="py-1 pr-2"><input type="text" name="um_label" value="{{ row.size_label|default:'' }}" aria-label="Unit size" class="w-24 border border-slate-300 rounded px-2 py-1 text-sm"></td>
+  <td class="py-1 pr-2"><input type="number" name="um_count" value="{{ row.count|default:'' }}" min="0" step="1" aria-label="Count" class="w-20 border border-slate-300 rounded px-2 py-1 text-sm"></td>
+  <td class="py-1 pr-2"><input type="number" name="um_sf" value="{{ row.sf|default:'' }}" min="0" step="any" aria-label="Square feet" class="w-24 border border-slate-300 rounded px-2 py-1 text-sm"></td>
+  <td class="py-1 pr-2"><input type="number" name="um_rate" value="{{ row.rate|default:'' }}" min="0" step="any" aria-label="Monthly rent" class="w-24 border border-slate-300 rounded px-2 py-1 text-sm"></td>
+  <td class="py-1 pr-2">
+    <select name="um_cc" aria-label="Climate controlled" class="border border-slate-300 rounded px-2 py-1 text-sm">
+      <option value="0" {% if not row.climate_controlled %}selected{% endif %}>No</option>
+      <option value="1" {% if row.climate_controlled %}selected{% endif %}>Yes</option>
+    </select>
+  </td>
+  <td class="py-1"><button type="button" onclick="this.closest('tr').remove()" aria-label="Remove row" class="text-slate-500 hover:text-red-600 text-sm px-2 py-1">&#10005;</button></td>
+</tr>

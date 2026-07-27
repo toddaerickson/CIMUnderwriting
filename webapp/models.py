@@ -24,6 +24,17 @@ class Deal(models.Model):
     memo_filename = models.CharField(max_length=300, blank=True, default="")
     excel_filename = models.CharField(max_length=300, blank=True, default="")
     input_files = models.JSONField(default=list, blank=True)
+
+    # ── Phase 3: web upload + extraction state ──
+    # ""=imported (no snapshot), then pending → running → done|failed.
+    extract_status = models.CharField(max_length=10, blank=True, default="")
+    extract_requested_at = models.DateTimeField(null=True, blank=True)
+    extract_error = models.TextField(blank=True, default="")
+    extract_warnings = models.JSONField(default=list, blank=True)
+    cim_json = models.JSONField(null=True, blank=True)
+    extraction_report = models.JSONField(null=True, blank=True)
+    assumption_overrides = models.JSONField(default=dict, blank=True)
+
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
