@@ -93,14 +93,12 @@ def test_json_safe_stringifies_unknown_objects():
 
 
 def test_patched_replacement_cost_mutates_in_place_and_restores():
-    # analysis.physical holds the dict OBJECT from import time — the
-    # patch must be visible through that binding, then fully restored.
     from analysis.physical import REPLACEMENT_COST as bound
-    from webapp.services import _patched_replacement_cost
+    from webapp.services import _patched_config
 
     original = bound["ss_driveup_per_sf"]
-    with _patched_replacement_cost({"ss_driveup_per_sf": [100, 120],
-                                    "not_a_real_key": [1, 2]}):
+    with _patched_config({"REPLACEMENT_COST": {"ss_driveup_per_sf": [100, 120],
+                                               "not_a_real_key": [1, 2]}}):
         assert tuple(bound["ss_driveup_per_sf"]) == (100, 120)
         assert "not_a_real_key" not in bound
     assert bound["ss_driveup_per_sf"] == original
@@ -108,11 +106,11 @@ def test_patched_replacement_cost_mutates_in_place_and_restores():
 
 def test_patched_replacement_cost_restores_on_exception():
     from analysis.physical import REPLACEMENT_COST as bound
-    from webapp.services import _patched_replacement_cost
+    from webapp.services import _patched_config
 
     original = bound["ss_driveup_per_sf"]
     with pytest.raises(RuntimeError):
-        with _patched_replacement_cost({"ss_driveup_per_sf": [100, 120]}):
+        with _patched_config({"REPLACEMENT_COST": {"ss_driveup_per_sf": [100, 120]}}):
             raise RuntimeError("boom")
     assert bound["ss_driveup_per_sf"] == original
 
@@ -139,11 +137,11 @@ def test_engine_end_to_end_with_overrides(tmp_path, monkeypatch):
     data.comp_db binds COMP_DB_PATH at import, so patch that module's name."""
     monkeypatch.setattr("data.comp_db.COMP_DB_PATH", str(tmp_path / "comps.db"))
     from gui.engine import AnalysisResult, run_analysis
-    from webapp.services import _patched_replacement_cost
+    from webapp.services import _patched_config
 
     result = AnalysisResult(pdf_path=str(tmp_path / "expo.pdf"))
     result.cim_data = _sample_cim()
-    with _patched_replacement_cost({"ss_driveup_per_sf": [100, 120]}):
+    with _patched_config({"REPLACEMENT_COST": {"ss_driveup_per_sf": [100, 120]}}):
         result = run_analysis(result, output_dir=str(tmp_path),
                               solver_target_irr=0.12)
     assert result.max_offer["achieved_irr"] == pytest.approx(0.12, abs=0.005)

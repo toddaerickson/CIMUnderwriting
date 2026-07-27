@@ -16,7 +16,7 @@ from contextlib import contextmanager
 from enum import Enum
 
 from django.conf import settings
-from django.db import transaction
+from django.db import models, transaction
 from django.utils import timezone
 
 import config as cfg
@@ -86,29 +86,137 @@ def json_safe(obj):
 
 # ── Per-run config overrides ────────────────────────────────────────
 
-# analysis.physical binds the REPLACEMENT_COST dict OBJECT at import
-# (`from config import REPLACEMENT_COST`), so per-deal overrides must
-# mutate that shared dict in place and restore it afterwards. The lock
-# serializes analysis runs so patched config never leaks across deals.
-_ORIG_REPLACEMENT_COST = copy.deepcopy(cfg.REPLACEMENT_COST)
+# Most analysis modules bind these dict OBJECTS at import time
+# (`from config import GATES` etc.), so overrides must mutate the shared
+# dicts in place and restore them afterwards. The lock serializes
+# analysis runs within this process so patched config never leaks
+# across deals. (The lock is per-process: two gunicorn workers can run
+# two analyses concurrently, each patching its own config module copy —
+# safe by construction.)
+_PATCHED_DICTS = ("GATES", "EXPENSE_BENCHMARKS", "REPLACEMENT_COST",
+                  "SCENARIO_DEFAULTS", "VALUE_ADD_SCENARIOS",
+                  "VALUE_ADD_TRIGGERS")
+_ORIG_CONFIG = {n: copy.deepcopy(getattr(cfg, n)) for n in _PATCHED_DICTS}
 _ANALYSIS_LOCK = threading.Lock()
+
+# analysis/physical.py reads these legacy alias keys at call time; keep
+# them in lockstep whenever the canonical key is patched (the Streamlit
+# editor did this sync; the per-deal RC path previously missed it).
+_RC_ALIAS_SYNC = {"ss_driveup_per_sf": "non_cc_per_sf",
+                  "ss_enclosed_per_sf": "cc_per_sf",
+                  "ss_driveup_site_per_sf": "site_work_per_sf"}
+
+
+def _merge_patch(targets: dict, patch: dict) -> None:
+    """Apply {constant: {key: value}} (scenario tops nest one level
+    deeper) into `targets`' dicts, mutating them in place. Unknown keys
+    are ignored; RC alias keys are kept in sync with their canonical
+    source."""
+    for name, changes in patch.items():
+        target = targets.get(name)
+        if target is None:
+            continue
+        for k, v in changes.items():
+            if isinstance(v, dict):                  # scenario param dicts
+                if k in target:
+                    target[k].update(v)
+            elif k in _ORIG_CONFIG[name]:
+                target[k] = tuple(v) if isinstance(v, (list, tuple)) else v
+        if name == "REPLACEMENT_COST":
+            for src, alias in _RC_ALIAS_SYNC.items():
+                if src in changes:
+                    target[alias] = target[src]
 
 
 @contextmanager
-def _patched_replacement_cost(overrides):
-    """Apply {key: [low, high]} deltas to config.REPLACEMENT_COST in
-    place; unknown keys ignored. Caller must hold _ANALYSIS_LOCK."""
-    if not overrides:
+def _patched_config(patch):
+    """In-place config mutation for one analysis run. Caller must hold
+    _ANALYSIS_LOCK. Never rebinds a config attr — importers hold the
+    original dict objects."""
+    if not patch:
         yield
         return
+    touched = [n for n in patch if n in _PATCHED_DICTS]
     try:
-        cfg.REPLACEMENT_COST.update(
-            {k: tuple(v) for k, v in overrides.items()
-             if k in _ORIG_REPLACEMENT_COST})
+        _merge_patch({n: getattr(cfg, n) for n in touched}, patch)
         yield
     finally:
-        cfg.REPLACEMENT_COST.clear()
-        cfg.REPLACEMENT_COST.update(copy.deepcopy(_ORIG_REPLACEMENT_COST))
+        for name in touched:
+            live = getattr(cfg, name)
+            live.clear()
+            live.update(copy.deepcopy(_ORIG_CONFIG[name]))
+
+
+def override_precedence(row):
+    """Within one (key, scope) lane: later effective_date wins, then
+    higher pk. THE single definition — the resolver's sort and the
+    settings page's active/superseded badges both use it, so the
+    tie-break can never drift between them (review finding)."""
+    return (row.effective_date, row.pk)
+
+
+def resolve_config_overrides(asset_type: str, on_date) -> dict:
+    """{dotted_key: value} effective for (asset_type, on_date).
+    Precedence: asset-specific beats global regardless of dates; then
+    override_precedence. Resolved in Python so SQLite and Postgres
+    behave identically."""
+    from webapp.models import ConfigOverride
+
+    rows = list(ConfigOverride.objects.filter(effective_date__lte=on_date)
+                .filter(models.Q(asset_type="") |
+                        models.Q(asset_type=asset_type or "")))
+    rows.sort(key=lambda r: (r.key, r.asset_type != "")
+              + override_precedence(r))
+    return {r.key: r.value for r in rows}      # winner lands last per key
+
+
+def build_config_patch(deltas: dict):
+    """Dotted-key deltas → (patch for _patched_config, solver_target_irr
+    or None, skipped_keys). Keys config.py no longer defines are logged,
+    skipped, and RETURNED — the worker stamps them as config_skipped so
+    the run record never claims a threshold the engine didn't see (an
+    old override row must never crash a run, and never lie either)."""
+    from registry import ScenarioType
+    from webapp.forms import override_key_registry
+
+    registry = override_key_registry()
+    patch, solver_irr, skipped = {}, None, []
+    for key, value in deltas.items():
+        if key not in registry:
+            logger.warning("config override for unknown key %r skipped", key)
+            skipped.append(key)
+            continue
+        if key == "SOLVER_TARGET_IRR":
+            solver_irr = float(value)
+            continue
+        parts = key.split(".")
+        if parts[0] in ("SCENARIO_DEFAULTS", "VALUE_ADD_SCENARIOS"):
+            scen = ScenarioType(parts[1])
+            patch.setdefault(parts[0], {}).setdefault(scen, {})[
+                parts[2]] = float(value)
+        else:
+            patch.setdefault(parts[0], {})[parts[1]] = value
+    return patch, solver_irr, skipped
+
+
+def effective_config(asset_type: str = "", on_date=None) -> dict:
+    """Deep-copied config constants with the effective ConfigOverride
+    deltas applied — the baseline the settings page displays and the
+    assumptions editor diffs against. Never mutates the config module.
+
+    Copies from _ORIG_CONFIG, NOT the live module: a request thread can
+    land here while an analysis run holds the live dicts patched with
+    ANOTHER deal's values (2 workers × 4 threads) — copying the live
+    module would contaminate the baseline (review finding). SOLVER_TARGET_IRR
+    is never patched in place, so the live read is safe."""
+    deltas = resolve_config_overrides(
+        asset_type, on_date or timezone.localdate())
+    patch, solver_irr, _skipped = build_config_patch(deltas)
+    eff = {n: copy.deepcopy(_ORIG_CONFIG[n]) for n in _PATCHED_DICTS}
+    _merge_patch(eff, patch)
+    eff["SOLVER_TARGET_IRR"] = (solver_irr if solver_irr is not None
+                                else cfg.SOLVER_TARGET_IRR)
+    return eff
 
 
 # ── Background extraction ───────────────────────────────────────────
@@ -318,14 +426,44 @@ def _analysis_worker(run_pk):
                 progress_step=step, progress_total=total,
                 progress_msg=str(msg)[:200])
 
+        # Global ConfigOverride deltas for this deal's asset type today;
+        # per-deal assumption overrides compose on top (per-deal wins).
+        config_deltas = resolve_config_overrides(
+            deal.asset_type, timezone.localdate())
+        # Per-deal scenario/VA sections are FULL 3×6 snapshots that the
+        # engine applies wholesale (custom_scenarios or DEFAULTS), so
+        # global scenario deltas can't reach those runs — drop them from
+        # patch AND stamp rather than record deltas that never applied
+        # (Design Decision 6).
+        for section, prefix in (("scenario_overrides", "SCENARIO_DEFAULTS."),
+                                ("va_scenario_overrides",
+                                 "VALUE_ADD_SCENARIOS.")):
+            if overrides.get(section):
+                config_deltas = {k: v for k, v in config_deltas.items()
+                                 if not k.startswith(prefix)}
+        patch, cfg_solver_irr, skipped = build_config_patch(config_deltas)
+        rc = overrides.get("replacement_cost_overrides")
+        if rc:
+            patch.setdefault("REPLACEMENT_COST", {}).update(rc)
+        solver_irr = overrides.get("solver_target_irr") or cfg_solver_irr
+        # Stamped BEFORE the run so even failed runs record what they
+        # attempted — past analyses keep the thresholds they ran under.
+        # Only deltas the engine will actually see go under "config";
+        # unknown-key rows are surfaced as config_skipped, not hidden in
+        # a daemon-thread log (Design Decision 13).
+        applied = {k: v for k, v in config_deltas.items() if k not in skipped}
+        AnalysisRun.objects.filter(pk=run_pk).update(
+            applied_overrides=json_safe(
+                {"config": applied, "config_skipped": skipped,
+                 "assumptions": overrides}))
+
         with _ANALYSIS_LOCK:
-            with _patched_replacement_cost(
-                    overrides.get("replacement_cost_overrides")):
+            with _patched_config(patch):
                 result = run_analysis(
                     result, progress=_progress, output_dir=deal.deal_dir,
                     custom_scenarios=overrides.get("scenario_overrides"),
                     custom_va_scenarios=overrides.get("va_scenario_overrides"),
-                    solver_target_irr=overrides.get("solver_target_irr"),
+                    solver_target_irr=solver_irr,
                 )
 
         meta = build_deal_meta(cim, result, deal.deal_dir,
