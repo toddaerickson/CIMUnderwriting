@@ -72,3 +72,20 @@ def test_import_deals_skips_malformed_folder(tmp_path, settings):
     assert Deal.objects.count() == 1
     d = Deal.objects.get()
     assert d.deal_id == "zzz-good"
+
+
+@pytest.mark.django_db
+def test_deal_list_filters(client, django_user_model):
+    from webapp.models import Deal
+
+    user = django_user_model.objects.create_user(username="op", password="x")
+    client.force_login(user)
+    Deal.objects.create(deal_id="alpha", property_name="Alpha Storage",
+                        state="TX", recommendation="PURSUE")
+    Deal.objects.create(deal_id="bravo", property_name="Bravo Storage",
+                        state="CO", recommendation="DECLINE")
+
+    resp = client.get("/deals/?state=TX")
+    assert resp.status_code == 200
+    assert b"Alpha Storage" in resp.content
+    assert b"Bravo Storage" not in resp.content

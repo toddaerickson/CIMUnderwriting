@@ -101,8 +101,11 @@ def test_operator_can_log_in_end_to_end(client, settings, monkeypatch):
     assert resp.status_code == 302
     assert resp.url == "/deals/"
 
-    resp = client.get("/")
+    # home redirects straight to the deal pipeline (Task 8); follow to
+    # confirm the authenticated session actually reaches a rendered page.
+    resp = client.get("/", follow=True)
     assert resp.status_code == 200
+    assert resp.redirect_chain == [("/deals/", 302)]
 
 
 @pytest.mark.django_db

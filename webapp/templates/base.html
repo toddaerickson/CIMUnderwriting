@@ -66,10 +66,8 @@
             New Analysis
             <span class="text-[10px] uppercase tracking-wide text-slate-300">soon</span>
           </span>
-          <span class="flex items-center justify-between px-2 py-1.5 md:py-0.5 rounded text-slate-400 cursor-not-allowed">
-            Deal Pipeline
-            <span class="text-[10px] uppercase tracking-wide text-slate-300">soon</span>
-          </span>
+          <a href="{% url 'deal-list' %}"
+             class="block px-2 py-1.5 md:py-0.5 rounded {% if request.resolver_match.url_name == 'deal-list' %}bg-accent-700 text-white{% else %}hover:bg-slate-100{% endif %}">Deal Pipeline</a>
         </div>
 
         <div>
