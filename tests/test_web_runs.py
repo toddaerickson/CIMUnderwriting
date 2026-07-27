@@ -301,3 +301,30 @@ def test_worker_progress_updates_row(deals_dir, fake_run):
     run = _start_run(deal)
     assert run.progress_step == 9
     assert run.progress_msg == "Generating memo & model..."
+
+
+@pytest.mark.django_db
+def test_worker_deal_refresh_failure_rolls_back_run_done_flip(
+        deals_dir, fake_run, monkeypatch):
+    """A failure AFTER the AnalysisRun 'done' flip is queued (while
+    building/applying deal_updates) must not leave the row stuck
+    status='failed' while still carrying done-looking result_json /
+    finished_at / filenames — that combination reads as done to any
+    poller that checks status first. The done-flip and the Deal
+    refresh must be all-or-nothing."""
+    def boom(cim):
+        raise RuntimeError("asset-type blew up")
+
+    monkeypatch.setattr("webapp.services.detect_asset_type", boom)
+    deal = _make_extracted_deal(deals_dir)
+    run = _start_run(deal)
+
+    assert run.status == "failed"
+    assert "asset-type blew up" in run.error
+    # Rolled back, not just re-flagged: no done-looking payload survives.
+    assert run.result_json is None
+    assert run.memo_filename == ""
+    assert run.excel_filename == ""
+    assert run.template_filename == ""
+    deal.refresh_from_db()
+    assert deal.recommendation == "N/A"  # deal row untouched too

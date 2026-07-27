@@ -16,6 +16,7 @@ from contextlib import contextmanager
 from enum import Enum
 
 from django.conf import settings
+from django.db import transaction
 from django.utils import timezone
 
 import config as cfg
@@ -350,35 +351,43 @@ def _analysis_worker(run_pk):
             "expense_ratio": result.expense_ratio,
             "errors": result.errors,
         })
-        AnalysisRun.objects.filter(pk=run_pk).update(
-            status="done", finished_at=timezone.now(), result_json=payload,
-            error="",
-            memo_filename=os.path.basename(result.memo_path or ""),
-            excel_filename=os.path.basename(result.excel_path or ""),
-            template_filename=os.path.basename(result.template_path or ""),
-        )
+        # Both writes below must land together: if anything past the
+        # AnalysisRun "done" flip raises (e.g. building deal_updates),
+        # the outer except flips status to "failed" but can't un-write
+        # a result_json/finished_at/filenames that already committed —
+        # a "failed" row carrying done-looking data. atomic() makes the
+        # flip and the Deal refresh all-or-nothing so a failure here
+        # rolls back the "done" write too, leaving a clean "failed" row.
+        with transaction.atomic():
+            AnalysisRun.objects.filter(pk=run_pk).update(
+                status="done", finished_at=timezone.now(), result_json=payload,
+                error="",
+                memo_filename=os.path.basename(result.memo_path or ""),
+                excel_filename=os.path.basename(result.excel_path or ""),
+                template_filename=os.path.basename(result.template_path or ""),
+            )
 
-        deal_updates = {
-            "recommendation": (meta.get("recommendation") or "N/A")[:40],
-            "estimated_fair_value": meta.get("estimated_fair_value"),
-            "analysis_date": datetime.date.fromisoformat(meta["analysis_date"]),
-            "memo_filename": os.path.basename(result.memo_path or ""),
-            "excel_filename": os.path.basename(result.excel_path or ""),
-            "asset_type": detect_asset_type(cim),
-        }
-        if cim.property_name:
-            deal_updates["property_name"] = cim.property_name[:200]
-        if cim.city:
-            deal_updates["city"] = cim.city[:100]
-        if cim.state:
-            deal_updates["state"] = cim.state[:2].upper()
-        if cim.nrsf:
-            deal_updates["nrsf"] = cim.nrsf
-        if cim.acreage:
-            deal_updates["acreage"] = cim.acreage
-        if cim.asking_price:
-            deal_updates["asking_price"] = cim.asking_price
-        Deal.objects.filter(pk=deal.pk).update(**deal_updates)
+            deal_updates = {
+                "recommendation": (meta.get("recommendation") or "N/A")[:40],
+                "estimated_fair_value": meta.get("estimated_fair_value"),
+                "analysis_date": datetime.date.fromisoformat(meta["analysis_date"]),
+                "memo_filename": os.path.basename(result.memo_path or ""),
+                "excel_filename": os.path.basename(result.excel_path or ""),
+                "asset_type": detect_asset_type(cim),
+            }
+            if cim.property_name:
+                deal_updates["property_name"] = cim.property_name[:200]
+            if cim.city:
+                deal_updates["city"] = cim.city[:100]
+            if cim.state:
+                deal_updates["state"] = cim.state[:2].upper()
+            if cim.nrsf:
+                deal_updates["nrsf"] = cim.nrsf
+            if cim.acreage:
+                deal_updates["acreage"] = cim.acreage
+            if cim.asking_price:
+                deal_updates["asking_price"] = cim.asking_price
+            Deal.objects.filter(pk=deal.pk).update(**deal_updates)
     except Exception as e:
         logger.exception("analysis worker failed for run %s", run_pk)
         AnalysisRun.objects.filter(pk=run_pk).update(
