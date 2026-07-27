@@ -15,8 +15,8 @@
         <td class="py-1.5 pl-3 pr-3 font-medium">{{ r.risk }}</td>
         <td class="py-1.5 pr-3">
           <span class="inline-block rounded px-1.5 py-0.5 text-xs font-semibold
-                {% if r.severity == 'HIGH' %}bg-red-100 text-red-800
-                {% elif r.severity == 'MEDIUM' %}bg-amber-100 text-amber-800
+                {% if r.severity_tone == 'high' %}bg-red-100 text-red-800
+                {% elif r.severity_tone == 'medium' %}bg-amber-100 text-amber-800
                 {% else %}bg-slate-100 text-slate-700{% endif %}">{{ r.severity }}</span>
         </td>
         <td class="py-1.5 pr-3 text-slate-600">{{ r.detail }}</td>

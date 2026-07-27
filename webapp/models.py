@@ -69,4 +69,4 @@ class AnalysisRun(models.Model):
         ordering = ["-created_at"]
 
     def __str__(self):
-        return f"{self.deal_id}:{self.pk} {self.status}"
+        return f"run {self.pk} ({self.status})"

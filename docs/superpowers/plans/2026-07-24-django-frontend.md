@@ -38,6 +38,7 @@
 - `Deal.Meta.ordering` — NULL `analysis_date` sorts first on Postgres, last on SQLite; switch to `F("analysis_date").desc(nulls_last=True)` so undated deals don't jump to the top at cutover.
 - Length overflow fails hard on Postgres (SQLite silently accepts): the live tree already has a 114/120-char `deal_id`, and `state` max_length=2 is guaranteed only by the parser regex — validate or widen before importing into Neon. (`import_deals` now catches `DataError` so an overflow skips the folder rather than aborting, but skipped ≠ imported.)
 - Add a `build_deal_meta` ↔ `import_deals` round-trip drift test when `webapp/services.py` absorbs the deal_manager helpers (no-drift CI guard for the meta→model key mapping).
+- `AnalysisRun` filename fields are written untruncated by the analysis worker; either truncate to 300 at write time or verify lengths before the Neon import (same class as the existing `deal_id` length item).
 
 **Analysis-layer backlog (operator, 2026-07-25 — separate from this front-end plan, do not fold into Phases 3–5):** quantify special/bonus depreciation in family office return expectations — cost-segregation allocation assumption, bonus depreciation % for the tax year, tax-shield value at assumed LP bracket, presented alongside pre-tax returns. Belongs in `analysis/`/`model/` as its own PR after the front-end port, or earlier if prioritized.
 

@@ -81,8 +81,8 @@ def returns_context(r) -> dict:
     va = r.get("va_results") or {}
     sens = r.get("sensitivity") or {}
     sens_rows = []
-    prices = sens.get("prices") or []
-    for i, row in enumerate(sens.get("grid") or []):
+    prices = sens.get("price_values") or []
+    for i, row in enumerate(sens.get("irr_grid") or []):
         price = prices[i] if i < len(prices) else None
         sens_rows.append({"price": fmt_money(price),
                           "cells": [fmt_pct(v) for v in row]})
@@ -104,8 +104,8 @@ def returns_context(r) -> dict:
         "max_offer": fmt_money((r.get("max_offer") or {}).get("max_price")),
         "va_max_offer": fmt_money((r.get("va_max_offer") or {}).get("max_price")),
         "has_va_max_offer": bool((r.get("va_max_offer") or {}).get("max_price")),
-        "has_sensitivity": bool(sens.get("grid")),
-        "sens_caps": [fmt_pct(c) for c in sens.get("exit_caps") or []],
+        "has_sensitivity": bool(sens.get("irr_grid")),
+        "sens_caps": [fmt_pct(c, digits=2) for c in sens.get("cap_values") or []],
         "sens_rows": sens_rows,
     }
 
@@ -129,5 +129,22 @@ def financials_context(r) -> dict:
     }
 
 
+_SEVERITY_TONE = {"High": "high", "Medium": "medium", "Low": "low"}
+
+
 def risks_context(r) -> dict:
-    return {"risks": (r.get("risk_analysis") or {}).get("risks") or []}
+    """Real risk items (analysis.risks.identify_risks) carry `description`
+    and title-case severities ("High"/"Medium"/"Low"). Normalize both here
+    so the template only compares against tokens this module controls."""
+    items = (r.get("risk_analysis") or {}).get("risks") or []
+    rows = []
+    for item in items:
+        severity = item.get("severity", "Low")
+        rows.append({
+            "risk": item.get("risk"),
+            "severity": severity,
+            "severity_tone": _SEVERITY_TONE.get(severity, "low"),
+            "detail": item.get("description"),
+            "mitigation": item.get("mitigation"),
+        })
+    return {"risks": rows}

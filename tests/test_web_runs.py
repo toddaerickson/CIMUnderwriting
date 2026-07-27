@@ -151,6 +151,27 @@ def test_engine_end_to_end_with_overrides(tmp_path, monkeypatch):
     assert os.path.isfile(result.excel_path)
     assert result.gate_summary["recommendation"]
 
+    # Anti-drift guard: webapp/results.py (returns_context) and
+    # output/excel_writer.py both read these exact sensitivity keys from
+    # the real engine output — pin the shape so a fixture can never
+    # silently diverge from what model/returns_model.py._build_sensitivity
+    # actually emits.
+    assert set(result.sensitivity.keys()) == {
+        "price_labels", "price_values", "cap_labels", "cap_values",
+        "irr_grid", "base_price", "base_exit_cap",
+    }
+
+    # The sample CIM (92% physical / 78% economic occupancy) trips the
+    # econ/phys spread risk, so real risk items are produced here — pin
+    # the keys and title-case severities that webapp/results.py's
+    # risks_context depends on.
+    risks = result.risk_analysis["risks"]
+    assert risks
+    for item in risks:
+        assert {"category", "risk", "description", "severity",
+                "mitigation"} <= item.keys()
+        assert item["severity"] in {"High", "Medium", "Low"}
+
 
 @pytest.fixture
 def fake_run(monkeypatch):
@@ -178,7 +199,7 @@ def fake_run(monkeypatch):
         result.gate_results = [
             {"gate": 1, "name": "Population (3-mi ≥ 50K)", "threshold": "≥ 50,000",
              "actual": "62,000", "result": "PASS", "note": "", "source": None},
-            {"gate": 2, "name": "No unproven demand", "threshold": "phys ≥ 75%",
+            {"gate": 2, "name": "No Unproven Demand", "threshold": "phys ≥ 75%",
              "actual": "92%", "result": "PASS", "note": "", "source": None},
         ]
         result.gate_summary = {"passed": 2, "failed": 0, "tbd": 0, "total": 2,
@@ -189,11 +210,15 @@ def fake_run(monkeypatch):
             "base": {"irr": float("nan"), "moic": 1.6, "yield_on_cost": 0.075},
             "bull": {"irr": 0.14, "moic": 1.9, "yield_on_cost": 0.085},
         }
-        result.sensitivity = {"prices": [3_325_000.0, 3_500_000.0, 3_675_000.0],
-                              "exit_caps": [0.055, 0.06, 0.065],
-                              "grid": [[0.11, 0.10, 0.09],
-                                       [0.10, 0.09, 0.08],
-                                       [0.09, 0.08, 0.07]]}
+        result.sensitivity = {"price_labels": ["-5.0%", "+0.0%", "+5.0%"],
+                              "price_values": [3_325_000.0, 3_500_000.0, 3_675_000.0],
+                              "cap_labels": ["5.50%", "6.00%", "6.50%"],
+                              "cap_values": [0.055, 0.06, 0.065],
+                              "irr_grid": [[0.11, 0.10, 0.09],
+                                           [0.10, 0.09, 0.08],
+                                           [0.09, 0.08, 0.07]],
+                              "base_price": 3_500_000.0,
+                              "base_exit_cap": 0.06}
         result.va_results = {
             "base": {"irr": 0.13, "moic": 1.7, "yield_on_cost": 0.08,
                      "development_spread": 0.02, "stabilized_noi": 300_000.0}}
@@ -209,8 +234,8 @@ def fake_run(monkeypatch):
             "expense_ratio_check": {"opex_revenue_ratio": 0.42},
         }
         result.risk_analysis = {"risks": [
-            {"risk": "ECRI bridge", "severity": "HIGH",
-             "detail": "Street rates falling", "mitigation": "Verify trend"}]}
+            {"category": "Market", "risk": "ECRI bridge", "severity": "High",
+             "description": "Street rates falling", "mitigation": "Verify trend"}]}
         result.adjusted_noi = 230_000.0
         result.expense_ratio = 0.42
         result.errors = ["Template generation failed: test-only"]
@@ -453,8 +478,8 @@ def test_detail_returns_tab(client, operator, deals_dir, fake_run):
     assert "14.0%" in content            # bull IRR
     assert "N/A" in content              # NaN base IRR scrubbed → N/A
     assert "$3,300,000" in content       # VA max offer
-    assert "$3,325,000" in content       # sensitivity price row
-    assert "6.0%" in content             # sensitivity cap column
+    assert "$3,325,000" in content       # sensitivity price row (price_values)
+    assert "6.00%" in content            # sensitivity cap column (cap_values, 2dp)
 
 
 @pytest.mark.django_db
@@ -466,7 +491,9 @@ def test_detail_financials_and_risks_tabs(client, operator, deals_dir, fake_run)
     assert "Insurance: understated" in fin         # dict adjustment normalized
     risks = client.get(f"/deals/{deal.pk}/?tab=risks").content.decode()
     assert "ECRI bridge" in risks
-    assert "HIGH" in risks
+    assert "Street rates falling" in risks             # description → detail column
+    assert "bg-red-100 text-red-800" in risks           # High severity → red badge tone
+    assert ">High</span>" in risks                      # badge text stays title-case
 
 
 @pytest.mark.django_db
