@@ -6,7 +6,7 @@ from django.conf import settings
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.db import connection
-from django.http import HttpResponse, JsonResponse
+from django.http import Http404, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils import timezone
@@ -14,6 +14,7 @@ from django.views.decorators.http import require_POST
 from django_htmx.http import HttpResponseClientRedirect
 
 from webapp import forms as assumptions_forms
+from webapp import results as results_ctx
 from webapp import services
 from webapp.models import AnalysisRun, Deal
 
@@ -276,7 +277,44 @@ def run_status(request, pk):
                   {"deal": deal, "run": run, "failed": state == "failed"})
 
 
+TAB_NAMES = ("summary", "returns", "financials", "risks")
+
+
 @login_required
 def deal_detail(request, pk):
     deal = get_object_or_404(Deal, pk=pk)
-    return HttpResponse(deal.property_name)  # replaced in Task 5
+    latest = deal.runs.first()
+    state = _run_state(latest)
+    done_run = latest if state == "done" else \
+        deal.runs.filter(status="done").exclude(result_json=None).first()
+    tab = request.GET.get("tab", "summary")
+    if tab not in TAB_NAMES:
+        tab = "summary"
+    ctx = {
+        "deal": deal, "run": latest, "done_run": done_run,
+        "state": state, "tab": tab,
+        "has_snapshot": bool(deal.cim_json),
+        "show_progress": state in ("running", "failed") and latest and
+                         latest.pk != (done_run.pk if done_run else None),
+        "run_failed": state == "failed",
+    }
+    if done_run:
+        r = done_run.result_json or {}
+        ctx["header"] = results_ctx.header_metrics(deal, r)
+        ctx["run_warnings"] = r.get("errors") or []
+        if tab == "summary":
+            ctx.update(results_ctx.summary_context(r))
+        elif tab == "returns":
+            ctx.update(results_ctx.returns_context(r))
+        elif tab == "financials":
+            ctx.update(results_ctx.financials_context(r))
+            ctx["benchmark_rows"] = services.expense_benchmark_rows(deal)
+        elif tab == "risks":
+            ctx.update(results_ctx.risks_context(r))
+    return render(request, "webapp/deal_detail.html", ctx)
+
+
+@login_required
+def deal_download(request, pk, kind):
+    """Stub — Task 6 wires up the real memo/excel/template file response."""
+    raise Http404

@@ -1,0 +1,31 @@
+{% if risks %}
+<div class="bg-white border border-slate-200 rounded-lg overflow-x-auto">
+  <table class="w-full text-sm border-collapse">
+    <thead>
+      <tr class="text-left border-b border-slate-300 text-xs text-slate-600">
+        <th class="py-1.5 pl-3 pr-3">Risk</th>
+        <th class="py-1.5 pr-3">Severity</th>
+        <th class="py-1.5 pr-3">Detail</th>
+        <th class="py-1.5 pr-3">Mitigation</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for r in risks %}
+      <tr class="border-b border-slate-100 align-top">
+        <td class="py-1.5 pl-3 pr-3 font-medium">{{ r.risk }}</td>
+        <td class="py-1.5 pr-3">
+          <span class="inline-block rounded px-1.5 py-0.5 text-xs font-semibold
+                {% if r.severity == 'HIGH' %}bg-red-100 text-red-800
+                {% elif r.severity == 'MEDIUM' %}bg-amber-100 text-amber-800
+                {% else %}bg-slate-100 text-slate-700{% endif %}">{{ r.severity }}</span>
+        </td>
+        <td class="py-1.5 pr-3 text-slate-600">{{ r.detail }}</td>
+        <td class="py-1.5 pr-3 text-slate-600">{{ r.mitigation }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% else %}
+<p class="text-sm text-slate-600">No significant risks identified.</p>
+{% endif %}

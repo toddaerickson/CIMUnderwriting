@@ -416,3 +416,80 @@ def test_assumptions_save_and_run(client, operator, deals_dir, fake_run):
     deal.refresh_from_db()
     assert deal.assumption_overrides["cim_overrides"]["asking_price"] == 3_400_000.0
     assert deal.runs.first().status == "done"
+
+
+def test_results_formatters():
+    from webapp.results import fmt_money, fmt_pct, fmt_x
+    assert fmt_pct(0.123) == "12.3%"
+    assert fmt_pct(None) == "N/A"
+    assert fmt_money(3_100_000.0) == "$3,100,000"
+    assert fmt_money(None) == "N/A"
+    assert fmt_x(1.62) == "1.62x"
+    assert fmt_x(None) == "N/A"
+
+
+def _run_deal(client, deals_dir):
+    deal = _make_extracted_deal(deals_dir)
+    client.post(f"/deals/{deal.pk}/run/")
+    return deal
+
+
+@pytest.mark.django_db
+def test_detail_summary_tab(client, operator, deals_dir, fake_run):
+    deal = _run_deal(client, deals_dir)
+    resp = client.get(f"/deals/{deal.pk}/")
+    content = resp.content.decode()
+    assert resp.status_code == 200
+    assert "PURSUE" in content
+    assert "Population (3-mi ≥ 50K)" in content       # gate row
+    assert "Template generation failed: test-only" in content  # run warnings
+    assert "Belton, TX" in content                     # property caption
+
+
+@pytest.mark.django_db
+def test_detail_returns_tab(client, operator, deals_dir, fake_run):
+    deal = _run_deal(client, deals_dir)
+    content = client.get(f"/deals/{deal.pk}/?tab=returns").content.decode()
+    assert "14.0%" in content            # bull IRR
+    assert "N/A" in content              # NaN base IRR scrubbed → N/A
+    assert "$3,300,000" in content       # VA max offer
+    assert "$3,325,000" in content       # sensitivity price row
+    assert "6.0%" in content             # sensitivity cap column
+
+
+@pytest.mark.django_db
+def test_detail_financials_and_risks_tabs(client, operator, deals_dir, fake_run):
+    deal = _run_deal(client, deals_dir)
+    fin = client.get(f"/deals/{deal.pk}/?tab=financials").content.decode()
+    assert "$230,000" in fin                       # analyst-adjusted NOI
+    assert "Property tax adjusted to benchmark" in fin
+    assert "Insurance: understated" in fin         # dict adjustment normalized
+    risks = client.get(f"/deals/{deal.pk}/?tab=risks").content.decode()
+    assert "ECRI bridge" in risks
+    assert "HIGH" in risks
+
+
+@pytest.mark.django_db
+def test_detail_no_runs_shows_run_button(client, operator, deals_dir):
+    deal = _make_extracted_deal(deals_dir)
+    content = client.get(f"/deals/{deal.pk}/").content.decode()
+    assert "Run Analysis" in content
+    assert "tab=returns" not in content   # no tabs before first done run
+
+
+@pytest.mark.django_db
+def test_detail_imported_deal_has_no_run_button(client, operator):
+    from webapp.models import Deal
+    imported = Deal.objects.create(deal_id="legacy", property_name="Legacy",
+                                   recommendation="PURSUE")
+    content = client.get(f"/deals/{imported.pk}/").content.decode()
+    assert "Run Analysis" not in content
+    assert "no extraction snapshot" in content.lower()
+
+
+@pytest.mark.django_db
+def test_detail_bad_tab_falls_back_to_summary(client, operator, deals_dir, fake_run):
+    deal = _run_deal(client, deals_dir)
+    resp = client.get(f"/deals/{deal.pk}/?tab=nope")
+    assert resp.status_code == 200
+    assert b"Go / No-Go Gates" in resp.content
