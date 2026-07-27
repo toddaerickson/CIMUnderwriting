@@ -6,10 +6,14 @@ Conversion happens ONLY in build_initial (×100) and build_overrides
 (÷100) — never in custom form fields, so bound redisplay round-trips
 the raw submitted strings untouched.
 """
+import logging
+
 from django import forms
 
 import config as cfg
 from registry import ScenarioType
+
+logger = logging.getLogger("cim_analyst.web")
 
 # Mirrors gui/components/assumptions_editor.REQUIRED_FIELDS — parity-
 # tested in tests/test_web_analyze.py; consolidated when gui/ retires
@@ -239,6 +243,9 @@ def parse_unit_mix(post) -> list[dict] | None:
             sf = float(sf or 0)
             rate = float(rate or 0)
         except ValueError:
+            logger.warning(
+                "unit-mix row dropped on save (non-numeric values): "
+                "label=%r count=%r sf=%r rate=%r", label, count, sf, rate)
             continue
         if count <= 0:
             continue

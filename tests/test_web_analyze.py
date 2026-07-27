@@ -462,3 +462,20 @@ def test_saved_values_render_on_next_get(client, operator, deals_dir, fake_extra
     _post_assumptions(client, deal, {"physical_occupancy": "85"})
     resp = client.get(f"/deals/{deal.pk}/assumptions/")
     assert b'value="85' in resp.content
+
+
+def test_parse_unit_mix_logs_dropped_rows(caplog):
+    """A non-numeric row is skipped, but never silently (audit check 3)."""
+    from django.http import QueryDict
+
+    from webapp.forms import parse_unit_mix
+    post = QueryDict(mutable=True)
+    post.setlist("um_label", ["10x10", "bad"])
+    post.setlist("um_count", ["100", "not-a-number"])
+    post.setlist("um_sf", ["100", "100"])
+    post.setlist("um_rate", ["95", "95"])
+    post.setlist("um_cc", ["0", "0"])
+    with caplog.at_level("WARNING", logger="cim_analyst.web"):
+        rows = parse_unit_mix(post)
+    assert len(rows) == 1
+    assert "unit-mix row dropped" in caplog.text
