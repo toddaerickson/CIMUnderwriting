@@ -119,7 +119,8 @@ def extract_pdf_data(pdf_path: str, cim_overrides: dict = None,
 def run_analysis(result: AnalysisResult, progress: Callable = None,
                   output_dir: str = None,
                   custom_scenarios: dict = None,
-                  custom_va_scenarios: dict = None) -> AnalysisResult:
+                  custom_va_scenarios: dict = None,
+                  solver_target_irr: float = None) -> AnalysisResult:
     """
     Run full analysis pipeline on an already-extracted CIMData.
 
@@ -128,6 +129,9 @@ def run_analysis(result: AnalysisResult, progress: Callable = None,
         progress: callable(step, total, message)
         custom_scenarios: per-analysis Bear/Base/Bull overrides
         custom_va_scenarios: per-analysis value-add scenario overrides
+        solver_target_irr: per-analysis max-offer IRR target; None keeps
+            the config.SOLVER_TARGET_IRR default (solver binds it as a
+            function default at import, so a parameter is the only seam)
 
     Returns:
         Updated AnalysisResult with all analysis fields populated
@@ -199,16 +203,20 @@ def run_analysis(result: AnalysisResult, progress: Callable = None,
         # Step 7: Max price solver
         _progress(7, 9, "Solving for maximum offer price...")
         from model.solver import solve_max_price, solve_max_price_value_add
+        solver_kwargs = (
+            {"target_irr": solver_target_irr} if solver_target_irr else {})
         result.max_offer = solve_max_price(
             adjusted_ttm_noi=result.adjusted_noi,
             capex=capex,
             expense_ratio=result.expense_ratio,
+            **solver_kwargs,
         )
         if result.va_results:
             result.va_max_offer = solve_max_price_value_add(
                 cim_data=cim_data,
                 financial_analysis=result.financial_analysis,
                 capex=capex,
+                **solver_kwargs,
             )
     else:
         result.errors.append("Cannot run scenarios — missing NOI or asking price")

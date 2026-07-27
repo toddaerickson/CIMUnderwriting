@@ -4,17 +4,20 @@ Absorbs gui/deal_manager responsibilities per the Phase 5 retirement map;
 imports the shared helpers from there (stdlib-only module) rather than
 copying them, so there is one source of truth until gui/ retires.
 """
+import copy
 import dataclasses
 import logging
 import math
 import numbers
 import os
 import threading
+from contextlib import contextmanager
 from enum import Enum
 
 from django.conf import settings
 from django.utils import timezone
 
+import config as cfg
 from gui.deal_manager import detect_asset_type, sanitize_name
 from gui.engine import extract_pdf_data
 from webapp.models import Deal
@@ -75,6 +78,33 @@ def json_safe(obj):
     if isinstance(obj, (list, tuple)):
         return [json_safe(v) for v in obj]
     return str(obj)
+
+
+# ── Per-run config overrides ────────────────────────────────────────
+
+# analysis.physical binds the REPLACEMENT_COST dict OBJECT at import
+# (`from config import REPLACEMENT_COST`), so per-deal overrides must
+# mutate that shared dict in place and restore it afterwards. The lock
+# serializes analysis runs so patched config never leaks across deals.
+_ORIG_REPLACEMENT_COST = copy.deepcopy(cfg.REPLACEMENT_COST)
+_ANALYSIS_LOCK = threading.Lock()
+
+
+@contextmanager
+def _patched_replacement_cost(overrides):
+    """Apply {key: [low, high]} deltas to config.REPLACEMENT_COST in
+    place; unknown keys ignored. Caller must hold _ANALYSIS_LOCK."""
+    if not overrides:
+        yield
+        return
+    try:
+        cfg.REPLACEMENT_COST.update(
+            {k: tuple(v) for k, v in overrides.items()
+             if k in _ORIG_REPLACEMENT_COST})
+        yield
+    finally:
+        cfg.REPLACEMENT_COST.clear()
+        cfg.REPLACEMENT_COST.update(copy.deepcopy(_ORIG_REPLACEMENT_COST))
 
 
 # ── Background extraction ───────────────────────────────────────────

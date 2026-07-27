@@ -90,3 +90,63 @@ def test_json_safe_stringifies_unknown_objects():
             return "weird"
 
     assert json_safe({"x": Weird()}) == {"x": "weird"}
+
+
+def test_patched_replacement_cost_mutates_in_place_and_restores():
+    # analysis.physical holds the dict OBJECT from import time — the
+    # patch must be visible through that binding, then fully restored.
+    from analysis.physical import REPLACEMENT_COST as bound
+    from webapp.services import _patched_replacement_cost
+
+    original = bound["ss_driveup_per_sf"]
+    with _patched_replacement_cost({"ss_driveup_per_sf": [100, 120],
+                                    "not_a_real_key": [1, 2]}):
+        assert tuple(bound["ss_driveup_per_sf"]) == (100, 120)
+        assert "not_a_real_key" not in bound
+    assert bound["ss_driveup_per_sf"] == original
+
+
+def test_patched_replacement_cost_restores_on_exception():
+    from analysis.physical import REPLACEMENT_COST as bound
+    from webapp.services import _patched_replacement_cost
+
+    original = bound["ss_driveup_per_sf"]
+    with pytest.raises(RuntimeError):
+        with _patched_replacement_cost({"ss_driveup_per_sf": [100, 120]}):
+            raise RuntimeError("boom")
+    assert bound["ss_driveup_per_sf"] == original
+
+
+def test_run_analysis_accepts_solver_target_irr():
+    import inspect
+    from gui.engine import run_analysis
+    params = inspect.signature(run_analysis).parameters
+    assert "solver_target_irr" in params
+    assert params["solver_target_irr"].default is None
+
+
+def test_solver_honors_target_irr():
+    from model.solver import solve_max_price
+    out = solve_max_price(adjusted_ttm_noi=250_000.0, capex=0,
+                          target_irr=0.12, expense_ratio=0.40)
+    assert out["converged"]
+    assert out["achieved_irr"] == pytest.approx(0.12, abs=0.005)
+
+
+def test_engine_end_to_end_with_overrides(tmp_path, monkeypatch):
+    """Real pipeline (no PDF, no network): overrides reach the solver and
+    the writers produce files. Comp DB redirected to a scratch path —
+    data.comp_db binds COMP_DB_PATH at import, so patch that module's name."""
+    monkeypatch.setattr("data.comp_db.COMP_DB_PATH", str(tmp_path / "comps.db"))
+    from gui.engine import AnalysisResult, run_analysis
+    from webapp.services import _patched_replacement_cost
+
+    result = AnalysisResult(pdf_path=str(tmp_path / "expo.pdf"))
+    result.cim_data = _sample_cim()
+    with _patched_replacement_cost({"ss_driveup_per_sf": [100, 120]}):
+        result = run_analysis(result, output_dir=str(tmp_path),
+                              solver_target_irr=0.12)
+    assert result.max_offer["achieved_irr"] == pytest.approx(0.12, abs=0.005)
+    assert os.path.isfile(result.memo_path)
+    assert os.path.isfile(result.excel_path)
+    assert result.gate_summary["recommendation"]
