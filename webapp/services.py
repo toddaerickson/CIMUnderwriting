@@ -6,8 +6,11 @@ copying them, so there is one source of truth until gui/ retires.
 """
 import dataclasses
 import logging
+import math
+import numbers
 import os
 import threading
+from enum import Enum
 
 from django.conf import settings
 from django.utils import timezone
@@ -36,6 +39,42 @@ def cim_from_dict(d: dict):
     data["income_lines"] = [FinancialLine(**l) for l in data.get("income_lines") or []]
     data["expense_lines"] = [FinancialLine(**l) for l in data.get("expense_lines") or []]
     return CIMData(**data)
+
+
+# ── Analysis payload sanitizer ───────────────────────────────────────
+
+ANALYSIS_TIMEOUT_SECONDS = 300  # run-status partial flips to failed after this
+
+
+def json_safe(obj):
+    """Recursively coerce an analysis payload to strict-JSON-safe values.
+
+    npf.irr yields NaN on non-converging cash flows; json.dumps(nan) is
+    invalid JSON that Postgres JSONB rejects (SQLite accepts it — the
+    breakage would be invisible until the Phase 5 cutover). Scenario
+    dicts are keyed by ScenarioType (str Enum) and sensitivity rows are
+    tuples of numpy floats.
+    """
+    if obj is None or isinstance(obj, bool):
+        return obj
+    if isinstance(obj, Enum):
+        return json_safe(obj.value)
+    if isinstance(obj, str):
+        return obj
+    if isinstance(obj, numbers.Integral):
+        return int(obj)
+    if isinstance(obj, numbers.Real):
+        f = float(obj)
+        return None if math.isnan(f) or math.isinf(f) else f
+    if isinstance(obj, dict):
+        out = {}
+        for k, v in obj.items():
+            k = json_safe(k)
+            out[k if isinstance(k, str) else str(k)] = json_safe(v)
+        return out
+    if isinstance(obj, (list, tuple)):
+        return [json_safe(v) for v in obj]
+    return str(obj)
 
 
 # ── Background extraction ───────────────────────────────────────────

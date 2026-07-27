@@ -43,3 +43,30 @@ class Deal(models.Model):
 
     def __str__(self):
         return self.property_name
+
+
+class AnalysisRun(models.Model):
+    """One execution of the analysis pipeline against a Deal's snapshot
+    + overrides. Append-only: each Run Analysis click creates a row, the
+    worker writes only its own row, the UI shows the newest done run.
+    """
+
+    deal = models.ForeignKey(Deal, on_delete=models.CASCADE, related_name="runs")
+    # running → done | failed (no pending: the row is created at start time)
+    status = models.CharField(max_length=10, default="running")
+    progress_step = models.IntegerField(default=0)
+    progress_total = models.IntegerField(default=9)
+    progress_msg = models.CharField(max_length=200, blank=True, default="")
+    result_json = models.JSONField(null=True, blank=True)
+    error = models.TextField(blank=True, default="")
+    memo_filename = models.CharField(max_length=300, blank=True, default="")
+    excel_filename = models.CharField(max_length=300, blank=True, default="")
+    template_filename = models.CharField(max_length=300, blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True)
+    finished_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return f"{self.deal_id}:{self.pk} {self.status}"
