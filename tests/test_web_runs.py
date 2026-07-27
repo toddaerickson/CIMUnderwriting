@@ -493,3 +493,55 @@ def test_detail_bad_tab_falls_back_to_summary(client, operator, deals_dir, fake_
     resp = client.get(f"/deals/{deal.pk}/?tab=nope")
     assert resp.status_code == 200
     assert b"Go / No-Go Gates" in resp.content
+
+
+@pytest.mark.django_db
+def test_download_endpoints_serve_run_outputs(client, operator, deals_dir, fake_run):
+    deal = _run_deal(client, deals_dir)
+    for kind, filename, mime in [
+        ("memo", "Expo_Storage_memo.docx",
+         "application/vnd.openxmlformats-officedocument.wordprocessingml.document"),
+        ("excel", "Expo_Storage_model.xlsx",
+         "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"),
+        ("template", "Expo_Storage_uw.xlsm",
+         "application/vnd.ms-excel.sheet.macroEnabled.12"),
+    ]:
+        resp = client.get(f"/deals/{deal.pk}/download/{kind}/")
+        assert resp.status_code == 200
+        assert filename in resp.headers["Content-Disposition"]
+        assert resp.headers["Content-Type"] == mime
+
+
+@pytest.mark.django_db
+def test_download_legacy_deal_falls_back_to_deal_row(client, operator, deals_dir):
+    from webapp.models import Deal
+    folder = deals_dir / "legacy"
+    folder.mkdir()
+    (folder / "memo.docx").write_bytes(b"legacy-memo")
+    legacy = Deal.objects.create(deal_id="legacy", property_name="Legacy",
+                                 deal_dir=str(folder), memo_filename="memo.docx")
+    resp = client.get(f"/deals/{legacy.pk}/download/memo/")
+    assert resp.status_code == 200
+    resp = client.get(f"/deals/{legacy.pk}/download/template/")
+    assert resp.status_code == 404
+
+
+@pytest.mark.django_db
+def test_download_rejects_bad_kind_missing_file_and_escape(client, operator, deals_dir):
+    from webapp.models import Deal
+    deal = _make_extracted_deal(deals_dir)
+    assert client.get(f"/deals/{deal.pk}/download/nope/").status_code == 404
+    assert client.get(f"/deals/{deal.pk}/download/memo/").status_code == 404  # no file yet
+    # a poisoned stored filename must not escape the deal folder
+    outside = deals_dir.parent / "secret.docx"
+    outside.write_bytes(b"secret")
+    deal.memo_filename = "../../secret.docx"
+    deal.save()
+    assert client.get(f"/deals/{deal.pk}/download/memo/").status_code == 404
+
+
+@pytest.mark.django_db
+def test_deal_list_links_detail(client, operator, deals_dir, fake_run):
+    deal = _run_deal(client, deals_dir)
+    resp = client.get("/deals/")
+    assert f'href="/deals/{deal.pk}/"'.encode() in resp.content

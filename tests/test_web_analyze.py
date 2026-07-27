@@ -373,10 +373,10 @@ def test_required_fields_parity_with_gui():
 
 
 @pytest.mark.django_db
-def test_deal_list_links_extracted_deals(client, operator, deals_dir, fake_extract):
+def test_deal_list_links_deal_detail(client, operator, deals_dir, fake_extract):
     deal = _extracted_deal(client, deals_dir, fake_extract)
     resp = client.get("/deals/")
-    assert f"/deals/{deal.pk}/assumptions/".encode() in resp.content
+    assert f"/deals/{deal.pk}/".encode() in resp.content
 
 
 def _post_assumptions(client, deal, extra=None):

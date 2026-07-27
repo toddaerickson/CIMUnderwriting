@@ -6,7 +6,7 @@ from django.conf import settings
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.db import connection
-from django.http import Http404, JsonResponse
+from django.http import FileResponse, Http404, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils import timezone
@@ -314,7 +314,33 @@ def deal_detail(request, pk):
     return render(request, "webapp/deal_detail.html", ctx)
 
 
+DOWNLOAD_KINDS = {
+    "memo": ("memo_filename",
+             "application/vnd.openxmlformats-officedocument"
+             ".wordprocessingml.document"),
+    "excel": ("excel_filename",
+              "application/vnd.openxmlformats-officedocument"
+              ".spreadsheetml.sheet"),
+    "template": ("template_filename",
+                 "application/vnd.ms-excel.sheet.macroEnabled.12"),
+}
+
+
 @login_required
 def deal_download(request, pk, kind):
-    """Stub — Task 6 wires up the real memo/excel/template file response."""
-    raise Http404
+    deal = get_object_or_404(Deal, pk=pk)
+    if kind not in DOWNLOAD_KINDS:
+        raise Http404
+    field, mime = DOWNLOAD_KINDS[kind]
+    run = deal.runs.filter(status="done").first()
+    filename = (getattr(run, field, "") if run else "") or \
+        getattr(deal, field, "")  # Deal has no template_filename → ""
+    filename = os.path.basename(filename or "")
+    if not filename or not deal.deal_dir:
+        raise Http404
+    path = os.path.realpath(os.path.join(deal.deal_dir, filename))
+    deals_root = os.path.realpath(settings.CIM_DEALS_DIR)
+    if not path.startswith(deals_root + os.sep) or not os.path.isfile(path):
+        raise Http404
+    return FileResponse(open(path, "rb"), as_attachment=True,
+                        filename=filename, content_type=mime)
