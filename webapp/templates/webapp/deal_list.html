@@ -1,0 +1,68 @@
+{% extends "base.html" %}
+{% block title %}Deal Pipeline{% endblock %}
+{% block content %}
+<div class="max-w-7xl">
+  <h1 class="text-xl font-semibold mb-3">Deal Pipeline</h1>
+
+  <div class="bg-white border border-slate-200 rounded-lg">
+    <form method="get" class="flex flex-wrap gap-2 items-end p-3 border-b border-slate-200">
+      <label class="text-xs text-slate-600">State
+        <select name="state" class="block border border-slate-300 rounded px-2 py-1 text-sm">
+          <option value="">All</option>
+          {% for s in state_options %}<option value="{{ s }}" {% if s == state %}selected{% endif %}>{{ s }}</option>{% endfor %}
+        </select>
+      </label>
+      <label class="text-xs text-slate-600">Recommendation
+        <select name="recommendation" class="block border border-slate-300 rounded px-2 py-1 text-sm">
+          <option value="">All</option>
+          {% for r in recommendation_options %}<option value="{{ r }}" {% if r == recommendation %}selected{% endif %}>{{ r }}</option>{% endfor %}
+        </select>
+      </label>
+      <label class="text-xs text-slate-600">Asset type
+        <select name="asset_type" class="block border border-slate-300 rounded px-2 py-1 text-sm">
+          <option value="">All</option>
+          {% for a in asset_type_options %}<option value="{{ a }}" {% if a == asset_type %}selected{% endif %}>{{ a }}</option>{% endfor %}
+        </select>
+      </label>
+      <button type="submit" class="bg-accent-700 text-white text-sm px-3 py-1.5 rounded">Filter</button>
+      <a href="{% url 'deal-list' %}" class="text-sm text-slate-500 underline">Clear</a>
+    </form>
+
+    <div class="overflow-x-auto max-h-[75vh] overflow-y-auto">
+      <table class="w-full text-sm border-collapse">
+        <thead>
+          <tr class="text-left border-b border-slate-300 text-xs text-slate-600">
+            <th class="sticky top-0 z-10 bg-white py-1.5 pl-3 pr-3">Property</th>
+            <th class="sticky top-0 z-10 bg-white py-1.5 pr-3">City</th>
+            <th class="sticky top-0 z-10 bg-white py-1.5 pr-3">ST</th>
+            <th class="sticky top-0 z-10 bg-white py-1.5 pr-3">Asset Type</th>
+            <th class="sticky top-0 z-10 bg-white py-1.5 pr-3 text-right">NRSF</th>
+            <th class="sticky top-0 z-10 bg-white py-1.5 pr-3 text-right">Asking</th>
+            <th class="sticky top-0 z-10 bg-white py-1.5 pr-3 text-right">Est. Fair Value</th>
+            <th class="sticky top-0 z-10 bg-white py-1.5 pr-3">Rec.</th>
+            <th class="sticky top-0 z-10 bg-white py-1.5 pr-3">Date</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for d in deals %}
+          <tr class="border-b border-slate-100 hover:bg-slate-50">
+            <td class="py-1.5 pl-3 pr-3 font-medium">{{ d.property_name }}</td>
+            <td class="py-1.5 pr-3">{{ d.city }}</td>
+            <td class="py-1.5 pr-3">{{ d.state }}</td>
+            <td class="py-1.5 pr-3">{{ d.asset_type }}</td>
+            <td class="py-1.5 pr-3 text-right whitespace-nowrap">{{ d.nrsf|floatformat:0 }}</td>
+            <td class="py-1.5 pr-3 text-right whitespace-nowrap">{% if d.asking_price %}${{ d.asking_price|floatformat:0 }}{% endif %}</td>
+            <td class="py-1.5 pr-3 text-right whitespace-nowrap">{% if d.estimated_fair_value %}${{ d.estimated_fair_value|floatformat:0 }}{% endif %}</td>
+            <td class="py-1.5 pr-3 whitespace-nowrap">{{ d.recommendation }}</td>
+            <td class="py-1.5 pr-3 whitespace-nowrap">{{ d.analysis_date|date:"Y-m-d" }}</td>
+          </tr>
+          {% empty %}
+          <tr><td colspan="9" class="py-8 px-3 text-center text-slate-500">No deals yet — run
+            <code>python manage.py import_deals</code> or start a New Analysis.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+{% endblock %}

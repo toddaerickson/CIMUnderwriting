@@ -37,4 +37,34 @@ def health(request):
 
 @login_required
 def home(request):
-    return render(request, "webapp/home.html")
+    from django.shortcuts import redirect
+
+    return redirect("deal-list")
+
+
+@login_required
+def deal_list(request):
+    from webapp.models import Deal
+
+    deals = Deal.objects.all()
+    state = request.GET.get("state", "")
+    recommendation = request.GET.get("recommendation", "")
+    asset_type = request.GET.get("asset_type", "")
+    if state:
+        deals = deals.filter(state=state)
+    if recommendation:
+        deals = deals.filter(recommendation=recommendation)
+    if asset_type:
+        deals = deals.filter(asset_type=asset_type)
+
+    def _options(field):
+        return (Deal.objects.exclude(**{field: ""})
+                .order_by(field).values_list(field, flat=True).distinct())
+
+    return render(request, "webapp/deal_list.html", {
+        "deals": deals,
+        "state": state, "recommendation": recommendation, "asset_type": asset_type,
+        "state_options": _options("state"),
+        "recommendation_options": _options("recommendation"),
+        "asset_type_options": _options("asset_type"),
+    })

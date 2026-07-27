@@ -33,6 +33,12 @@
 | 4 | `AnalysisRun` model (status/progress/result_json/output paths), threaded run + HTMX poll, results pages (Summary gates + replacement cost, Returns + sensitivity, Financials, Risks), download endpoints (.docx/.xlsx/.xlsm), Deal detail becomes real | Standard, UI passes required | Own plan doc |
 | 5 | Comps browser (read-only over `data/cim_comps.db`), settings editor (delta-only `ConfigOverride` — operator directive 2026-07-25: overrides scoped optionally by asset_type and effective-dated, so thresholds can tighten/loosen over time and per property class while past analyses keep the thresholds they ran under), `render.yaml` + Neon + persistent disk, prod deploy + deal import, retire `gui/` + Streamlit + Railway service, move `gui/engine.py` → `engine.py`, docs/CLAUDE.md updates | **High (deploy/cutover + prod migrate ordering)** | Own plan doc |
 
+**Phase 5 pre-cutover checklist (from Phase 2 final review, 2026-07-26 — Postgres-only failure modes invisible on SQLite; resolve before the Neon migrate):**
+
+- `Deal.Meta.ordering` — NULL `analysis_date` sorts first on Postgres, last on SQLite; switch to `F("analysis_date").desc(nulls_last=True)` so undated deals don't jump to the top at cutover.
+- Length overflow fails hard on Postgres (SQLite silently accepts): the live tree already has a 114/120-char `deal_id`, and `state` max_length=2 is guaranteed only by the parser regex — validate or widen before importing into Neon. (`import_deals` now catches `DataError` so an overflow skips the folder rather than aborting, but skipped ≠ imported.)
+- Add a `build_deal_meta` ↔ `import_deals` round-trip drift test when `webapp/services.py` absorbs the deal_manager helpers (no-drift CI guard for the meta→model key mapping).
+
 **Analysis-layer backlog (operator, 2026-07-25 — separate from this front-end plan, do not fold into Phases 3–5):** quantify special/bonus depreciation in family office return expectations — cost-segregation allocation assumption, bonus depreciation % for the tax year, tax-shield value at assumed LP bracket, presented alongside pre-tax returns. Belongs in `analysis/`/`model/` as its own PR after the front-end port, or earlier if prioritized.
 
 ### What gets retired from `gui/` (Phase 5), and what replaces it
