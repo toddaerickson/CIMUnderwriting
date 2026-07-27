@@ -1,0 +1,16 @@
+{% if failed %}
+<div id="extract-status" class="max-w-xl rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
+  <p class="font-medium">Extraction failed{% if deal.extract_error %}: {{ deal.extract_error }}{% else %} or timed out.{% endif %}</p>
+  <form method="post" action="{% url 'extract-retry' deal.pk %}" class="mt-2">
+    {% csrf_token %}
+    <button type="submit" class="bg-accent-700 text-white text-sm px-3 py-1.5 rounded">Retry extraction</button>
+  </form>
+</div>
+{% else %}
+<div id="extract-status"
+     hx-get="{% url 'extract-status' deal.pk %}"
+     hx-trigger="load delay:2s" hx-swap="outerHTML"
+     class="max-w-xl rounded-md border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700">
+  <span class="inline-block animate-pulse">Extracting PDF data&hellip; this usually takes under a minute.</span>
+</div>
+{% endif %}

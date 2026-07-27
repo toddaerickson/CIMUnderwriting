@@ -1,10 +1,18 @@
 import logging
 import os
 
+from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.db import connection
-from django.http import JsonResponse
-from django.shortcuts import render
+from django.http import HttpResponse, JsonResponse
+from django.shortcuts import get_object_or_404, redirect, render
+from django.urls import reverse
+from django.utils import timezone
+from django.views.decorators.http import require_POST
+from django_htmx.http import HttpResponseClientRedirect
+
+from webapp import services
+from webapp.models import Deal
 
 logger = logging.getLogger("cim_analyst.web")
 
@@ -37,8 +45,6 @@ def health(request):
 
 @login_required
 def home(request):
-    from django.shortcuts import redirect
-
     return redirect("deal-list")
 
 
@@ -68,3 +74,53 @@ def deal_list(request):
         "recommendation_options": _options("recommendation"),
         "asset_type_options": _options("asset_type"),
     })
+
+
+# ── Phase 3: extraction status polling ──────────────────────────────
+
+def _extract_state(deal) -> str:
+    """'done' | 'failed' | 'running' — a stamp older than the timeout counts
+    as failed so the UI never shows an eternal spinner."""
+    if deal.extract_status == "done":
+        return "done"
+    if deal.extract_status == "failed":
+        return "failed"
+    if deal.extract_requested_at and (
+            timezone.now() - deal.extract_requested_at
+    ).total_seconds() > services.EXTRACT_TIMEOUT_SECONDS:
+        return "failed"
+    return "running"
+
+
+@login_required
+def extract_status(request, pk):
+    deal = get_object_or_404(Deal, pk=pk)
+    state = _extract_state(deal)
+    if state == "done":
+        return HttpResponseClientRedirect(reverse("deal-assumptions", args=[deal.pk]))
+    return render(request, "webapp/_extract_status.html",
+                  {"deal": deal, "failed": state == "failed"})
+
+
+@login_required
+@require_POST
+def extract_retry(request, pk):
+    deal = get_object_or_404(Deal, pk=pk)
+    if deal.extract_status == "" or not deal.input_files:
+        messages.error(request, "No uploaded CIM to re-extract.")
+        return redirect("deal-list")
+    services.start_extract(deal)
+    return redirect("deal-assumptions", pk=deal.pk)
+
+
+@login_required
+def deal_assumptions(request, pk):
+    deal = get_object_or_404(Deal, pk=pk)
+    if deal.extract_status == "" and not deal.cim_json:
+        return render(request, "webapp/assumptions_wait.html",
+                      {"deal": deal, "unavailable": True})
+    state = _extract_state(deal)
+    if state != "done":
+        return render(request, "webapp/assumptions_wait.html",
+                      {"deal": deal, "failed": state == "failed"})
+    return HttpResponse("Assumptions editor lands in Task 5.")  # replaced in Task 5

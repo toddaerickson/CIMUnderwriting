@@ -137,3 +137,78 @@ def test_stale_extract_worker_is_dropped(deals_dir, fake_extract):
     deal.refresh_from_db()
     assert deal.extract_status == "running"  # stale write dropped
     assert deal.cim_json is None
+
+
+@pytest.mark.django_db
+def test_extract_status_running_polls(client, operator, deals_dir):
+    from django.utils import timezone
+    deal = _make_upload_deal(deals_dir)
+    deal.extract_status = "running"
+    deal.extract_requested_at = timezone.now()
+    deal.save()
+    resp = client.get(f"/deals/{deal.pk}/extract-status/")
+    assert resp.status_code == 200
+    assert b"hx-trigger" in resp.content  # keeps polling
+
+
+@pytest.mark.django_db
+def test_extract_status_done_redirects(client, operator, deals_dir):
+    deal = _make_upload_deal(deals_dir)
+    deal.extract_status = "done"
+    deal.save()
+    resp = client.get(f"/deals/{deal.pk}/extract-status/")
+    assert resp.status_code == 200
+    assert resp.headers["HX-Redirect"] == f"/deals/{deal.pk}/assumptions/"
+
+
+@pytest.mark.django_db
+def test_extract_status_failed_and_timeout_stop_polling(client, operator, deals_dir):
+    import datetime
+
+    from django.utils import timezone
+    deal = _make_upload_deal(deals_dir)
+    deal.extract_status = "failed"
+    deal.extract_error = "boom"
+    deal.save()
+    resp = client.get(f"/deals/{deal.pk}/extract-status/")
+    assert b"hx-trigger" not in resp.content
+    assert b"Retry extraction" in resp.content
+    # timeout: still "running" but stamp is too old
+    deal.extract_status = "running"
+    deal.extract_error = ""
+    deal.extract_requested_at = timezone.now() - datetime.timedelta(seconds=999)
+    deal.save()
+    resp = client.get(f"/deals/{deal.pk}/extract-status/")
+    assert b"hx-trigger" not in resp.content
+    assert b"Retry extraction" in resp.content
+
+
+@pytest.mark.django_db
+def test_extract_retry_reruns(client, operator, deals_dir, fake_extract):
+    deal = _make_upload_deal(deals_dir)
+    deal.extract_status = "failed"
+    deal.extract_error = "old error"
+    deal.save()
+    resp = client.post(f"/deals/{deal.pk}/extract-retry/")
+    assert resp.status_code == 302
+    deal.refresh_from_db()
+    assert deal.extract_status == "done"  # sync mode ran inline
+    assert deal.extract_error == ""
+
+
+@pytest.mark.django_db
+def test_assumptions_wait_and_unavailable(client, operator, deals_dir):
+    from django.utils import timezone
+
+    from webapp.models import Deal
+    deal = _make_upload_deal(deals_dir)
+    deal.extract_status = "running"
+    deal.extract_requested_at = timezone.now()
+    deal.save()
+    resp = client.get(f"/deals/{deal.pk}/assumptions/")
+    assert resp.status_code == 200
+    assert b"Extracting" in resp.content
+    imported = Deal.objects.create(deal_id="legacy", property_name="Legacy")
+    resp = client.get(f"/deals/{imported.pk}/assumptions/")
+    assert resp.status_code == 200
+    assert b"no extraction snapshot" in resp.content.lower()

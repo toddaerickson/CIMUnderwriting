@@ -22,6 +22,10 @@
      tailwind.config.js header comment.) {% endcomment %}
   <link rel="stylesheet" href="{% static 'css/tw.css' %}">
 
+  {% comment %} Vendored htmx (copied from managertools static/js — no CDN).
+     Used for extraction-status polling and the unit-mix row editor. {% endcomment %}
+  <script src="{% static 'js/htmx.min.js' %}" defer></script>
+
   {% comment %} Page-specific <head> additions (currently just the
      allauth chrome's scoped login-form CSS — see
      webapp/templates/allauth/layouts/base.html). Empty by default; safe
