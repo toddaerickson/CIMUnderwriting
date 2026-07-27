@@ -128,9 +128,21 @@ def deal_assumptions(request, pk):
                       {"deal": deal, "failed": state == "failed"})
     report = deal.extraction_report or {}
     missing_required = set(report.get("missing", [])) & assumptions_forms.REQUIRED_FIELDS
-    form = assumptions_forms.AssumptionsForm(
-        initial=assumptions_forms.build_initial(deal))
-    rows = assumptions_forms.unit_mix_rows(deal)
+    if request.method == "POST":
+        form = assumptions_forms.AssumptionsForm(request.POST)
+        if form.is_valid():
+            deal.assumption_overrides = assumptions_forms.build_overrides(
+                form.cleaned_data, request.POST, deal)
+            deal.save(update_fields=["assumption_overrides", "updated_at"])
+            messages.success(request, "Assumptions saved.")
+            return redirect("deal-assumptions", pk=deal.pk)
+        rows = assumptions_forms.parse_unit_mix(request.POST) or []
+        status = 422
+    else:
+        form = assumptions_forms.AssumptionsForm(
+            initial=assumptions_forms.build_initial(deal))
+        rows = assumptions_forms.unit_mix_rows(deal)
+        status = 200
     f = assumptions_forms
     return render(request, "webapp/assumptions.html", {
         "deal": deal, "form": form, "report": report,
@@ -148,7 +160,7 @@ def deal_assumptions(request, pk):
         "rc_soft": [form["rc_soft_cost_pct_low"], form["rc_soft_cost_pct_high"],
                     form["rc_dev_profit_pct_low"], form["rc_dev_profit_pct_high"]],
         "solver_field": form["solver_target_irr"],
-    })
+    }, status=status)
 
 
 @login_required

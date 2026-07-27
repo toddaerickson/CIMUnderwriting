@@ -218,3 +218,113 @@ def rc_grid(form):
              "cells": [form[f"rc_{hard}_low"], form[f"rc_{hard}_high"],
                        form[f"rc_{site}_low"], form[f"rc_{site}_high"]]}
             for hard, site, display in cfg.FACILITY_TYPES]
+
+
+# ── POST parsing + delta computation ────────────────────────────────
+
+def parse_unit_mix(post) -> list[dict] | None:
+    """Parallel getlist arrays → canonical rows; count ≤ 0 rows dropped.
+    Returns None when the form carried no unit-mix inputs at all."""
+    labels = post.getlist("um_label")
+    if not labels:
+        return None
+    counts = post.getlist("um_count")
+    sfs = post.getlist("um_sf")
+    rates = post.getlist("um_rate")
+    ccs = post.getlist("um_cc")
+    rows = []
+    for label, count, sf, rate, cc in zip(labels, counts, sfs, rates, ccs):
+        try:
+            count = int(float(count or 0))
+            sf = float(sf or 0)
+            rate = float(rate or 0)
+        except ValueError:
+            continue
+        if count <= 0:
+            continue
+        rows.append({"size_label": label.strip(), "count": count, "sf": sf,
+                     "rate": rate, "climate_controlled": cc == "1"})
+    return rows
+
+
+def _same(a, b) -> bool:
+    if isinstance(a, (int, float)) and isinstance(b, (int, float)):
+        return round(float(a), 6) == round(float(b), 6)
+    return a == b
+
+
+def _rounded_sections(defaults, params) -> dict:
+    return {sc: {p: round(float(defaults[sc][p]), 6) for p in params}
+            for sc in SCENARIO_KEYS}
+
+
+def _submitted_sections(cleaned, prefix, params, defaults, non_pct=()) -> dict:
+    """Grid values → decimal dicts; blanks fall back to config defaults."""
+    out = {}
+    for sc in SCENARIO_KEYS:
+        d = defaults.get(sc, {})
+        s = {}
+        for p in params:
+            v = cleaned.get(f"{prefix}_{sc}_{p}")
+            if v is None:
+                s[p] = round(float(d.get(p, 0)), 6)
+            elif p in non_pct:
+                s[p] = round(float(v), 6)
+            else:
+                s[p] = round(float(v) / 100.0, 6)
+        out[sc] = s
+    return out
+
+
+def build_overrides(cleaned, post, deal) -> dict:
+    """Deltas only — see the Phase 3 plan's Design Decisions. Sections
+    equal to their defaults are omitted entirely."""
+    snapshot = deal.cim_json or {}
+    out = {}
+
+    cim_o = {}
+    for name in CIM_SCALAR_FIELDS:
+        v = cleaned.get(name)
+        if v in (None, ""):
+            continue
+        if name in CIM_PCT_FIELDS:
+            v = round(v / 100.0, 6)
+        snap = snapshot.get(name)
+        if snap is None or not _same(v, snap):
+            cim_o[name] = v
+    mix = parse_unit_mix(post)
+    if mix is not None and mix != _normalize_unit_mix(snapshot.get("unit_mix")):
+        cim_o["unit_mix"] = mix
+    if cim_o:
+        out["cim_overrides"] = cim_o
+
+    scen = _submitted_sections(cleaned, "scen", SCENARIO_PARAMS, cfg.SCENARIO_DEFAULTS)
+    if scen != _rounded_sections(cfg.SCENARIO_DEFAULTS, SCENARIO_PARAMS):
+        out["scenario_overrides"] = scen
+    va = _submitted_sections(cleaned, "va", VA_PARAMS, cfg.VALUE_ADD_SCENARIOS,
+                             non_pct=VA_NON_PCT)
+    if va != _rounded_sections(cfg.VALUE_ADD_SCENARIOS, VA_PARAMS):
+        out["va_scenario_overrides"] = va
+
+    rc = {}
+    for key in RC_KEYS:
+        low = cleaned.get(f"rc_{key}_low")
+        high = cleaned.get(f"rc_{key}_high")
+        if low is None or high is None:
+            continue
+        if key in RC_PCT_KEYS:
+            low, high = low / 100.0, high / 100.0
+        cur = [round(float(low), 6), round(float(high), 6)]
+        d_low, d_high = cfg.REPLACEMENT_COST[key]
+        if cur != [round(float(d_low), 6), round(float(d_high), 6)]:
+            rc[key] = cur
+    if rc:
+        out["replacement_cost_overrides"] = rc
+
+    tgt = cleaned.get("solver_target_irr")
+    if tgt is not None:
+        tgt = round(tgt / 100.0, 6)
+        if not _same(tgt, cfg.SOLVER_TARGET_IRR):
+            out["solver_target_irr"] = tgt
+
+    return out

@@ -377,3 +377,88 @@ def test_deal_list_links_extracted_deals(client, operator, deals_dir, fake_extra
     deal = _extracted_deal(client, deals_dir, fake_extract)
     resp = client.get("/deals/")
     assert f"/deals/{deal.pk}/assumptions/".encode() in resp.content
+
+
+def _post_assumptions(client, deal, extra=None):
+    """POST the form as rendered (initial values), with optional edits."""
+    from webapp import forms as f
+    initial = f.build_initial(deal)
+    data = {k: ("" if v is None else v) for k, v in initial.items()}
+    rows = f.unit_mix_rows(deal)
+    data["um_label"] = [r["size_label"] for r in rows]
+    data["um_count"] = [str(r["count"]) for r in rows]
+    data["um_sf"] = [str(r["sf"]) for r in rows]
+    data["um_rate"] = [str(r["rate"]) for r in rows]
+    data["um_cc"] = ["1" if r["climate_controlled"] else "0" for r in rows]
+    data.update(extra or {})
+    return client.post(f"/deals/{deal.pk}/assumptions/", data)
+
+
+@pytest.mark.django_db
+def test_save_unchanged_form_stores_no_overrides(client, operator, deals_dir,
+                                                 fake_extract):
+    deal = _extracted_deal(client, deals_dir, fake_extract)
+    resp = _post_assumptions(client, deal)
+    assert resp.status_code == 302
+    deal.refresh_from_db()
+    assert deal.assumption_overrides == {}
+
+
+@pytest.mark.django_db
+def test_save_cim_delta_and_pct_conversion(client, operator, deals_dir, fake_extract):
+    deal = _extracted_deal(client, deals_dir, fake_extract)
+    _post_assumptions(client, deal, {"asking_price": "3200000",
+                                     "physical_occupancy": "85"})
+    deal.refresh_from_db()
+    cim_o = deal.assumption_overrides["cim_overrides"]
+    assert cim_o == {"asking_price": 3200000.0, "physical_occupancy": 0.85}
+
+
+@pytest.mark.django_db
+def test_save_scenario_delta_stores_full_section(client, operator, deals_dir,
+                                                 fake_extract):
+    import config as cfg
+    deal = _extracted_deal(client, deals_dir, fake_extract)
+    _post_assumptions(client, deal, {"scen_bear_exit_cap": "9"})
+    deal.refresh_from_db()
+    scen = deal.assumption_overrides["scenario_overrides"]
+    assert scen["bear"]["exit_cap"] == 0.09
+    # untouched values persisted alongside (auditability)
+    assert scen["base"]["exit_cap"] == cfg.SCENARIO_DEFAULTS["base"]["exit_cap"]
+    assert "va_scenario_overrides" not in deal.assumption_overrides
+
+
+@pytest.mark.django_db
+def test_save_unit_mix_edit(client, operator, deals_dir, fake_extract):
+    deal = _extracted_deal(client, deals_dir, fake_extract)
+    _post_assumptions(client, deal, {
+        "um_label": ["10x10", "10x20", ""],
+        "um_count": ["120", "50", "0"],          # changed 100 → 120; blank row dropped
+        "um_sf": ["100", "200", ""],
+        "um_rate": ["95", "165", ""],
+        "um_cc": ["0", "1", "0"],
+    })
+    deal.refresh_from_db()
+    mix = deal.assumption_overrides["cim_overrides"]["unit_mix"]
+    assert len(mix) == 2
+    assert mix[0]["count"] == 120
+    assert mix[1]["climate_controlled"] is True
+
+
+@pytest.mark.django_db
+def test_save_rc_and_solver_deltas(client, operator, deals_dir, fake_extract):
+    deal = _extracted_deal(client, deals_dir, fake_extract)
+    _post_assumptions(client, deal, {"rc_ss_driveup_per_sf_low": "60",
+                                     "solver_target_irr": "12"})
+    deal.refresh_from_db()
+    o = deal.assumption_overrides
+    assert o["replacement_cost_overrides"] == {"ss_driveup_per_sf": [60.0, 85.0]}
+    assert o["solver_target_irr"] == 0.12
+
+
+@pytest.mark.django_db
+def test_saved_values_render_on_next_get(client, operator, deals_dir, fake_extract):
+    deal = _extracted_deal(client, deals_dir, fake_extract)
+    _post_assumptions(client, deal, {"physical_occupancy": "85"})
+    resp = client.get(f"/deals/{deal.pk}/assumptions/")
+    assert b'value="85' in resp.content
