@@ -15,7 +15,7 @@ from django_htmx.http import HttpResponseClientRedirect
 
 from webapp import forms as assumptions_forms
 from webapp import services
-from webapp.models import Deal
+from webapp.models import AnalysisRun, Deal
 
 logger = logging.getLogger("cim_analyst.web")
 
@@ -134,6 +134,14 @@ def deal_assumptions(request, pk):
             deal.assumption_overrides = assumptions_forms.build_overrides(
                 form.cleaned_data, request.POST, deal)
             deal.save(update_fields=["assumption_overrides", "updated_at"])
+            if "run" in request.POST:
+                if _run_state(deal.runs.first()) == "running":
+                    messages.error(
+                        request, "An analysis is already running for this deal.")
+                    return redirect("deal-detail", pk=deal.pk)
+                run = AnalysisRun.objects.create(deal=deal)
+                services.start_analysis(run)
+                return redirect("deal-detail", pk=deal.pk)
             messages.success(request, "Assumptions saved.")
             return redirect("deal-assumptions", pk=deal.pk)
         rows = assumptions_forms.parse_unit_mix(request.POST) or []
@@ -224,3 +232,51 @@ def deal_discard(request, pk):
     deal.delete()
     messages.success(request, f"Discarded upload “{name}”.")
     return redirect("deal-list")
+
+
+# ── Phase 4: analysis runs ──────────────────────────────────────────
+
+def _run_state(run):
+    """None | 'running' | 'failed' | 'done' — a running row older than
+    the timeout counts as failed so the UI never spins forever."""
+    if run is None:
+        return None
+    if run.status in ("done", "failed"):
+        return run.status
+    if (timezone.now() - run.created_at).total_seconds() > \
+            services.ANALYSIS_TIMEOUT_SECONDS:
+        return "failed"
+    return "running"
+
+
+@login_required
+@require_POST
+def deal_run(request, pk):
+    deal = get_object_or_404(Deal, pk=pk)
+    if not deal.cim_json:
+        messages.error(request, "No extraction snapshot — upload the CIM "
+                                "under New Analysis first.")
+        return redirect("deal-detail", pk=deal.pk)
+    if _run_state(deal.runs.first()) == "running":
+        messages.error(request, "An analysis is already running for this deal.")
+        return redirect("deal-detail", pk=deal.pk)
+    run = AnalysisRun.objects.create(deal=deal)
+    services.start_analysis(run)
+    return redirect("deal-detail", pk=deal.pk)
+
+
+@login_required
+def run_status(request, pk):
+    deal = get_object_or_404(Deal, pk=pk)
+    run = deal.runs.first()
+    state = _run_state(run)
+    if state == "done":
+        return HttpResponseClientRedirect(reverse("deal-detail", args=[deal.pk]))
+    return render(request, "webapp/_run_status.html",
+                  {"deal": deal, "run": run, "failed": state == "failed"})
+
+
+@login_required
+def deal_detail(request, pk):
+    deal = get_object_or_404(Deal, pk=pk)
+    return HttpResponse(deal.property_name)  # replaced in Task 5

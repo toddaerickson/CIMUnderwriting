@@ -328,3 +328,91 @@ def test_worker_deal_refresh_failure_rolls_back_run_done_flip(
     assert run.template_filename == ""
     deal.refresh_from_db()
     assert deal.recommendation == "N/A"  # deal row untouched too
+
+
+@pytest.mark.django_db
+def test_deal_run_starts_and_redirects(client, operator, deals_dir, fake_run):
+    deal = _make_extracted_deal(deals_dir)
+    resp = client.post(f"/deals/{deal.pk}/run/")
+    assert resp.status_code == 302
+    assert resp.url == f"/deals/{deal.pk}/"
+    run = deal.runs.first()
+    assert run.status == "done"  # sync mode ran inline
+
+
+@pytest.mark.django_db
+def test_deal_run_refuses_without_snapshot(client, operator, deals_dir):
+    from webapp.models import Deal
+    imported = Deal.objects.create(deal_id="legacy", property_name="Legacy")
+    resp = client.post(f"/deals/{imported.pk}/run/")
+    assert resp.status_code == 302
+    assert imported.runs.count() == 0
+
+
+@pytest.mark.django_db
+def test_deal_run_refuses_while_running(client, operator, deals_dir, monkeypatch):
+    from webapp import services
+    from webapp.models import AnalysisRun
+    deal = _make_extracted_deal(deals_dir)
+    AnalysisRun.objects.create(deal=deal)  # status=running, fresh stamp
+    monkeypatch.setattr(services, "start_analysis",
+                        lambda run: pytest.fail("must not start a second run"))
+    client.post(f"/deals/{deal.pk}/run/")
+    assert deal.runs.count() == 1
+
+
+@pytest.mark.django_db
+def test_run_status_running_polls(client, operator, deals_dir):
+    from webapp.models import AnalysisRun
+    deal = _make_extracted_deal(deals_dir)
+    AnalysisRun.objects.create(deal=deal, progress_step=3,
+                               progress_msg="Analyzing market...")
+    resp = client.get(f"/deals/{deal.pk}/run-status/")
+    assert resp.status_code == 200
+    assert b"hx-trigger" in resp.content
+    assert b"Analyzing market..." in resp.content
+
+
+@pytest.mark.django_db
+def test_run_status_done_redirects(client, operator, deals_dir):
+    from webapp.models import AnalysisRun
+    deal = _make_extracted_deal(deals_dir)
+    AnalysisRun.objects.create(deal=deal, status="done")
+    resp = client.get(f"/deals/{deal.pk}/run-status/")
+    assert resp.headers["HX-Redirect"] == f"/deals/{deal.pk}/"
+
+
+@pytest.mark.django_db
+def test_run_status_failed_and_timeout_stop_polling(client, operator, deals_dir):
+    import datetime as dt
+
+    from django.utils import timezone
+
+    from webapp.models import AnalysisRun
+    deal = _make_extracted_deal(deals_dir)
+    run = AnalysisRun.objects.create(deal=deal, status="failed",
+                                     error="solver exploded")
+    resp = client.get(f"/deals/{deal.pk}/run-status/")
+    assert b"hx-trigger" not in resp.content
+    assert b"solver exploded" in resp.content
+    # timeout: still "running" but created too long ago
+    run.status = "running"
+    run.error = ""
+    run.save()
+    AnalysisRun.objects.filter(pk=run.pk).update(
+        created_at=timezone.now() - dt.timedelta(seconds=999))
+    resp = client.get(f"/deals/{deal.pk}/run-status/")
+    assert b"hx-trigger" not in resp.content
+    assert b"timed out" in resp.content
+
+
+@pytest.mark.django_db
+def test_assumptions_save_and_run(client, operator, deals_dir, fake_run):
+    deal = _make_extracted_deal(deals_dir)
+    resp = client.post(f"/deals/{deal.pk}/assumptions/",
+                       {"asking_price": "3400000", "run": "1"})
+    assert resp.status_code == 302
+    assert resp.url == f"/deals/{deal.pk}/"
+    deal.refresh_from_db()
+    assert deal.assumption_overrides["cim_overrides"]["asking_price"] == 3_400_000.0
+    assert deal.runs.first().status == "done"

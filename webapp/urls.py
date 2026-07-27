@@ -11,4 +11,7 @@ urlpatterns = [
     path("analyze/", views.analyze, name="analyze"),
     path("deals/<int:pk>/discard/", views.deal_discard, name="deal-discard"),
     path("deals/unit-mix-row/", views.unit_mix_row, name="unit-mix-row"),
+    path("deals/<int:pk>/", views.deal_detail, name="deal-detail"),
+    path("deals/<int:pk>/run/", views.deal_run, name="deal-run"),
+    path("deals/<int:pk>/run-status/", views.run_status, name="run-status"),
 ]
