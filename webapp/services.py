@@ -97,3 +97,87 @@ def _extract_worker(deal_pk, pdf_path, stamp):
         if getattr(settings, "EXTRACT_USE_THREAD", True):
             from django.db import connections
             connections.close_all()
+
+
+# ── Upload / deal creation / duplicate check ────────────────────────
+
+ALLOWED_DOC_EXTS = {".pdf", ".xlsx", ".xls", ".csv"}
+MAX_UPLOAD_BYTES = 200 * 1024 * 1024
+
+
+def _safe_filename(name: str) -> str:
+    base = os.path.basename((name or "").replace("\x00", "")).strip()
+    if base in ("", ".", ".."):
+        raise ValueError("invalid filename")
+    return base
+
+
+def unique_deal_slug(base: str) -> str:
+    """Free slug for a new upload; collisions get -v2, -v3, … (the web
+    equivalent of Streamlit's 'Continue as New (v2)')."""
+    base = (base or "deal")[:100]
+
+    def taken(slug):
+        return (Deal.objects.filter(deal_id=slug).exists()
+                or os.path.isdir(os.path.join(settings.CIM_DEALS_DIR, slug)))
+
+    if not taken(base):
+        return base
+    n = 2
+    while taken(f"{base}-v{n}"):
+        n += 1
+    return f"{base}-v{n}"
+
+
+def create_deal_from_upload(cim_file, rent_roll=None, financials=None) -> Deal:
+    """Create the deal folder + inputs/ + Deal row from uploaded files.
+
+    deal_id derives from the PDF filename stem (property name isn't known
+    until extraction completes and refreshes the row)."""
+    cim_name = _safe_filename(cim_file.name)
+    stem = os.path.splitext(cim_name)[0]
+    slug = unique_deal_slug(sanitize_name(stem).lower())
+    deal_dir = os.path.join(settings.CIM_DEALS_DIR, slug)
+    inputs_dir = os.path.join(deal_dir, "inputs")
+    os.makedirs(inputs_dir, exist_ok=True)
+    input_files = []
+    for f in (cim_file, rent_roll, financials):
+        if not f:
+            continue
+        name = _safe_filename(f.name)
+        with open(os.path.join(inputs_dir, name), "wb") as out:
+            for chunk in f.chunks():
+                out.write(chunk)
+        input_files.append(name)
+    return Deal.objects.create(
+        deal_id=slug, property_name=stem, deal_dir=deal_dir,
+        input_files=input_files, extract_status="pending")
+
+
+def _comp_db_dupes(filename: str) -> list[dict]:
+    """Advisory comp-DB matches; a broken comp DB must not block an
+    upload, but it must be loud in the logs."""
+    try:
+        from data.comp_db import CompDatabase
+        stem = os.path.splitext(filename)[0]
+        return CompDatabase().find_duplicates(filename=filename, property_name=stem)
+    except Exception:
+        logger.exception("comp DB duplicate check failed")
+        return []
+
+
+def find_upload_duplicates(filename: str) -> list[dict]:
+    """Comp-DB matches + Deal rows whose input_files contain this
+    filename. Call BEFORE create_deal_from_upload, or the new row
+    matches itself."""
+    dupes = _comp_db_dupes(filename)
+    for deal in Deal.objects.all():
+        if filename in (deal.input_files or []):
+            dupes.append({
+                "property_name": deal.property_name, "city": deal.city,
+                "state": deal.state,
+                "analysis_date": deal.analysis_date.isoformat() if deal.analysis_date else "",
+                "pdf_filename": filename, "match_type": "deal_folder",
+                "deal_pk": deal.pk,
+            })
+    return dupes

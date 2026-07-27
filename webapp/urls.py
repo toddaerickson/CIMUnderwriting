@@ -8,4 +8,6 @@ urlpatterns = [
     path("deals/<int:pk>/assumptions/", views.deal_assumptions, name="deal-assumptions"),
     path("deals/<int:pk>/extract-status/", views.extract_status, name="extract-status"),
     path("deals/<int:pk>/extract-retry/", views.extract_retry, name="extract-retry"),
+    path("analyze/", views.analyze, name="analyze"),
+    path("deals/<int:pk>/discard/", views.deal_discard, name="deal-discard"),
 ]

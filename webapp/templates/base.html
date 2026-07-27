@@ -66,10 +66,8 @@
       <nav class="flex-1 overflow-y-auto px-2 py-4 space-y-4 text-[13px] text-slate-900/90">
         <div>
           <div class="px-2 text-xs font-bold uppercase tracking-wider text-slate-500 mb-1">Underwrite</div>
-          <span class="flex items-center justify-between px-2 py-1.5 md:py-0.5 rounded text-slate-400 cursor-not-allowed">
-            New Analysis
-            <span class="text-[10px] uppercase tracking-wide text-slate-300">soon</span>
-          </span>
+          <a href="{% url 'analyze' %}"
+             class="block px-2 py-1.5 md:py-0.5 rounded {% if request.resolver_match.url_name == 'analyze' %}bg-accent-700 text-white{% else %}hover:bg-slate-100{% endif %}">New Analysis</a>
           <a href="{% url 'deal-list' %}"
              class="block px-2 py-1.5 md:py-0.5 rounded {% if request.resolver_match.url_name == 'deal-list' %}bg-accent-700 text-white{% else %}hover:bg-slate-100{% endif %}">Deal Pipeline</a>
         </div>

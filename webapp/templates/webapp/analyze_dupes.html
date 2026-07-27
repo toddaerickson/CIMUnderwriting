@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+{% block title %}Possible Duplicate — {{ deal.property_name }}{% endblock %}
+{% block content %}
+<div class="max-w-4xl">
+  <h1 class="font-display text-xl font-semibold mb-3">Possible duplicate</h1>
+  <div class="mb-3 rounded-md border border-amber-200 bg-amber-50 px-4 py-2 text-sm text-amber-800">
+    This file or property may already exist ({{ dupes|length }} match{{ dupes|length|pluralize:"es" }} found).
+    Extraction of the new upload has already started in the background.
+  </div>
+  <div class="bg-white border border-slate-200 rounded-lg overflow-x-auto mb-4">
+    <table class="w-full text-sm border-collapse">
+      <thead>
+        <tr class="text-left border-b border-slate-300 text-xs text-slate-600">
+          <th class="py-1.5 pl-3 pr-3">Property</th>
+          <th class="py-1.5 pr-3">City</th>
+          <th class="py-1.5 pr-3">ST</th>
+          <th class="py-1.5 pr-3">Analyzed</th>
+          <th class="py-1.5 pr-3">Match</th>
+          <th class="py-1.5 pr-3"></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for d in dupes %}
+        <tr class="border-b border-slate-100">
+          <td class="py-1.5 pl-3 pr-3 font-medium">{{ d.property_name }}</td>
+          <td class="py-1.5 pr-3">{{ d.city }}</td>
+          <td class="py-1.5 pr-3">{{ d.state }}</td>
+          <td class="py-1.5 pr-3 whitespace-nowrap">{{ d.analysis_date }}</td>
+          <td class="py-1.5 pr-3">{{ d.match_type }}</td>
+          <td class="py-1.5 pr-3">
+            {% if d.deal_pk %}<a href="{% url 'deal-assumptions' d.deal_pk %}" class="text-accent-700 hover:underline">Open</a>{% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <div class="flex gap-2 items-center">
+    <a href="{% url 'deal-assumptions' deal.pk %}"
+       class="bg-accent-700 text-white text-sm px-4 py-1.5 rounded">Keep &amp; continue as &ldquo;{{ deal.deal_id }}&rdquo;</a>
+    <form method="post" action="{% url 'deal-discard' deal.pk %}">
+      {% csrf_token %}
+      <button type="submit" class="text-sm px-4 py-1.5 rounded border border-red-300 text-red-700 hover:bg-red-50">Discard this upload</button>
+    </form>
+  </div>
+</div>
+{% endblock %}

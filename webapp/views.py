@@ -1,6 +1,8 @@
 import logging
 import os
+import shutil
 
+from django.conf import settings
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.db import connection
@@ -124,3 +126,61 @@ def deal_assumptions(request, pk):
         return render(request, "webapp/assumptions_wait.html",
                       {"deal": deal, "failed": state == "failed"})
     return HttpResponse("Assumptions editor lands in Task 5.")  # replaced in Task 5
+
+
+# ── Phase 3: upload flow ─────────────────────────────────────────────
+
+@login_required
+def analyze(request):
+    if request.method != "POST":
+        return render(request, "webapp/analyze.html")
+    errors = []
+    cim = request.FILES.get("cim")
+    if not cim:
+        errors.append("A CIM PDF is required.")
+    elif not cim.name.lower().endswith(".pdf"):
+        errors.append("The CIM must be a .pdf file.")
+    optional = {}
+    for key, label in (("rent_roll", "Rent roll"), ("financials", "Financials")):
+        f = request.FILES.get(key)
+        optional[key] = f
+        if f is not None:
+            ext = os.path.splitext(f.name)[1].lower()
+            if ext not in services.ALLOWED_DOC_EXTS:
+                errors.append(f"{label}: unsupported file type {ext or '(none)'}.")
+    for f in [f for f in (cim, optional["rent_roll"], optional["financials"]) if f]:
+        if f.size > services.MAX_UPLOAD_BYTES:
+            errors.append(f"{f.name} is larger than 200 MB.")
+    if errors:
+        return render(request, "webapp/analyze.html", {"errors": errors}, status=422)
+    dupes = services.find_upload_duplicates(os.path.basename(cim.name))
+    try:
+        deal = services.create_deal_from_upload(
+            cim, rent_roll=optional["rent_roll"], financials=optional["financials"])
+    except ValueError as e:
+        return render(request, "webapp/analyze.html", {"errors": [str(e)]}, status=422)
+    services.start_extract(deal)
+    if dupes:
+        return render(request, "webapp/analyze_dupes.html",
+                      {"deal": deal, "dupes": dupes})
+    return redirect("deal-assumptions", pk=deal.pk)
+
+
+@login_required
+@require_POST
+def deal_discard(request, pk):
+    """Delete a just-uploaded deal (dupe-confirm page). Refuses imported
+    deals (no extraction state) and anything that already produced
+    analysis outputs — those folders hold real history."""
+    deal = get_object_or_404(Deal, pk=pk)
+    deals_root = os.path.realpath(settings.CIM_DEALS_DIR)
+    target = os.path.realpath(deal.deal_dir) if deal.deal_dir else ""
+    if (deal.extract_status == "" or deal.memo_filename or deal.excel_filename
+            or not target.startswith(deals_root + os.sep)):
+        messages.error(request, "This deal can't be discarded from here.")
+        return redirect("deal-list")
+    shutil.rmtree(target, ignore_errors=True)
+    name = deal.property_name
+    deal.delete()
+    messages.success(request, f"Discarded upload “{name}”.")
+    return redirect("deal-list")

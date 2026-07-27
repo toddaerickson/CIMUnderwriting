@@ -212,3 +212,112 @@ def test_assumptions_wait_and_unavailable(client, operator, deals_dir):
     resp = client.get(f"/deals/{imported.pk}/assumptions/")
     assert resp.status_code == 200
     assert b"no extraction snapshot" in resp.content.lower()
+
+
+def _pdf(name="expo.pdf"):
+    return SimpleUploadedFile(name, b"%PDF-1.4 fake", content_type="application/pdf")
+
+
+@pytest.mark.django_db
+def test_analyze_requires_login(client):
+    resp = client.get("/analyze/")
+    assert resp.status_code == 302
+    assert resp.url.startswith("/accounts/login/")
+
+
+@pytest.mark.django_db
+def test_upload_creates_deal_and_extracts(client, operator, deals_dir, fake_extract):
+    from webapp.models import Deal
+    resp = client.post("/analyze/", {"cim": _pdf()})
+    deal = Deal.objects.get()
+    assert resp.status_code == 302
+    assert resp.url == f"/deals/{deal.pk}/assumptions/"
+    assert deal.deal_id == "expo"
+    assert deal.input_files == ["expo.pdf"]
+    assert os.path.isfile(os.path.join(deal.deal_dir, "inputs", "expo.pdf"))
+    deal.refresh_from_db()
+    assert deal.extract_status == "done"  # sync mode
+    assert deal.property_name == "Expo Storage"
+
+
+@pytest.mark.django_db
+def test_upload_saves_optional_files(client, operator, deals_dir, fake_extract):
+    from webapp.models import Deal
+    client.post("/analyze/", {
+        "cim": _pdf(),
+        "rent_roll": SimpleUploadedFile("rr.xlsx", b"fake",
+                                        content_type="application/octet-stream"),
+        "financials": SimpleUploadedFile("fin.csv", b"a,b", content_type="text/csv"),
+    })
+    deal = Deal.objects.get()
+    assert deal.input_files == ["expo.pdf", "rr.xlsx", "fin.csv"]
+    assert os.path.isfile(os.path.join(deal.deal_dir, "inputs", "rr.xlsx"))
+
+
+@pytest.mark.django_db
+def test_upload_validation(client, operator, deals_dir):
+    from webapp.models import Deal
+    resp = client.post("/analyze/", {})
+    assert resp.status_code == 422
+    resp = client.post("/analyze/", {"cim": SimpleUploadedFile("x.exe", b"z")})
+    assert resp.status_code == 422
+    resp = client.post("/analyze/", {"cim": _pdf(),
+                                     "rent_roll": SimpleUploadedFile("x.exe", b"z")})
+    assert resp.status_code == 422
+    assert Deal.objects.count() == 0
+
+
+@pytest.mark.django_db
+def test_upload_slug_collision_gets_v2(client, operator, deals_dir, fake_extract,
+                                       monkeypatch):
+    from webapp import services
+    from webapp.models import Deal
+    monkeypatch.setattr(services, "_comp_db_dupes", lambda filename: [])
+    client.post("/analyze/", {"cim": _pdf()})
+    resp = client.post("/analyze/", {"cim": _pdf()})  # same filename again
+    assert Deal.objects.count() == 2
+    assert set(Deal.objects.values_list("deal_id", flat=True)) == {"expo", "expo-v2"}
+    # second upload matched the first deal's input file → dupe confirm page
+    assert resp.status_code == 200
+    assert b"already exist" in resp.content
+
+
+@pytest.mark.django_db
+def test_comp_db_dupes_surface(client, operator, deals_dir, fake_extract, monkeypatch):
+    from webapp import services
+    monkeypatch.setattr(services, "_comp_db_dupes", lambda filename: [{
+        "property_name": "Expo Storage", "city": "Belton", "state": "TX",
+        "analysis_date": "2026-06-01", "pdf_filename": filename,
+        "match_type": "filename",
+    }])
+    resp = client.post("/analyze/", {"cim": _pdf()})
+    assert resp.status_code == 200
+    assert b"Expo Storage" in resp.content
+    assert b"Discard this upload" in resp.content
+
+
+@pytest.mark.django_db
+def test_discard_deletes_upload(client, operator, deals_dir, fake_extract):
+    from webapp.models import Deal
+    client.post("/analyze/", {"cim": _pdf()})
+    deal = Deal.objects.get()
+    folder = deal.deal_dir
+    resp = client.post(f"/deals/{deal.pk}/discard/")
+    assert resp.status_code == 302
+    assert Deal.objects.count() == 0
+    assert not os.path.isdir(folder)
+
+
+@pytest.mark.django_db
+def test_discard_refuses_imported_and_analyzed(client, operator, deals_dir):
+    from webapp.models import Deal
+    imported = Deal.objects.create(deal_id="legacy", property_name="Legacy",
+                                   deal_dir=str(deals_dir / "legacy"))
+    analyzed = Deal.objects.create(deal_id="done-deal", property_name="Done",
+                                   deal_dir=str(deals_dir / "done-deal"),
+                                   extract_status="done", memo_filename="memo.docx")
+    for d in (imported, analyzed):
+        os.makedirs(d.deal_dir, exist_ok=True)
+        client.post(f"/deals/{d.pk}/discard/")
+        assert Deal.objects.filter(pk=d.pk).exists()
+        assert os.path.isdir(d.deal_dir)
