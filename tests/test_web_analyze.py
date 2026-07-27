@@ -321,3 +321,59 @@ def test_discard_refuses_imported_and_analyzed(client, operator, deals_dir):
         client.post(f"/deals/{d.pk}/discard/")
         assert Deal.objects.filter(pk=d.pk).exists()
         assert os.path.isdir(d.deal_dir)
+
+
+def _extracted_deal(client, deals_dir, fake_extract):
+    from webapp.models import Deal
+    client.post("/analyze/", {"cim": _pdf()})
+    deal = Deal.objects.latest("pk")
+    deal.refresh_from_db()
+    assert deal.extract_status == "done"
+    return deal
+
+
+@pytest.mark.django_db
+def test_assumptions_get_renders_snapshot(client, operator, deals_dir, fake_extract):
+    deal = _extracted_deal(client, deals_dir, fake_extract)
+    resp = client.get(f"/deals/{deal.pk}/assumptions/")
+    assert resp.status_code == 200
+    content = resp.content.decode()
+    assert 'value="Expo Storage"' in content          # property name prefilled
+    assert 'value="92' in content                     # physical_occupancy 0.92 → 92
+    assert 'value="3500000' in content                # asking price
+    assert "10x10" in content                         # unit mix row rendered
+    assert 'name="um_label"' in content
+
+
+@pytest.mark.django_db
+def test_assumptions_get_flags_missing_required(client, operator, deals_dir,
+                                                fake_extract):
+    deal = _extracted_deal(client, deals_dir, fake_extract)
+    deal.cim_json["ttm_egr"] = None
+    deal.extraction_report["missing"] = ["ttm_egr", "msa"]
+    deal.save()
+    resp = client.get(f"/deals/{deal.pk}/assumptions/")
+    content = resp.content.decode()
+    assert "required-flag" in content  # marker class on the ttm_egr label
+
+
+@pytest.mark.django_db
+def test_unit_mix_row_endpoint(client, operator):
+    resp = client.get("/deals/unit-mix-row/")
+    assert resp.status_code == 200
+    assert b'name="um_label"' in resp.content
+
+
+@pytest.mark.django_db
+def test_required_fields_parity_with_gui():
+    from gui.components.assumptions_editor import REQUIRED_FIELDS as gui_required
+
+    from webapp.forms import REQUIRED_FIELDS as web_required
+    assert web_required == gui_required
+
+
+@pytest.mark.django_db
+def test_deal_list_links_extracted_deals(client, operator, deals_dir, fake_extract):
+    deal = _extracted_deal(client, deals_dir, fake_extract)
+    resp = client.get("/deals/")
+    assert f"/deals/{deal.pk}/assumptions/".encode() in resp.content

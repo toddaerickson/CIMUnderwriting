@@ -181,3 +181,27 @@ def find_upload_duplicates(filename: str) -> list[dict]:
                 "deal_pk": deal.pk,
             })
     return dupes
+
+
+def expense_benchmark_rows(deal) -> list[dict]:
+    """Read-only reference table: CIM $/SF vs state-adjusted benchmarks."""
+    from config import EXPENSE_BENCHMARKS, get_regional_benchmarks
+    from registry import EXPENSE_CATEGORIES
+
+    snapshot = deal.cim_json or {}
+    state = (snapshot.get("state") or deal.state or "").upper()
+    nrsf = snapshot.get("nrsf") or 0
+    benchmarks = get_regional_benchmarks(state) if state else EXPENSE_BENCHMARKS
+    cim_exp = {}
+    if nrsf:
+        for line in snapshot.get("expense_lines") or []:
+            if line.get("t12"):
+                cim_exp[(line.get("label") or "").lower()] = line["t12"] / nrsf
+    rows = []
+    for cat in EXPENSE_CATEGORIES:
+        low, high = benchmarks.get(cat.key, (0, 0))
+        cim_val = next((val for kw in cat.parse_keywords
+                        for label, val in cim_exp.items() if kw in label), None)
+        rows.append({"category": cat.display_name, "cim": cim_val,
+                     "low": low, "high": high})
+    return rows

@@ -13,6 +13,7 @@ from django.utils import timezone
 from django.views.decorators.http import require_POST
 from django_htmx.http import HttpResponseClientRedirect
 
+from webapp import forms as assumptions_forms
 from webapp import services
 from webapp.models import Deal
 
@@ -125,7 +126,34 @@ def deal_assumptions(request, pk):
     if state != "done":
         return render(request, "webapp/assumptions_wait.html",
                       {"deal": deal, "failed": state == "failed"})
-    return HttpResponse("Assumptions editor lands in Task 5.")  # replaced in Task 5
+    report = deal.extraction_report or {}
+    missing_required = set(report.get("missing", [])) & assumptions_forms.REQUIRED_FIELDS
+    form = assumptions_forms.AssumptionsForm(
+        initial=assumptions_forms.build_initial(deal))
+    rows = assumptions_forms.unit_mix_rows(deal)
+    f = assumptions_forms
+    return render(request, "webapp/assumptions.html", {
+        "deal": deal, "form": form, "report": report,
+        "missing_fields": report.get("missing", []),
+        "warnings": deal.extract_warnings,
+        "unit_rows": rows,
+        "benchmark_rows": services.expense_benchmark_rows(deal),
+        "sec_property": f.section_fields(form, f.SECTION_PROPERTY, missing_required),
+        "sec_size": f.section_fields(form, f.SECTION_SIZE, missing_required),
+        "sec_income": f.section_fields(form, f.SECTION_INCOME, missing_required),
+        "sec_demo": f.section_fields(form, f.SECTION_DEMOGRAPHICS, missing_required),
+        "scenario_rows": f.scenario_grid(form),
+        "va_rows": f.va_grid(form),
+        "rc_rows": f.rc_grid(form),
+        "rc_soft": [form["rc_soft_cost_pct_low"], form["rc_soft_cost_pct_high"],
+                    form["rc_dev_profit_pct_low"], form["rc_dev_profit_pct_high"]],
+        "solver_field": form["solver_target_irr"],
+    })
+
+
+@login_required
+def unit_mix_row(request):
+    return render(request, "webapp/_unit_mix_row.html", {"row": {}})
 
 
 # ── Phase 3: upload flow ─────────────────────────────────────────────
