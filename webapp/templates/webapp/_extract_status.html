@@ -3,7 +3,7 @@
   <p class="font-medium">Extraction failed{% if deal.extract_error %}: {{ deal.extract_error }}{% else %} or timed out.{% endif %}</p>
   <form method="post" action="{% url 'extract-retry' deal.pk %}" class="mt-2">
     {% csrf_token %}
-    <button type="submit" class="bg-accent-700 text-white text-sm px-3 py-1.5 rounded">Retry extraction</button>
+    <button type="submit" class="bg-accent-700 text-white text-sm px-4 py-1.5 rounded">Retry extraction</button>
   </form>
 </div>
 {% else %}
