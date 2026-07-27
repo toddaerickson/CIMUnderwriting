@@ -9,6 +9,7 @@ import os
 
 from django.conf import settings
 from django.core.management.base import BaseCommand
+from django.db import DataError
 
 from webapp.models import Deal
 
@@ -59,6 +60,7 @@ class Command(BaseCommand):
                 TypeError,
                 AttributeError,
                 OSError,
+                DataError,
             ) as e:
                 skipped += 1
                 self.stderr.write(f"skipped {name}: {e}")
