@@ -40,3 +40,35 @@ def test_import_deals_idempotent(tmp_path, settings):
     assert d.state == "TX"
     assert d.analysis_date.isoformat() == "2026-07-01"
     assert d.deal_dir == str(folder)
+
+
+@pytest.mark.django_db
+def test_import_deals_skips_malformed_folder(tmp_path, settings):
+    from django.core.management import call_command
+    from webapp.models import Deal
+
+    bad_meta = {
+        "deal_id": "aaa-bad", "property_name": "Bad Storage",
+        "nrsf": [1, 2, 3],  # non-numeric FloatField value -> TypeError on save
+    }
+    good_meta = {
+        "deal_id": "zzz-good", "property_name": "Good Storage",
+        "city": "Waco", "state": "TX", "asset_type": "Self Storage",
+        "nrsf": 30000.0, "acreage": 3.0, "asking_price": 2_000_000,
+        "estimated_fair_value": 1_900_000, "recommendation": "PASS",
+        "analysis_date": "2026-07-05", "memo_path": "memo.docx",
+        "excel_path": "model.xlsx", "input_files": ["om.pdf"],
+    }
+    bad_folder = tmp_path / "aaa-bad"
+    bad_folder.mkdir()
+    (bad_folder / "deal_meta.json").write_text(json.dumps(bad_meta))
+    good_folder = tmp_path / "zzz-good"
+    good_folder.mkdir()
+    (good_folder / "deal_meta.json").write_text(json.dumps(good_meta))
+    settings.CIM_DEALS_DIR = str(tmp_path)
+
+    call_command("import_deals")  # must not raise
+
+    assert Deal.objects.count() == 1
+    d = Deal.objects.get()
+    assert d.deal_id == "zzz-good"

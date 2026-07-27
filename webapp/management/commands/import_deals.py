@@ -52,7 +52,14 @@ class Command(BaseCommand):
                     },
                 )
                 imported += 1
-            except (KeyError, ValueError, json.JSONDecodeError) as e:
+            except (
+                KeyError,
+                ValueError,
+                json.JSONDecodeError,
+                TypeError,
+                AttributeError,
+                OSError,
+            ) as e:
                 skipped += 1
                 self.stderr.write(f"skipped {name}: {e}")
         self.stdout.write(f"imported/updated {imported}, skipped {skipped}")
