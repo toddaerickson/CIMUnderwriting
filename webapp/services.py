@@ -505,17 +505,17 @@ def _analysis_worker(run_pk):
             AnalysisRun.objects.filter(pk=run_pk).update(
                 status="done", finished_at=timezone.now(), result_json=payload,
                 error="",
-                memo_filename=os.path.basename(result.memo_path or ""),
-                excel_filename=os.path.basename(result.excel_path or ""),
-                template_filename=os.path.basename(result.template_path or ""),
+                memo_filename=os.path.basename(result.memo_path or "")[:300],
+                excel_filename=os.path.basename(result.excel_path or "")[:300],
+                template_filename=os.path.basename(result.template_path or "")[:300],
             )
 
             deal_updates = {
                 "recommendation": (meta.get("recommendation") or "N/A")[:40],
                 "estimated_fair_value": meta.get("estimated_fair_value"),
                 "analysis_date": datetime.date.fromisoformat(meta["analysis_date"]),
-                "memo_filename": os.path.basename(result.memo_path or ""),
-                "excel_filename": os.path.basename(result.excel_path or ""),
+                "memo_filename": os.path.basename(result.memo_path or "")[:300],
+                "excel_filename": os.path.basename(result.excel_path or "")[:300],
                 "asset_type": detect_asset_type(cim),
             }
             if cim.property_name:

@@ -9,7 +9,7 @@ class Deal(models.Model):
     metadata sourced from a float pipeline, not accounting.
     """
 
-    deal_id = models.SlugField(max_length=120, unique=True)
+    deal_id = models.SlugField(max_length=200, unique=True)
     property_name = models.CharField(max_length=200)
     city = models.CharField(max_length=100, blank=True, default="")
     state = models.CharField(max_length=2, blank=True, default="")
@@ -39,7 +39,11 @@ class Deal(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
-        ordering = ["-analysis_date", "-created_at"]
+        # F() ordering: NULL analysis_date sorts FIRST on Postgres under
+        # plain "-analysis_date" but LAST on SQLite — pin nulls_last so
+        # undated deals don't jump to the top at the Neon cutover.
+        ordering = [models.F("analysis_date").desc(nulls_last=True),
+                    "-created_at"]
 
     def __str__(self):
         return self.property_name
