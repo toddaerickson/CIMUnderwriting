@@ -17,9 +17,8 @@ from registry import ScenarioType
 
 logger = logging.getLogger("cim_analyst.web")
 
-# Mirrors gui/components/assumptions_editor.REQUIRED_FIELDS — parity-
-# tested in tests/test_web_analyze.py; consolidated when gui/ retires
-# in Phase 5.
+# Single source of truth for required assumption fields (the Streamlit
+# editor's copy was consolidated here when gui/ retired in Phase 5).
 REQUIRED_FIELDS = {
     "asking_price", "nrsf", "total_units", "ttm_noi",
     "physical_occupancy", "state", "ttm_egr",

@@ -43,6 +43,8 @@
 - [x] Render (done) — blueprint merged; production cutover follows the DEPLOY.md runbook
 - [x] Authentication — Django allowlisted login (`ALLOWED_EMAILS`) replaced the Cloudflare Tunnel + Access plan
 - [ ] Custom domain
+- [ ] Post-cutover hardening (deferred from PR #2 review): `SECURE_HSTS_SECONDS`
+      + `manage.py check --deploy` in CI; decide `/admin/` exposure (see DEPLOY.md)
 
 ### Levered Returns / LP Waterfall
 - [ ] Add debt layer (senior/junior with term, IO, amort, rate)

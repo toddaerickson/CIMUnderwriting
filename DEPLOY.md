@@ -67,6 +67,20 @@ Ship-dark ends here. Railway keeps serving Streamlit until step 8; nothing below
 9. ⚑ **Retire Railway**: delete the CIM_Analyst service (and its volume) in the Railway dashboard.
 10. **Bookkeeping**: update the deploy table row in `~/.claude/CLAUDE.md` → `| CIM_Analyst | Render | push to main | /health/ |`; set a quarterly calendar reminder for the restore drill (Neon PITR + disk snapshot).
 
+## Post-cutover hardening (deferred from the PR #2 review)
+
+Two security items were explicitly deferred "to Phase 5" in PR #2's review and
+remain open at cutover. Neither blocks go-live (single allowlisted user, HTTPS
+enforced by Render + `SECURE_SSL_REDIRECT`), but they are decisions, not
+oversights — close them shortly after the cutover proves stable:
+
+- **HSTS + `check --deploy`**: set `SECURE_HSTS_SECONDS` (start small, e.g.
+  3600, before committing to a long max-age) in the production settings block,
+  and add `python manage.py check --deploy` to CI so regressions surface.
+- **`/admin/` exposure decision**: the Django admin is reachable on the public
+  host, gated by the same allowlisted login. Decide: keep it (operator
+  convenience — the runbook's verification step uses it), or restrict it.
+
 ## Data safety
 
 - **Neon PITR** covers the database (deals, runs, overrides, users).
