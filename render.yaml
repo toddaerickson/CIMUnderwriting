@@ -1,0 +1,41 @@
+# Render Blueprint — CIM Analyst (Django + gunicorn, Neon Postgres,
+# persistent disk for deal folders + comp DB).
+# Managertools-proven shape; disk block is the one addition (deal PDFs,
+# generated memos/models, and the SQLite comp DB live on /data).
+# NOTE: attaching a disk disables zero-downtime deploys — fine at 1 user.
+services:
+  - type: web
+    name: cim-analyst
+    runtime: python
+    plan: starter
+    region: oregon
+    branch: main
+    autoDeploy: true
+    buildCommand: pip install -r requirements.txt && TAILWINDCSS_VERSION=v3.4.17 tailwindcss -c tailwind.config.js -i static/src/input.css -o static/css/tw.css --minify && python manage.py collectstatic --noinput && python manage.py migrate --no-input
+    startCommand: gunicorn cimweb.wsgi:application --bind 0.0.0.0:$PORT --workers 2 --threads 4 --timeout 120
+    healthCheckPath: /health/
+    disk:
+      name: cim-data
+      mountPath: /data
+      sizeGB: 1
+    envVars:
+      - key: DATABASE_URL
+        sync: false          # Neon pooled connection string
+      - key: DJANGO_SECRET_KEY
+        generateValue: true
+      - key: ALLOWED_EMAILS
+        value: terickson@marathoncre.com
+      - key: ALLOWED_HOSTS
+        sync: false          # cim-analyst.onrender.com (exact host after first deploy)
+      - key: CSRF_TRUSTED_ORIGINS
+        sync: false          # https://<same host>
+      - key: CENSUS_API_KEY
+        sync: false
+      - key: CIM_DEALS_DIR
+        value: /data/deals
+      - key: COMP_DB_PATH
+        value: /data/cim_comps.db
+      - key: CIM_OVERRIDES_DIR
+        value: /data/overrides
+      - key: PYTHON_VERSION
+        value: "3.12.6"

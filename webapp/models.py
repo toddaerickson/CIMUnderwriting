@@ -4,7 +4,7 @@ from django.db import models
 class Deal(models.Model):
     """One underwritten property. Row of record for the pipeline page.
 
-    Mirrors deal_meta.json (gui/deal_manager.build_deal_meta) so existing
+    Mirrors deal_meta.json (webapp.services.build_deal_meta) so existing
     deal folders import losslessly. Floats, not Decimals: this is display
     metadata sourced from a float pipeline, not accounting.
     """

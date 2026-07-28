@@ -122,3 +122,20 @@ def test_bootstrap_operator_reconciles_flags(settings):
     call_command("bootstrap_operator")
     user = User.objects.get(username="terickson@marathoncre.com")
     assert user.is_staff and user.is_superuser
+
+
+@pytest.mark.django_db
+def test_health_reports_missing_disk(client, monkeypatch, settings):
+    monkeypatch.setenv("CIM_DEALS_DIR", "/data/deals")
+    settings.CIM_DEALS_DIR = "/nonexistent/deals"
+    resp = client.get("/health/")
+    assert resp.status_code == 503
+    assert resp.json()["disk"] is False
+    assert resp.json()["db"] is True
+
+
+@pytest.mark.django_db
+def test_health_disk_probe_skipped_without_env(client):
+    resp = client.get("/health/")
+    assert resp.status_code == 200
+    assert resp.json()["disk"] is True

@@ -52,19 +52,3 @@ jobs:
           python-version: "3.12"
       - run: pip install -r requirements.txt
       - run: python scripts/smoke_pg_django.py
-
-  docker:
-    runs-on: ubuntu-latest
-    needs: test
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Build Docker image
-        run: docker build -t cim-analyst .
-
-      - name: Verify container starts
-        run: |
-          docker run -d --name test-cim -p 8501:8501 cim-analyst
-          sleep 10
-          curl -sf http://localhost:8501/_stcore/health || exit 1
-          docker stop test-cim

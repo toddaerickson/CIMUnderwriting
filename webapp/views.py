@@ -42,9 +42,22 @@ def health(request):
         or os.environ.get("RAILWAY_GIT_COMMIT_SHA")
         or "unknown"
     )
+    # Disk probe: only when the deploy declares file locations via env
+    # (Render). Dev/CI leave these unset and skip it. Without this, an
+    # unmounted disk is invisible — CompDatabase() fabricates an empty
+    # comps DB and uploads land on the ephemeral container FS.
+    disk_ok = True
+    if os.environ.get("CIM_DEALS_DIR"):
+        disk_ok = os.path.isdir(settings.CIM_DEALS_DIR)
+    if disk_ok and os.environ.get("COMP_DB_PATH"):
+        disk_ok = os.path.exists(os.environ["COMP_DB_PATH"])
+    if not disk_ok:
+        logger.error("health check: data disk missing or env misrouted")
+    ok = db_ok and disk_ok
     return JsonResponse(
-        {"status": "ok" if db_ok else "degraded", "db": db_ok, "git_sha": sha[:12]},
-        status=200 if db_ok else 503,
+        {"status": "ok" if ok else "degraded", "db": db_ok,
+         "disk": disk_ok, "git_sha": sha[:12]},
+        status=200 if ok else 503,
     )
 
 
@@ -397,9 +410,9 @@ def comps(request):
 
 @login_required
 def settings_page(request):
-    from gui.deal_manager import ASSET_TYPES
     from webapp.forms import (ConfigOverrideForm, format_override_value,
                               override_key_registry)
+    from webapp.services import ASSET_TYPES
     from webapp.models import ConfigOverride
 
     if request.method == "POST":

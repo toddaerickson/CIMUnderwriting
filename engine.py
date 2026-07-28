@@ -1,5 +1,5 @@
 """
-Callable analysis pipeline for the Streamlit GUI.
+Callable analysis pipeline — the web↔pipeline boundary.
 
 Mirrors run.py's main() but returns all intermediate results
 instead of printing to terminal.
@@ -10,7 +10,7 @@ import logging
 from dataclasses import dataclass, field
 from typing import Optional, Callable
 
-logger = logging.getLogger("cim_analyst.gui")
+logger = logging.getLogger("cim_analyst.engine")
 
 
 @dataclass

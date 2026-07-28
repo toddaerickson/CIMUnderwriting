@@ -13,16 +13,18 @@ Self-storage investment screening and underwriting tool. Upload a CIM (Confident
 - **Max price solver** — bisection solver finds highest price for target IRR
 - **Output generation** — Word memo (.docx), Excel returns model (.xlsx), pre-filled underwriting template (.xlsm)
 - **Deal tracker** — persistent deal folder with metadata and comp database
-- **Streamlit dashboard** — web UI with file upload, interactive editing, and download buttons
+- **Web app** — Django UI with upload, assumptions editing, threaded analysis runs, results tabs, downloads, comps browser, and settings overrides
 
 ## Quick Start
 
 ```bash
 pip install -r requirements.txt
-streamlit run gui/app.py
+python manage.py migrate
+OPERATOR_PASSWORD='<choose one>' python manage.py bootstrap_operator
+python manage.py runserver
 ```
 
-Open http://localhost:8501, upload a CIM PDF, review assumptions, click "Run Analysis."
+Open http://localhost:8000, log in, upload a CIM PDF, review assumptions, click "Save & Run."
 
 ### CLI
 
@@ -32,22 +34,12 @@ python run.py
 
 Prompts for a PDF filename and runs the full pipeline with terminal output.
 
-### Docker
-
-```bash
-docker compose up --build
-```
-
-Runs on port 8501 with persistent data volume at `/data`.
-
 ## Project Structure
 
 ```
-gui/                    # Streamlit dashboard
-  app.py                # Entry point, navigation
-  pages/                # Upload, Deal Tracker, Settings, Comp DB
-  components/           # Assumptions editor, gates, metrics, downloads
-  engine.py             # Analysis pipeline callable from GUI
+cimweb/                 # Django project (settings, urls, wsgi)
+webapp/                 # Django app — views, models, forms, services, results, templates
+engine.py               # Analysis orchestration (extract_pdf_data / run_analysis)
 extract/                # PDF text extraction and CIM parsing
 analysis/               # Financial, market, physical, rent, risk analysis
 model/                  # Returns model, value-add model, solver
@@ -58,12 +50,13 @@ config.py               # Investment criteria, benchmarks, scenario defaults
 
 ## Configuration
 
-Copy `.env.example` to `.env` and fill in values. See `DEPLOY.md` for full deployment guide.
+Copy `.env.example` to `.env` and fill in values. See `DEPLOY.md` for the
+Render/Neon deployment architecture and cutover runbook.
 
 Key environment variables:
 - `CENSUS_API_KEY` — demographic enrichment (optional)
 - `GP_NAME`, `GP_EQUITY_SHARE`, `GP_AM_FEE_RATE`, `GP_PROMOTE_PCT` — fund structure for UW template
-- `COMP_DB_PATH`, `CIM_DEALS_DIR`, `CIM_OVERRIDES_DIR` — data paths (for Docker)
+- `COMP_DB_PATH`, `CIM_DEALS_DIR`, `CIM_OVERRIDES_DIR` — data paths (set by `render.yaml` in prod)
 
 ## Investment Criteria
 
@@ -85,6 +78,8 @@ cd CIMUnderwriting
 python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 cp .env.example .env  # fill in CENSUS_API_KEY, GP_* values
+python manage.py migrate
+OPERATOR_PASSWORD='<choose one>' python manage.py bootstrap_operator
 ```
 
 ## Tests

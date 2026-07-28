@@ -1,18 +1,20 @@
 """Deal-folder, extraction, and duplicate-check services for the web UI.
 
-Absorbs gui/deal_manager responsibilities per the Phase 5 retirement map;
-imports the shared helpers from there (stdlib-only module) rather than
-copying them, so there is one source of truth until gui/ retires.
+Owns the deal-folder/meta helpers outright (absorbed from the retired
+gui/deal_manager per the Phase 5 retirement map).
 """
 import copy
 import dataclasses
 import datetime
+import json
 import logging
 import math
 import numbers
 import os
+import re
 import threading
 from contextlib import contextmanager
+from datetime import date
 from enum import Enum
 
 from django.conf import settings
@@ -20,13 +22,100 @@ from django.db import models, transaction
 from django.utils import timezone
 
 import config as cfg
-from gui.deal_manager import (build_deal_meta, detect_asset_type,
-                              sanitize_name, write_deal_meta)
-from gui.engine import (AnalysisResult, _apply_overrides, extract_pdf_data,
-                        run_analysis)
+from engine import (AnalysisResult, _apply_overrides, extract_pdf_data,
+                    run_analysis)
 from webapp.models import Deal
 
 logger = logging.getLogger("cim_analyst.web")
+
+
+# ── Deal folder / meta helpers (absorbed from gui/deal_manager) ──────
+
+def sanitize_name(name: str) -> str:
+    """Convert a property name to a filesystem-safe folder name."""
+    # Replace non-alphanumeric chars (except spaces) with nothing
+    clean = re.sub(r"[^\w\s-]", "", name)
+    # Replace whitespace runs with underscore
+    clean = re.sub(r"\s+", "_", clean.strip())
+    return clean or "Unknown_Property"
+
+
+def write_deal_meta(deal_folder: str, meta: dict):
+    """Write deal_meta.json to a deal folder."""
+    meta_path = os.path.join(deal_folder, "deal_meta.json")
+    with open(meta_path, "w") as f:
+        json.dump(meta, f, indent=2, default=str)
+
+
+def read_deal_meta(deal_folder: str) -> dict | None:
+    """Read deal_meta.json from a deal folder. Returns None if missing."""
+    meta_path = os.path.join(deal_folder, "deal_meta.json")
+    if not os.path.isfile(meta_path):
+        return None
+    with open(meta_path, "r") as f:
+        return json.load(f)
+
+
+# The exact strings detect_asset_type can return — single source for the
+# settings editor's scope dropdown (guarded by a no-drift test).
+ASSET_TYPES = (
+    "Self Storage",
+    "Climate-Controlled Self Storage",
+    "Boat & RV Storage",
+)
+
+
+def detect_asset_type(cim_data) -> str:
+    """Determine asset type from CIM data fields."""
+    brv_sf = sum(filter(None, [
+        getattr(cim_data, "brv_enclosed_sf", None),
+        getattr(cim_data, "brv_covered_sf", None),
+        getattr(cim_data, "brv_open_sf", None),
+    ]))
+    if brv_sf > 0:
+        return "Boat & RV Storage"
+
+    cc_pct = getattr(cim_data, "cc_pct", None)
+    if cc_pct is not None and cc_pct > 0.5:
+        return "Climate-Controlled Self Storage"
+
+    return "Self Storage"
+
+
+def build_deal_meta(cim_data, result, deal_folder: str, input_files: list[str] = None) -> dict:
+    """Assemble deal_meta.json content from analysis results.
+
+    Args:
+        cim_data: parsed CIM data
+        result: AnalysisResult from engine
+        deal_folder: path to deal folder
+        input_files: list of uploaded filenames
+    """
+    # Estimated fair value: prefer VA max offer, fall back to static
+    fair_value = None
+    if result.va_max_offer and result.va_max_offer.get("max_price"):
+        fair_value = result.va_max_offer["max_price"]
+    elif result.max_offer and result.max_offer.get("max_price"):
+        fair_value = result.max_offer["max_price"]
+
+    recommendation = result.gate_summary.get("recommendation", "N/A") if result.gate_summary else "N/A"
+
+    return {
+        "deal_id": sanitize_name(cim_data.property_name or "Unknown").lower(),
+        "property_name": cim_data.property_name or "Unknown",
+        "city": cim_data.city or "",
+        "state": cim_data.state or "",
+        "asset_type": detect_asset_type(cim_data),
+        "nrsf": cim_data.nrsf,
+        "acreage": getattr(cim_data, "acreage", None),
+        "asking_price": cim_data.asking_price,
+        "estimated_fair_value": round(fair_value) if fair_value else None,
+        "recommendation": recommendation,
+        "analysis_date": date.today().isoformat(),
+        "memo_path": os.path.basename(result.memo_path) if result.memo_path else "",
+        "excel_path": os.path.basename(result.excel_path) if result.excel_path else "",
+        "input_files": input_files or [],
+    }
 
 
 # ── CIMData snapshot serialization ──────────────────────────────────
