@@ -102,6 +102,15 @@ def list_all_deals() -> list[dict]:
     return deals
 
 
+# The exact strings detect_asset_type can return — single source for the
+# settings editor's scope dropdown (guarded by a no-drift test).
+ASSET_TYPES = (
+    "Self Storage",
+    "Climate-Controlled Self Storage",
+    "Boat & RV Storage",
+)
+
+
 def detect_asset_type(cim_data) -> str:
     """Determine asset type from CIM data fields."""
     brv_sf = sum(filter(None, [

@@ -6,13 +6,14 @@ from django.conf import settings
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.db import connection
-from django.http import FileResponse, Http404, JsonResponse
+from django.http import FileResponse, Http404, HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils import timezone
 from django.views.decorators.http import require_POST
 from django_htmx.http import HttpResponseClientRedirect
 
+import config as cfg
 from webapp import forms as assumptions_forms
 from webapp import results as results_ctx
 from webapp import services
@@ -120,6 +121,7 @@ def extract_retry(request, pk):
 @login_required
 def deal_assumptions(request, pk):
     deal = get_object_or_404(Deal, pk=pk)
+    eff = services.effective_config(deal.asset_type)
     if deal.extract_status == "" and not deal.cim_json:
         return render(request, "webapp/assumptions_wait.html",
                       {"deal": deal, "unavailable": True})
@@ -133,7 +135,7 @@ def deal_assumptions(request, pk):
         form = assumptions_forms.AssumptionsForm(request.POST)
         if form.is_valid():
             deal.assumption_overrides = assumptions_forms.build_overrides(
-                form.cleaned_data, request.POST, deal)
+                form.cleaned_data, request.POST, deal, eff)
             deal.save(update_fields=["assumption_overrides", "updated_at"])
             if "run" in request.POST:
                 if _run_state(deal.runs.first()) == "running":
@@ -149,7 +151,7 @@ def deal_assumptions(request, pk):
         status = 422
     else:
         form = assumptions_forms.AssumptionsForm(
-            initial=assumptions_forms.build_initial(deal))
+            initial=assumptions_forms.build_initial(deal, eff))
         rows = assumptions_forms.unit_mix_rows(deal)
         status = 200
     f = assumptions_forms
@@ -344,3 +346,137 @@ def deal_download(request, pk, kind):
         raise Http404
     return FileResponse(open(path, "rb"), as_attachment=True,
                         filename=filename, content_type=mime)
+
+
+# ── Phase 5: comps browser ──────────────────────────────────────────
+
+COMP_COLUMNS = ["property_name", "city", "state", "nrsf", "total_units",
+                "occupancy", "adjusted_noi", "revenue_per_sf",
+                "noi_per_sf", "analysis_date", "pdf_filename"]
+
+
+@login_required
+def comps(request):
+    """Read-only browser over the existing comp SQLite DB. Filters run
+    in Python: the summary query IS the API and the table is tiny."""
+    from data.comp_db import CompDatabase
+
+    all_rows = CompDatabase().get_comp_summary()
+    state = request.GET.get("state", "").strip().upper()
+    min_nrsf_raw = request.GET.get("min_nrsf", "").strip()
+    try:
+        min_nrsf = float(min_nrsf_raw) if min_nrsf_raw else 0.0
+    except ValueError:
+        min_nrsf = 0.0
+    rows = [r for r in all_rows
+            if (not state or (r["state"] or "").upper() == state)
+            and (r["nrsf"] or 0) >= min_nrsf]
+
+    if request.GET.get("format") == "csv":
+        import csv
+
+        resp = HttpResponse(content_type="text/csv")
+        resp["Content-Disposition"] = 'attachment; filename="comps.csv"'
+        writer = csv.DictWriter(resp, fieldnames=COMP_COLUMNS)
+        writer.writeheader()
+        writer.writerows(
+            {k: r.get(k) for k in COMP_COLUMNS} for r in rows)
+        return resp
+
+    return render(request, "webapp/comps.html", {
+        "rows": rows,
+        "total": len(all_rows),
+        "state": state,
+        "min_nrsf": min_nrsf_raw,
+        "state_options": sorted({(r["state"] or "").upper()
+                                 for r in all_rows if r["state"]}),
+    })
+
+
+# ── Phase 5: settings (config overrides) ────────────────────────────
+
+@login_required
+def settings_page(request):
+    from gui.deal_manager import ASSET_TYPES
+    from webapp.forms import (ConfigOverrideForm, format_override_value,
+                              override_key_registry)
+    from webapp.models import ConfigOverride
+
+    if request.method == "POST":
+        form = ConfigOverrideForm(request.POST)
+        if form.is_valid():
+            row = form.save()
+            messages.success(request, f"Override added: {row}.")
+            return redirect("settings")
+    else:
+        form = ConfigOverrideForm()
+
+    registry = override_key_registry()
+    today = timezone.localdate()
+
+    # Status per row, judged within its own (key, scope) lane: the
+    # winning row is "active", later-dated rows are "scheduled", the
+    # rest "superseded"; keys config.py no longer defines: "unknown key".
+    # services.override_precedence is THE tie-break — same function the
+    # resolver sorts by, so the badge can never disagree with a run.
+    rows = list(ConfigOverride.objects.all())
+    winners = {}
+    for r in rows:
+        if r.effective_date > today or r.key not in registry:
+            continue
+        lane = (r.key, r.asset_type)
+        w = winners.get(lane)
+        if w is None or services.override_precedence(r) > \
+                services.override_precedence(w):
+            winners[lane] = r
+    overrides = []
+    for r in rows:
+        if r.key not in registry:
+            status = "unknown key"
+        elif r.effective_date > today:
+            status = "scheduled"
+        elif winners.get((r.key, r.asset_type)) is r:
+            status = "active"
+        else:
+            status = "superseded"
+        overrides.append({
+            "row": r, "status": status,
+            "display_value": format_override_value(r.key, r.value),
+            "label": registry.get(r.key, {}).get("label", r.key),
+        })
+
+    # Effective-values preview for the selected scope. dotted_get works
+    # against both the config module and the eff mapping (str-enum keys),
+    # including top-level scalars like SOLVER_TARGET_IRR — one traversal,
+    # no special cases (review finding).
+    from webapp.forms import dotted_get
+
+    sel = request.GET.get("asset_type", "")
+    if sel not in ASSET_TYPES:
+        sel = ""
+    eff = services.effective_config(sel)
+    deltas = services.resolve_config_overrides(sel, today)
+    groups = {}
+    for key, spec in registry.items():
+        groups.setdefault(spec["group"], []).append({
+            "key": key, "label": spec["label"],
+            "default": format_override_value(key, dotted_get(cfg, key)),
+            "effective": format_override_value(key, dotted_get(eff, key)),
+            "changed": key in deltas,
+        })
+
+    return render(request, "webapp/settings.html", {
+        "form": form, "overrides": overrides, "groups": groups,
+        "asset_types": ASSET_TYPES, "selected_asset_type": sel,
+    })
+
+
+@login_required
+@require_POST
+def override_delete(request, pk):
+    from webapp.models import ConfigOverride
+
+    row = get_object_or_404(ConfigOverride, pk=pk)
+    row.delete()
+    messages.success(request, f"Deleted override {row.key}.")
+    return redirect("settings")

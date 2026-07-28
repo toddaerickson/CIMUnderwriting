@@ -54,12 +54,9 @@
       </div>
 
       {% comment %}
-      Sidebar IA per CLAUDE.md's phased build-out. New Analysis (Phase 3),
-      Deal Pipeline (Phase 2), Comps (Phase 5), Settings (Phase 5) don't
-      have routes yet — rendered as muted, non-navigating spans (not
-      {% url %} calls, which would 500 on an unregistered name). When a
-      phase lands its route, convert the span to the same pattern Log out
-      already uses below:
+      Sidebar IA per CLAUDE.md's phased build-out. All entries below now
+      have routes (New Analysis/Deal Pipeline: Phase 2-3; Comps/Settings:
+      Phase 5) and follow the same active-state pattern:
         <a href="{% url 'name' %}"
            class="block px-2 py-1.5 md:py-0.5 rounded {% if request.resolver_match.url_name == 'name' %}bg-accent-700 text-white{% else %}hover:bg-slate-100{% endif %}">Label</a>
       {% endcomment %}
@@ -74,14 +71,10 @@
 
         <div>
           <div class="px-2 text-xs font-bold uppercase tracking-wider text-slate-500 mb-1">Reference</div>
-          <span class="flex items-center justify-between px-2 py-1.5 md:py-0.5 rounded text-slate-400 cursor-not-allowed">
-            Comps
-            <span class="text-[10px] uppercase tracking-wide text-slate-300">soon</span>
-          </span>
-          <span class="flex items-center justify-between px-2 py-1.5 md:py-0.5 rounded text-slate-400 cursor-not-allowed">
-            Settings
-            <span class="text-[10px] uppercase tracking-wide text-slate-300">soon</span>
-          </span>
+          <a href="{% url 'comps' %}"
+             class="block px-2 py-1.5 md:py-0.5 rounded {% if request.resolver_match.url_name == 'comps' %}bg-accent-700 text-white{% else %}hover:bg-slate-100{% endif %}">Comps</a>
+          <a href="{% url 'settings' %}"
+             class="block px-2 py-1.5 md:py-0.5 rounded {% if request.resolver_match.url_name == 'settings' %}bg-accent-700 text-white{% else %}hover:bg-slate-100{% endif %}">Settings</a>
         </div>
       </nav>
 

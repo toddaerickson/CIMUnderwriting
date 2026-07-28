@@ -9,8 +9,10 @@ the raw submitted strings untouched.
 import logging
 
 from django import forms
+from django.utils import timezone
 
 import config as cfg
+from gui.deal_manager import ASSET_TYPES
 from registry import ScenarioType
 
 logger = logging.getLogger("cim_analyst.web")
@@ -138,7 +140,10 @@ def _pct_display(v):
     return round(float(v) * 100, 4) if v is not None else None
 
 
-def build_initial(deal) -> dict:
+def build_initial(deal, eff=None) -> dict:
+    if eff is None:
+        from webapp import services      # lazy: avoids a module cycle
+        eff = services.effective_config(deal.asset_type)
     snapshot = deal.cim_json or {}
     saved = deal.assumption_overrides or {}
     merged = {**snapshot, **saved.get("cim_overrides", {})}
@@ -148,12 +153,12 @@ def build_initial(deal) -> dict:
         initial[name] = _pct_display(v) if name in CIM_PCT_FIELDS else v
     scen_saved = saved.get("scenario_overrides", {})
     for sc in SCENARIO_KEYS:
-        current = {**cfg.SCENARIO_DEFAULTS.get(sc, {}), **scen_saved.get(sc, {})}
+        current = {**eff["SCENARIO_DEFAULTS"].get(sc, {}), **scen_saved.get(sc, {})}
         for p in SCENARIO_PARAMS:
             initial[f"scen_{sc}_{p}"] = _pct_display(current.get(p))
     va_saved = saved.get("va_scenario_overrides", {})
     for sc in SCENARIO_KEYS:
-        current = {**cfg.VALUE_ADD_SCENARIOS.get(sc, {}), **va_saved.get(sc, {})}
+        current = {**eff["VALUE_ADD_SCENARIOS"].get(sc, {}), **va_saved.get(sc, {})}
         for p in VA_PARAMS:
             v = current.get(p)
             if p in VA_NON_PCT:
@@ -162,13 +167,13 @@ def build_initial(deal) -> dict:
                 initial[f"va_{sc}_{p}"] = _pct_display(v)
     rc_saved = saved.get("replacement_cost_overrides", {})
     for key in RC_KEYS:
-        low, high = rc_saved.get(key, cfg.REPLACEMENT_COST[key])
+        low, high = rc_saved.get(key, eff["REPLACEMENT_COST"][key])
         if key in RC_PCT_KEYS:
             low, high = float(low) * 100, float(high) * 100
         initial[f"rc_{key}_low"] = round(float(low), 4)
         initial[f"rc_{key}_high"] = round(float(high), 4)
     initial["solver_target_irr"] = _pct_display(
-        saved.get("solver_target_irr", cfg.SOLVER_TARGET_IRR))
+        saved.get("solver_target_irr", eff["SOLVER_TARGET_IRR"]))
     return initial
 
 
@@ -283,9 +288,12 @@ def _submitted_sections(cleaned, prefix, params, defaults, non_pct=()) -> dict:
     return out
 
 
-def build_overrides(cleaned, post, deal) -> dict:
+def build_overrides(cleaned, post, deal, eff=None) -> dict:
     """Deltas only — see the Phase 3 plan's Design Decisions. Sections
     equal to their defaults are omitted entirely."""
+    if eff is None:
+        from webapp import services      # lazy: avoids a module cycle
+        eff = services.effective_config(deal.asset_type)
     snapshot = deal.cim_json or {}
     out = {}
 
@@ -305,12 +313,12 @@ def build_overrides(cleaned, post, deal) -> dict:
     if cim_o:
         out["cim_overrides"] = cim_o
 
-    scen = _submitted_sections(cleaned, "scen", SCENARIO_PARAMS, cfg.SCENARIO_DEFAULTS)
-    if scen != _rounded_sections(cfg.SCENARIO_DEFAULTS, SCENARIO_PARAMS):
+    scen = _submitted_sections(cleaned, "scen", SCENARIO_PARAMS, eff["SCENARIO_DEFAULTS"])
+    if scen != _rounded_sections(eff["SCENARIO_DEFAULTS"], SCENARIO_PARAMS):
         out["scenario_overrides"] = scen
-    va = _submitted_sections(cleaned, "va", VA_PARAMS, cfg.VALUE_ADD_SCENARIOS,
+    va = _submitted_sections(cleaned, "va", VA_PARAMS, eff["VALUE_ADD_SCENARIOS"],
                              non_pct=VA_NON_PCT)
-    if va != _rounded_sections(cfg.VALUE_ADD_SCENARIOS, VA_PARAMS):
+    if va != _rounded_sections(eff["VALUE_ADD_SCENARIOS"], VA_PARAMS):
         out["va_scenario_overrides"] = va
 
     rc = {}
@@ -322,7 +330,7 @@ def build_overrides(cleaned, post, deal) -> dict:
         if key in RC_PCT_KEYS:
             low, high = low / 100.0, high / 100.0
         cur = [round(float(low), 6), round(float(high), 6)]
-        d_low, d_high = cfg.REPLACEMENT_COST[key]
+        d_low, d_high = eff["REPLACEMENT_COST"][key]
         if cur != [round(float(d_low), 6), round(float(d_high), 6)]:
             rc[key] = cur
     if rc:
@@ -331,7 +339,176 @@ def build_overrides(cleaned, post, deal) -> dict:
     tgt = cleaned.get("solver_target_irr")
     if tgt is not None:
         tgt = round(tgt / 100.0, 6)
-        if not _same(tgt, cfg.SOLVER_TARGET_IRR):
+        if not _same(tgt, eff["SOLVER_TARGET_IRR"]):
             out["solver_target_irr"] = tgt
 
     return out
+
+
+# ── Phase 5: config override registry + form ────────────────────────
+
+GATES_INT_KEYS = {"population_3mi", "unproven_vintage_year"}
+EXPENSE_PCT_KEYS = {"mgmt_fee_pct", "opex_revenue_ratio"}
+RC_LEGACY_ALIASES = {"non_cc_per_sf", "cc_per_sf", "site_work_per_sf"}
+# total_opex is recomputed from the line items by get_regional_benchmarks
+# (config.py:394-396) — an override would show in the preview but never
+# reach a run with a known state. Derived, not editable.
+EXPENSE_DERIVED_KEYS = {"total_opex"}
+
+
+def _label(key: str) -> str:
+    return key.split(".")[-1].replace("_", " ").title()
+
+
+def dotted_get(root, dotted_key: str):
+    """Resolve 'GATES.min_irr_5yr' against a config-shaped tree — the
+    config module itself or an effective_config() mapping. ScenarioType
+    is a str Enum, so plain [] lookups work at every level."""
+    node = root
+    for part in dotted_key.split("."):
+        node = node[part] if isinstance(node, dict) else getattr(node, part)
+    return node
+
+
+def override_key_registry() -> dict:
+    """Editable threshold keys, derived LIVE from config.py so the picker
+    can never drift from the real constants. Values are stored/applied in
+    canonical config units; `pct` keys display as whole-number percents.
+    """
+    reg = {}
+    for k in cfg.GATES:
+        reg[f"GATES.{k}"] = {
+            "group": "Gates", "kind": "scalar",
+            "pct": k not in GATES_INT_KEYS, "int": k in GATES_INT_KEYS,
+            "label": _label(k)}
+    for k in cfg.EXPENSE_BENCHMARKS:
+        if k in EXPENSE_DERIVED_KEYS:
+            continue
+        reg[f"EXPENSE_BENCHMARKS.{k}"] = {
+            "group": "Expense Benchmarks ($/NRSF/yr)", "kind": "range",
+            "pct": k in EXPENSE_PCT_KEYS, "int": False, "label": _label(k)}
+    for k in cfg.REPLACEMENT_COST:
+        if k in RC_LEGACY_ALIASES:
+            continue                     # synced automatically by the patcher
+        reg[f"REPLACEMENT_COST.{k}"] = {
+            "group": "Replacement Cost ($/SF)", "kind": "range",
+            "pct": k in RC_PCT_KEYS, "int": False, "label": _label(k)}
+    for top, group in (("SCENARIO_DEFAULTS", "Scenarios"),
+                       ("VALUE_ADD_SCENARIOS", "Value-Add Scenarios")):
+        for scen, params in getattr(cfg, top).items():
+            for p in params:
+                is_int = p in VA_NON_PCT
+                reg[f"{top}.{scen.value}.{p}"] = {
+                    "group": group, "kind": "scalar",
+                    "pct": not is_int, "int": is_int,
+                    "label": f"{scen.value.title()} {_label(p)}"}
+    for k in cfg.VALUE_ADD_TRIGGERS:
+        reg[f"VALUE_ADD_TRIGGERS.{k}"] = {
+            "group": "Value-Add Triggers", "kind": "scalar",
+            "pct": True, "int": False, "label": _label(k)}
+    reg["SOLVER_TARGET_IRR"] = {
+        "group": "Solver", "kind": "scalar", "pct": True, "int": False,
+        "label": "Solver Target IRR"}
+    return reg
+
+
+def _parse_num(raw_part: str) -> float:
+    # NB: forms.py already has a `_num()` field factory — don't shadow it.
+    try:
+        return float(raw_part.replace("%", "").replace("$", "").strip())
+    except ValueError:
+        raise forms.ValidationError("Enter numbers only.")
+
+
+def parse_override_value(key: str, raw: str):
+    """Display units in ('12' or '1.40, 2.60'), canonical units out
+    (0.12 or [1.4, 2.6]). Comma is the range separator ONLY for range
+    keys; scalars strip thousands separators so the displayed format is
+    always re-enterable (review finding)."""
+    spec = override_key_registry().get(key)
+    if spec is None:
+        raise forms.ValidationError("Unknown setting key.")
+    raw = str(raw).replace("–", ",")
+    if spec["kind"] == "range":
+        parts = [p for p in (s.strip() for s in raw.split(",")) if p]
+        if len(parts) != 2:
+            raise forms.ValidationError("Enter two numbers: low, high.")
+        low, high = _parse_num(parts[0]), _parse_num(parts[1])
+        if spec["pct"]:
+            low, high = low / 100.0, high / 100.0
+        if low > high:
+            raise forms.ValidationError("Low must be ≤ high.")
+        return [round(low, 6), round(high, 6)]
+    v = _parse_num(raw.replace(",", ""))
+    if spec["int"]:
+        return int(v)
+    if spec["pct"]:
+        v = v / 100.0
+    return round(v, 6)
+
+
+def format_override_value(key: str, value) -> str:
+    """Canonical units in, display string out (inverse of parse — no
+    thousands separators, so any displayed value re-parses verbatim)."""
+    spec = override_key_registry().get(key)
+
+    def one(v, pct):
+        if pct:
+            return f"{round(float(v) * 100, 4):g}%"
+        if spec and spec["int"]:
+            return f"{int(v)}"
+        return f"{round(float(v), 4):g}"
+
+    pct = bool(spec and spec["pct"])
+    if isinstance(value, (list, tuple)):
+        return f"{one(value[0], pct)} – {one(value[1], pct)}"
+    return one(value, pct)
+
+
+class ConfigOverrideForm(forms.Form):
+    key = forms.ChoiceField()
+    value = forms.CharField(max_length=60)
+    asset_type = forms.ChoiceField(required=False)
+    # timezone.localdate, NOT datetime.date.today: Render's system clock
+    # is UTC — after ~6pm Chicago, today() is tomorrow, and a freshly
+    # added override would be silently "scheduled"/inert (review finding).
+    effective_date = forms.DateField(initial=timezone.localdate,
+                                     widget=forms.DateInput(attrs={"type": "date"}))
+    note = forms.CharField(max_length=200, required=False)
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        reg = override_key_registry()
+        groups = {}
+        for key, spec in reg.items():
+            groups.setdefault(spec["group"], []).append(
+                (key, f"{spec['label']} ({key})"))
+        self.fields["key"].choices = [
+            (g, opts) for g, opts in groups.items()]
+        self.fields["asset_type"].choices = (
+            [("", "All asset types")] + [(a, a) for a in ASSET_TYPES])
+
+        base = "border border-slate-300 rounded px-2 py-1 text-sm block"
+        self.fields["key"].widget.attrs["class"] = base + " max-w-[22rem]"
+        self.fields["value"].widget.attrs.update(
+            {"class": base + " w-32", "placeholder": "12  or  1.4, 2.6"})
+        self.fields["asset_type"].widget.attrs["class"] = base
+        self.fields["effective_date"].widget.attrs["class"] = base
+        self.fields["note"].widget.attrs.update(
+            {"class": base + " w-44", "placeholder": "why"})
+
+    def clean(self):
+        cleaned = super().clean()
+        key, raw = cleaned.get("key"), cleaned.get("value")
+        if key and raw is not None:
+            cleaned["parsed_value"] = parse_override_value(key, raw)
+        return cleaned
+
+    def save(self):
+        from webapp.models import ConfigOverride
+        return ConfigOverride.objects.create(
+            key=self.cleaned_data["key"],
+            value=self.cleaned_data["parsed_value"],
+            asset_type=self.cleaned_data.get("asset_type") or "",
+            effective_date=self.cleaned_data["effective_date"],
+            note=self.cleaned_data.get("note") or "")

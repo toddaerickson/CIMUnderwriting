@@ -59,6 +59,12 @@ class AnalysisRun(models.Model):
     progress_msg = models.CharField(max_length=200, blank=True, default="")
     result_json = models.JSONField(null=True, blank=True)
     error = models.TextField(blank=True, default="")
+    # Snapshot of the deltas this run actually used: {"config": {dotted
+    # key: value}, "assumptions": <Deal.assumption_overrides at run
+    # time>}. Written at run start so even failed runs record what they
+    # attempted — this is how past analyses keep the thresholds they
+    # ran under regardless of later ConfigOverride edits.
+    applied_overrides = models.JSONField(null=True, blank=True)
     memo_filename = models.CharField(max_length=300, blank=True, default="")
     excel_filename = models.CharField(max_length=300, blank=True, default="")
     template_filename = models.CharField(max_length=300, blank=True, default="")
@@ -70,3 +76,25 @@ class AnalysisRun(models.Model):
 
     def __str__(self):
         return f"run {self.pk} ({self.status})"
+
+
+class ConfigOverride(models.Model):
+    """One delta from a config.py threshold. Append-mostly: to change a
+    value going forward, add a new row with a later effective_date; the
+    resolver picks per key the asset-specific-then-latest row. Values are
+    stored in canonical config units (decimals, [low, high] lists).
+    """
+
+    key = models.CharField(max_length=80)          # dotted path, e.g. "GATES.min_irr_5yr"
+    value = models.JSONField()                     # number or [low, high]
+    asset_type = models.CharField(max_length=60, blank=True, default="")  # "" = all
+    effective_date = models.DateField()
+    note = models.CharField(max_length=200, blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["key", "asset_type", "-effective_date", "-pk"]
+
+    def __str__(self):
+        scope = self.asset_type or "all"
+        return f"{self.key} [{scope}] from {self.effective_date}"
