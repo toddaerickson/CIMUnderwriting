@@ -8,9 +8,13 @@ Analyzes a self-storage CIM (PDF) and produces:
 
 ## How to run
 ```bash
-python run.py
+python manage.py runserver   # Web app (Django) — upload, assumptions, runs, results
+python run.py                # CLI — prompts for a PDF filename in the current directory
 ```
-The program prompts for a PDF filename in the current directory.
+The web app is the primary interface; the CLI remains for local one-off runs.
+The settings editor stores dated deltas (`ConfigOverride` rows) on top of
+`config.py` — it never mutates the file. The comps browser reads
+`data/cim_comps.db` read-only.
 
 ## When the user provides a CIM PDF
 1. Run `python run.py` and provide the filename
@@ -21,8 +25,12 @@ The program prompts for a PDF filename in the current directory.
 
 ## Architecture
 ```
-run.py                     # Entry point — file prompt, orchestration
-config.py                  # Hard-coded investment criteria / thresholds
+run.py                     # CLI entry point — file prompt, orchestration
+engine.py                  # Analysis orchestration (extract_pdf_data / run_analysis) — the web↔pipeline boundary
+config.py                  # Hard-coded investment criteria / thresholds (base for ConfigOverride deltas)
+cimweb/                    # Django project (settings, urls, wsgi)
+webapp/                    # Django app — views, models (Deal/AnalysisRun/ConfigOverride),
+                           #   forms, services (deal folders), results, templates
 extract/
   pdf_reader.py            # PDF text + table extraction (pdfplumber)
   parser.py                # Structured data extraction → CIMData dataclass

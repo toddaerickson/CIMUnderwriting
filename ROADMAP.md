@@ -11,7 +11,7 @@
 - [x] Word memo generation (.docx)
 - [x] Excel returns model (.xlsx)
 - [x] Pre-filled underwriting template (.xlsm)
-- [x] Streamlit dashboard with file upload
+- [x] Streamlit dashboard with file upload (retired in the Phase 5 cutover)
 - [x] 6-tab assumptions editor (Property, Size, Unit Mix, Income & Expenses, Scenarios, Demographics)
 - [x] Percentage inputs as whole numbers (type 6 for 6%)
 - [x] Per-analysis scenario overrides (don't mutate global config)
@@ -21,21 +21,27 @@
 - [x] Duplicate detection on upload (comp DB + deal folder search)
 - [x] Deal tracker with persistent folders
 - [x] Comp database (SQLite)
-- [x] Batch analysis
+- [x] Batch analysis (retired with the Streamlit GUI — see Not Building)
 - [x] Sidebar redesign (New Analysis, Deal Pipeline, Comps, Settings)
-- [x] Docker + docker-compose deployment
-- [x] GitHub Actions CI (pytest + Docker build + health check)
+- [x] Docker + docker-compose deployment (retired in the Phase 5 cutover)
+- [x] GitHub Actions CI (pytest + real-Postgres smoke + collectstatic)
 - [x] Environment variable externalization
 - [x] Security audit and sanitization
 - [x] SQLite WAL mode for concurrent reads
 - [x] Temp file cleanup after analysis
 - [x] DB backup script (scripts/backup_db.sh)
+- [x] Django web app (cimweb/webapp): allowlisted auth, upload + extraction,
+      6-tab assumptions editor, threaded analysis runs, results tabs, downloads
+- [x] Comps browser + settings override CRUD (`ConfigOverride` dated deltas)
+- [x] Postgres-safe schema hardening + real-Postgres CI smoke job
+- [x] engine.py at root; Streamlit GUI / Docker / Railway artifacts retired
+- [x] Render blueprint (`render.yaml`): Neon Postgres + 1GB disk + disk-aware /health/
 
 ## Next Up
 
 ### Web Deployment
-- [ ] Deploy to Railway or VPS
-- [ ] Cloudflare Tunnel + Access for authentication
+- [x] Render (done) — blueprint merged; production cutover follows the DEPLOY.md runbook
+- [x] Authentication — Django allowlisted login (`ALLOWED_EMAILS`) replaced the Cloudflare Tunnel + Access plan
 - [ ] Custom domain
 
 ### Levered Returns / LP Waterfall
@@ -58,8 +64,9 @@
 
 ## Not Building (By Design)
 
-- React/Next.js frontend — Streamlit is sufficient for internal tools
-- PostgreSQL — SQLite is correct at 1-5 users
+- React/Next.js frontend — server-rendered Django templates are sufficient for internal tools
 - REST API — no second consumer exists
 - Multi-tenancy — single firm, shared pipeline
-- Celery/Redis background workers — analysis takes 10-30 seconds
+- Celery/Redis background workers — analysis takes 10-30 seconds; a thread per run suffices
+- Batch analysis (multi-PDF) — retired with the Streamlit GUI; the web flow
+  underwrites one deal at a time. Revisit only if a real multi-CIM day actually hurts.
