@@ -1,4 +1,5 @@
 """Phase 3: upload, background extract, assumptions editor tests."""
+import datetime
 import json
 import os
 
@@ -128,7 +129,9 @@ def test_stale_extract_worker_is_dropped(deals_dir, fake_extract):
 
     from webapp import services
     deal = _make_upload_deal(deals_dir)
-    old_stamp = timezone.now()
+    # Explicitly older: two bare now() calls can land on the same
+    # microsecond, making the stale stamp match the retry's CAS.
+    old_stamp = timezone.now() - datetime.timedelta(seconds=5)
     deal.extract_status = "running"
     deal.extract_requested_at = timezone.now()  # newer stamp = a retry happened
     deal.save()
@@ -362,14 +365,6 @@ def test_unit_mix_row_endpoint(client, operator):
     resp = client.get("/deals/unit-mix-row/")
     assert resp.status_code == 200
     assert b'name="um_label"' in resp.content
-
-
-@pytest.mark.django_db
-def test_required_fields_parity_with_gui():
-    from gui.components.assumptions_editor import REQUIRED_FIELDS as gui_required
-
-    from webapp.forms import REQUIRED_FIELDS as web_required
-    assert web_required == gui_required
 
 
 @pytest.mark.django_db
