@@ -117,7 +117,7 @@ def test_patched_replacement_cost_restores_on_exception():
 
 def test_run_analysis_accepts_solver_target_irr():
     import inspect
-    from gui.engine import run_analysis
+    from engine import run_analysis
     params = inspect.signature(run_analysis).parameters
     assert "solver_target_irr" in params
     assert params["solver_target_irr"].default is None
@@ -136,7 +136,7 @@ def test_engine_end_to_end_with_overrides(tmp_path, monkeypatch):
     the writers produce files. Comp DB redirected to a scratch path —
     data.comp_db binds COMP_DB_PATH at import, so patch that module's name."""
     monkeypatch.setattr("data.comp_db.COMP_DB_PATH", str(tmp_path / "comps.db"))
-    from gui.engine import AnalysisResult, run_analysis
+    from engine import AnalysisResult, run_analysis
     from webapp.services import _patched_config
 
     result = AnalysisResult(pdf_path=str(tmp_path / "expo.pdf"))
@@ -173,7 +173,7 @@ def test_engine_end_to_end_with_overrides(tmp_path, monkeypatch):
 
 @pytest.fixture
 def fake_run(monkeypatch):
-    """Stand-in for gui.engine.run_analysis: fills the result fields the
+    """Stand-in for engine.run_analysis: fills the result fields the
     worker consumes, writes the three output files, captures kwargs."""
     calls = {}
 

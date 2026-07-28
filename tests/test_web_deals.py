@@ -157,9 +157,9 @@ def test_build_deal_meta_import_deals_round_trip_no_drift(tmp_path, settings):
 
     from django.core.management import call_command
 
-    from gui.deal_manager import build_deal_meta
-    from gui.engine import AnalysisResult
+    from engine import AnalysisResult
     from tests.test_web_runs import _sample_cim
+    from webapp.services import build_deal_meta
     from webapp.models import Deal
 
     cim = _sample_cim()

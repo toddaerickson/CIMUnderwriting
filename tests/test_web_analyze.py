@@ -65,7 +65,7 @@ def test_cim_from_dict_ignores_unknown_keys():
 
 @pytest.fixture
 def fake_extract(monkeypatch):
-    from gui.engine import AnalysisResult
+    from engine import AnalysisResult
 
     def _fake(pdf_path, cim_overrides=None, progress=None):
         cim = _sample_cim()

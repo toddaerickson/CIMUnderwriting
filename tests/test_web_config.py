@@ -46,7 +46,7 @@ def test_analysis_run_applied_overrides_default():
 def test_asset_types_matches_detect_asset_type():
     """No-drift guard: the scope dropdown's choices are exactly the values
     detect_asset_type can return."""
-    from gui.deal_manager import ASSET_TYPES, detect_asset_type
+    from webapp.services import ASSET_TYPES, detect_asset_type
 
     class FakeCim:
         brv_enclosed_sf = None

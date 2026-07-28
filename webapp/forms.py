@@ -12,7 +12,7 @@ from django import forms
 from django.utils import timezone
 
 import config as cfg
-from gui.deal_manager import ASSET_TYPES
+from webapp.services import ASSET_TYPES
 from registry import ScenarioType
 
 logger = logging.getLogger("cim_analyst.web")

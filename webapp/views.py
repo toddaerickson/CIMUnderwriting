@@ -397,9 +397,9 @@ def comps(request):
 
 @login_required
 def settings_page(request):
-    from gui.deal_manager import ASSET_TYPES
     from webapp.forms import (ConfigOverrideForm, format_override_value,
                               override_key_registry)
+    from webapp.services import ASSET_TYPES
     from webapp.models import ConfigOverride
 
     if request.method == "POST":
