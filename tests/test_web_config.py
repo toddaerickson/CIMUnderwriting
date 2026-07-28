@@ -270,7 +270,7 @@ def test_worker_applies_global_overrides_and_stamps_run(deals_dir, monkeypatch):
     ConfigOverride.objects.create(key="SOLVER_TARGET_IRR", value=0.12,
                                   effective_date=dt.date(2026, 1, 1))
     # a global scenario delta that must be DROPPED (per-deal section wins
-    # wholesale) and an unknown key that must land in config_skipped
+    # wholesale)
     ConfigOverride.objects.create(key="SCENARIO_DEFAULTS.base.exit_cap",
                                   value=0.07,
                                   effective_date=dt.date(2026, 1, 1))
@@ -301,13 +301,45 @@ def test_worker_applies_global_overrides_and_stamps_run(deals_dir, monkeypatch):
     assert seen["solver_target_irr"] == 0.15
     assert seen["custom_scenarios"] == per_deal_scen
     # stamp records ONLY what applied: the scenario delta was dropped
-    # (per-deal section wins wholesale), nothing was unknown
-    assert run.applied_overrides["config"] == {
-        "GATES.min_irr_5yr": 0.13, "SOLVER_TARGET_IRR": 0.12}
+    # (per-deal section wins wholesale) and so was the global solver row
+    # (per-deal solver_target_irr won); nothing was unknown
+    assert run.applied_overrides["config"] == {"GATES.min_irr_5yr": 0.13}
     assert run.applied_overrides["config_skipped"] == []
     assert run.applied_overrides["assumptions"]["solver_target_irr"] == 0.15
     from analysis.filters import GATES
     assert GATES["min_irr_5yr"] == 0.10          # restored after the run
+
+
+@pytest.mark.django_db
+def test_worker_stamps_global_solver_without_per_deal_override(deals_dir,
+                                                              monkeypatch):
+    """With NO per-deal solver override, the global SOLVER_TARGET_IRR row
+    both reaches the engine and is stamped under "config"."""
+    import datetime as dt
+
+    from tests.test_web_runs import _make_extracted_deal
+    from webapp.models import ConfigOverride
+
+    ConfigOverride.objects.create(key="SOLVER_TARGET_IRR", value=0.12,
+                                  effective_date=dt.date(2026, 1, 1))
+    seen = {}
+
+    def _fake(result, progress=None, output_dir=None, custom_scenarios=None,
+              custom_va_scenarios=None, solver_target_irr=None):
+        seen["solver_target_irr"] = solver_target_irr
+        result.gate_results = []
+        result.gate_summary = {"passed": 0, "failed": 0, "tbd": 0, "total": 0,
+                               "recommendation": "PURSUE",
+                               "failed_gates": [], "tbd_gates": []}
+        return result
+
+    monkeypatch.setattr("webapp.services.run_analysis", _fake)
+    deal = _make_extracted_deal(deals_dir)
+    from tests.test_web_runs import _start_run
+    run = _start_run(deal)
+
+    assert seen["solver_target_irr"] == 0.12
+    assert run.applied_overrides["config"] == {"SOLVER_TARGET_IRR": 0.12}
 
 
 @pytest.mark.django_db

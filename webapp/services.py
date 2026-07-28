@@ -452,6 +452,11 @@ def _analysis_worker(run_pk):
         # unknown-key rows are surfaced as config_skipped, not hidden in
         # a daemon-thread log (Design Decision 13).
         applied = {k: v for k, v in config_deltas.items() if k not in skipped}
+        # A per-deal solver target supersedes the global row entirely;
+        # stamping the global value would record a threshold the engine
+        # never used. The winner is already recorded under "assumptions".
+        if overrides.get("solver_target_irr"):
+            applied.pop("SOLVER_TARGET_IRR", None)
         AnalysisRun.objects.filter(pk=run_pk).update(
             applied_overrides=json_safe(
                 {"config": applied, "config_skipped": skipped,
