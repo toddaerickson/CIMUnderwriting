@@ -356,3 +356,64 @@ def test_assumptions_explicit_change_still_persists(deals_dir):
     assert form.is_valid(), form.errors
     out = build_overrides(form.cleaned_data, QueryDict(), deal, eff)
     assert out["scenario_overrides"]["base"]["exit_cap"] == 0.08
+
+
+# ── Phase 5A: comps browser ──────────────────────────────────────────
+
+@pytest.fixture
+def comp_db(tmp_path, monkeypatch):
+    """Scratch comp DB with three rows (data.comp_db binds COMP_DB_PATH
+    at import — patch the module attribute, same as test_web_runs)."""
+    path = str(tmp_path / "comps.db")
+    monkeypatch.setattr("data.comp_db.COMP_DB_PATH", path)
+    import sqlite3
+
+    from data.comp_db import CompDatabase
+    db = CompDatabase()          # creates schema
+    with sqlite3.connect(path) as conn:
+        conn.executemany(
+            "INSERT INTO properties (property_name, city, state, nrsf,"
+            " total_units, occupancy, adjusted_noi, revenue_per_sf,"
+            " noi_per_sf, analysis_date, pdf_filename)"
+            " VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+            [("Alpha Storage", "Belton", "TX", 45000, 350, 0.92, 250000,
+              9.3, 5.6, "2026-07-01", "alpha.pdf"),
+             ("Bravo Storage", "Denver", "CO", 62000, 480, 0.88, 400000,
+              10.1, 6.5, "2026-06-15", "bravo.pdf"),
+             ("Small Lockers", "Waco", "TX", 18000, 190, 0.95, 90000,
+              8.8, 5.0, "2026-05-20", "small.pdf")])
+    return db
+
+
+@pytest.mark.django_db
+def test_comps_page_lists_and_filters(client, operator, comp_db):
+    resp = client.get("/comps/")
+    content = resp.content.decode()
+    assert resp.status_code == 200
+    assert "Alpha Storage" in content and "Bravo Storage" in content
+    assert "3 comps" in content
+
+    content = client.get("/comps/?state=TX").content.decode()
+    assert "Alpha Storage" in content
+    assert "Bravo Storage" not in content
+
+    content = client.get("/comps/?state=TX&min_nrsf=40000").content.decode()
+    assert "Alpha Storage" in content
+    assert "Small Lockers" not in content
+
+
+@pytest.mark.django_db
+def test_comps_csv_export(client, operator, comp_db):
+    resp = client.get("/comps/?state=TX&format=csv")
+    assert resp["Content-Type"].startswith("text/csv")
+    body = resp.content.decode()
+    assert body.splitlines()[0].startswith("property_name,")
+    assert "Alpha Storage" in body and "Bravo Storage" not in body
+
+
+@pytest.mark.django_db
+def test_comps_page_empty_db(client, operator, tmp_path, monkeypatch):
+    monkeypatch.setattr("data.comp_db.COMP_DB_PATH", str(tmp_path / "e.db"))
+    resp = client.get("/comps/")
+    assert resp.status_code == 200
+    assert b"No comps yet" in resp.content

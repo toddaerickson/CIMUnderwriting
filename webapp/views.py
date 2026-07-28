@@ -6,7 +6,7 @@ from django.conf import settings
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.db import connection
-from django.http import FileResponse, Http404, JsonResponse
+from django.http import FileResponse, Http404, HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils import timezone
@@ -345,3 +345,48 @@ def deal_download(request, pk, kind):
         raise Http404
     return FileResponse(open(path, "rb"), as_attachment=True,
                         filename=filename, content_type=mime)
+
+
+# ── Phase 5: comps browser ──────────────────────────────────────────
+
+COMP_COLUMNS = ["property_name", "city", "state", "nrsf", "total_units",
+                "occupancy", "adjusted_noi", "revenue_per_sf",
+                "noi_per_sf", "analysis_date", "pdf_filename"]
+
+
+@login_required
+def comps(request):
+    """Read-only browser over the existing comp SQLite DB. Filters run
+    in Python: the summary query IS the API and the table is tiny."""
+    from data.comp_db import CompDatabase
+
+    all_rows = CompDatabase().get_comp_summary()
+    state = request.GET.get("state", "").strip().upper()
+    min_nrsf_raw = request.GET.get("min_nrsf", "").strip()
+    try:
+        min_nrsf = float(min_nrsf_raw) if min_nrsf_raw else 0.0
+    except ValueError:
+        min_nrsf = 0.0
+    rows = [r for r in all_rows
+            if (not state or (r["state"] or "").upper() == state)
+            and (r["nrsf"] or 0) >= min_nrsf]
+
+    if request.GET.get("format") == "csv":
+        import csv
+
+        resp = HttpResponse(content_type="text/csv")
+        resp["Content-Disposition"] = 'attachment; filename="comps.csv"'
+        writer = csv.DictWriter(resp, fieldnames=COMP_COLUMNS)
+        writer.writeheader()
+        writer.writerows(
+            {k: r.get(k) for k in COMP_COLUMNS} for r in rows)
+        return resp
+
+    return render(request, "webapp/comps.html", {
+        "rows": rows,
+        "total": len(all_rows),
+        "state": state,
+        "min_nrsf": min_nrsf_raw,
+        "state_options": sorted({(r["state"] or "").upper()
+                                 for r in all_rows if r["state"]}),
+    })
