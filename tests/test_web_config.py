@@ -308,3 +308,51 @@ def test_worker_applies_global_overrides_and_stamps_run(deals_dir, monkeypatch):
     assert run.applied_overrides["assumptions"]["solver_target_irr"] == 0.15
     from analysis.filters import GATES
     assert GATES["min_irr_5yr"] == 0.10          # restored after the run
+
+
+@pytest.mark.django_db
+def test_assumptions_baseline_reflects_global_override(deals_dir):
+    """With a global scenario override active, the form's initial shows
+    the EFFECTIVE value, and saving the form untouched produces NO
+    per-deal scenario delta (baseline == effective, not config.py).
+    post arg is a QueryDict: parse_unit_mix calls .getlist (review)."""
+    from django.http import QueryDict
+
+    from tests.test_web_runs import _make_extracted_deal
+
+    from webapp import services
+    from webapp.forms import build_initial, build_overrides, AssumptionsForm
+    from webapp.models import ConfigOverride
+
+    ConfigOverride.objects.create(
+        key="SCENARIO_DEFAULTS.base.exit_cap", value=0.07,
+        effective_date=datetime.date(2026, 1, 1))
+    deal = _make_extracted_deal(deals_dir)
+    eff = services.effective_config(deal.asset_type)
+
+    initial = build_initial(deal, eff)
+    assert initial["scen_base_exit_cap"] == 7.0          # 0.07 shown as 7
+
+    form = AssumptionsForm(initial)                      # resubmit as-is
+    assert form.is_valid(), form.errors
+    out = build_overrides(form.cleaned_data, QueryDict(), deal, eff)
+    assert "scenario_overrides" not in out               # no spurious delta
+
+
+@pytest.mark.django_db
+def test_assumptions_explicit_change_still_persists(deals_dir):
+    from tests.test_web_runs import _make_extracted_deal
+
+    from webapp import services
+    from webapp.forms import build_initial, build_overrides, AssumptionsForm
+
+    from django.http import QueryDict
+
+    deal = _make_extracted_deal(deals_dir)
+    eff = services.effective_config(deal.asset_type)
+    initial = build_initial(deal, eff)
+    initial["scen_base_exit_cap"] = 8.0                  # user edits to 8%
+    form = AssumptionsForm(initial)
+    assert form.is_valid(), form.errors
+    out = build_overrides(form.cleaned_data, QueryDict(), deal, eff)
+    assert out["scenario_overrides"]["base"]["exit_cap"] == 0.08

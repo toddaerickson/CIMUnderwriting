@@ -140,7 +140,10 @@ def _pct_display(v):
     return round(float(v) * 100, 4) if v is not None else None
 
 
-def build_initial(deal) -> dict:
+def build_initial(deal, eff=None) -> dict:
+    if eff is None:
+        from webapp import services      # lazy: avoids a module cycle
+        eff = services.effective_config(deal.asset_type)
     snapshot = deal.cim_json or {}
     saved = deal.assumption_overrides or {}
     merged = {**snapshot, **saved.get("cim_overrides", {})}
@@ -150,12 +153,12 @@ def build_initial(deal) -> dict:
         initial[name] = _pct_display(v) if name in CIM_PCT_FIELDS else v
     scen_saved = saved.get("scenario_overrides", {})
     for sc in SCENARIO_KEYS:
-        current = {**cfg.SCENARIO_DEFAULTS.get(sc, {}), **scen_saved.get(sc, {})}
+        current = {**eff["SCENARIO_DEFAULTS"].get(sc, {}), **scen_saved.get(sc, {})}
         for p in SCENARIO_PARAMS:
             initial[f"scen_{sc}_{p}"] = _pct_display(current.get(p))
     va_saved = saved.get("va_scenario_overrides", {})
     for sc in SCENARIO_KEYS:
-        current = {**cfg.VALUE_ADD_SCENARIOS.get(sc, {}), **va_saved.get(sc, {})}
+        current = {**eff["VALUE_ADD_SCENARIOS"].get(sc, {}), **va_saved.get(sc, {})}
         for p in VA_PARAMS:
             v = current.get(p)
             if p in VA_NON_PCT:
@@ -164,13 +167,13 @@ def build_initial(deal) -> dict:
                 initial[f"va_{sc}_{p}"] = _pct_display(v)
     rc_saved = saved.get("replacement_cost_overrides", {})
     for key in RC_KEYS:
-        low, high = rc_saved.get(key, cfg.REPLACEMENT_COST[key])
+        low, high = rc_saved.get(key, eff["REPLACEMENT_COST"][key])
         if key in RC_PCT_KEYS:
             low, high = float(low) * 100, float(high) * 100
         initial[f"rc_{key}_low"] = round(float(low), 4)
         initial[f"rc_{key}_high"] = round(float(high), 4)
     initial["solver_target_irr"] = _pct_display(
-        saved.get("solver_target_irr", cfg.SOLVER_TARGET_IRR))
+        saved.get("solver_target_irr", eff["SOLVER_TARGET_IRR"]))
     return initial
 
 
@@ -285,9 +288,12 @@ def _submitted_sections(cleaned, prefix, params, defaults, non_pct=()) -> dict:
     return out
 
 
-def build_overrides(cleaned, post, deal) -> dict:
+def build_overrides(cleaned, post, deal, eff=None) -> dict:
     """Deltas only — see the Phase 3 plan's Design Decisions. Sections
     equal to their defaults are omitted entirely."""
+    if eff is None:
+        from webapp import services      # lazy: avoids a module cycle
+        eff = services.effective_config(deal.asset_type)
     snapshot = deal.cim_json or {}
     out = {}
 
@@ -307,12 +313,12 @@ def build_overrides(cleaned, post, deal) -> dict:
     if cim_o:
         out["cim_overrides"] = cim_o
 
-    scen = _submitted_sections(cleaned, "scen", SCENARIO_PARAMS, cfg.SCENARIO_DEFAULTS)
-    if scen != _rounded_sections(cfg.SCENARIO_DEFAULTS, SCENARIO_PARAMS):
+    scen = _submitted_sections(cleaned, "scen", SCENARIO_PARAMS, eff["SCENARIO_DEFAULTS"])
+    if scen != _rounded_sections(eff["SCENARIO_DEFAULTS"], SCENARIO_PARAMS):
         out["scenario_overrides"] = scen
-    va = _submitted_sections(cleaned, "va", VA_PARAMS, cfg.VALUE_ADD_SCENARIOS,
+    va = _submitted_sections(cleaned, "va", VA_PARAMS, eff["VALUE_ADD_SCENARIOS"],
                              non_pct=VA_NON_PCT)
-    if va != _rounded_sections(cfg.VALUE_ADD_SCENARIOS, VA_PARAMS):
+    if va != _rounded_sections(eff["VALUE_ADD_SCENARIOS"], VA_PARAMS):
         out["va_scenario_overrides"] = va
 
     rc = {}
@@ -324,7 +330,7 @@ def build_overrides(cleaned, post, deal) -> dict:
         if key in RC_PCT_KEYS:
             low, high = low / 100.0, high / 100.0
         cur = [round(float(low), 6), round(float(high), 6)]
-        d_low, d_high = cfg.REPLACEMENT_COST[key]
+        d_low, d_high = eff["REPLACEMENT_COST"][key]
         if cur != [round(float(d_low), 6), round(float(d_high), 6)]:
             rc[key] = cur
     if rc:
@@ -333,7 +339,7 @@ def build_overrides(cleaned, post, deal) -> dict:
     tgt = cleaned.get("solver_target_irr")
     if tgt is not None:
         tgt = round(tgt / 100.0, 6)
-        if not _same(tgt, cfg.SOLVER_TARGET_IRR):
+        if not _same(tgt, eff["SOLVER_TARGET_IRR"]):
             out["solver_target_irr"] = tgt
 
     return out

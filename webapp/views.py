@@ -120,6 +120,7 @@ def extract_retry(request, pk):
 @login_required
 def deal_assumptions(request, pk):
     deal = get_object_or_404(Deal, pk=pk)
+    eff = services.effective_config(deal.asset_type)
     if deal.extract_status == "" and not deal.cim_json:
         return render(request, "webapp/assumptions_wait.html",
                       {"deal": deal, "unavailable": True})
@@ -133,7 +134,7 @@ def deal_assumptions(request, pk):
         form = assumptions_forms.AssumptionsForm(request.POST)
         if form.is_valid():
             deal.assumption_overrides = assumptions_forms.build_overrides(
-                form.cleaned_data, request.POST, deal)
+                form.cleaned_data, request.POST, deal, eff)
             deal.save(update_fields=["assumption_overrides", "updated_at"])
             if "run" in request.POST:
                 if _run_state(deal.runs.first()) == "running":
@@ -149,7 +150,7 @@ def deal_assumptions(request, pk):
         status = 422
     else:
         form = assumptions_forms.AssumptionsForm(
-            initial=assumptions_forms.build_initial(deal))
+            initial=assumptions_forms.build_initial(deal, eff))
         rows = assumptions_forms.unit_mix_rows(deal)
         status = 200
     f = assumptions_forms
