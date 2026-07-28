@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% block title %}Settings{% endblock %}
 {% block content %}
-<div class="max-w-5xl space-y-6">
+<div class="max-w-5xl space-y-4">
   <div>
     <h1 class="text-xl font-semibold mb-1">Settings</h1>
     <p class="text-sm text-slate-600">Investment thresholds are defined in
@@ -12,8 +12,8 @@
   </div>
 
   <section>
-    <h2 class="text-sm font-bold uppercase tracking-wider text-slate-500 mb-2">Add override</h2>
-    <form method="post" class="flex flex-wrap gap-2 items-end">
+    <h2 class="text-sm font-semibold mb-1.5">Add override</h2>
+    <form method="post" class="bg-white border border-slate-200 rounded-lg p-3 flex flex-wrap gap-2 items-end">
       {% csrf_token %}
       <label class="text-xs text-slate-600">Setting
         {{ form.key }}
@@ -42,54 +42,56 @@
   </section>
 
   <section>
-    <h2 class="text-sm font-bold uppercase tracking-wider text-slate-500 mb-2">Overrides</h2>
-    <table class="w-full text-sm border-collapse">
-      <thead>
-        <tr class="text-left border-b border-slate-300 text-xs text-slate-600">
-          <th class="py-1.5 pr-3">Setting</th>
-          <th class="py-1.5 pr-3">Value</th>
-          <th class="py-1.5 pr-3">Scope</th>
-          <th class="py-1.5 pr-3">Effective</th>
-          <th class="py-1.5 pr-3">Status</th>
-          <th class="py-1.5 pr-3">Note</th>
-          <th class="py-1.5"></th>
-        </tr>
-      </thead>
-      <tbody>
-        {% for o in overrides %}
-        <tr class="border-b border-slate-100 {% if o.status == 'superseded' %}text-slate-400{% endif %}">
-          <td class="py-1.5 pr-3 font-medium">{{ o.label }}
-            <span class="block text-[11px] text-slate-400">{{ o.row.key }}</span></td>
-          <td class="py-1.5 pr-3">{{ o.display_value }}</td>
-          <td class="py-1.5 pr-3">{{ o.row.asset_type|default:"All" }}</td>
-          <td class="py-1.5 pr-3 whitespace-nowrap">{{ o.row.effective_date|date:"Y-m-d" }}</td>
-          <td class="py-1.5 pr-3">
-            <span class="text-xs rounded px-1.5 py-0.5
-              {% if o.status == 'active' %}bg-emerald-50 text-emerald-700
-              {% elif o.status == 'scheduled' %}bg-amber-50 text-amber-700
-              {% elif o.status == 'unknown key' %}bg-red-50 text-red-700
-              {% else %}bg-slate-100 text-slate-500{% endif %}">{{ o.status }}</span>
-          </td>
-          <td class="py-1.5 pr-3 text-slate-500">{{ o.row.note }}</td>
-          <td class="py-1.5 text-right">
-            <form method="post" action="{% url 'override-delete' o.row.pk %}"
-                  onsubmit="return confirm('Delete this override?')">
-              {% csrf_token %}
-              <button type="submit" class="text-xs text-red-600 underline">Delete</button>
-            </form>
-          </td>
-        </tr>
-        {% empty %}
-        <tr><td colspan="7" class="py-4 text-slate-500">No overrides —
-          analyses use the <code>config.py</code> defaults.</td></tr>
-        {% endfor %}
-      </tbody>
-    </table>
+    <h2 class="text-sm font-semibold mb-1.5">Overrides</h2>
+    <div class="bg-white border border-slate-200 rounded-lg overflow-x-auto">
+      <table class="w-full text-sm border-collapse">
+        <thead>
+          <tr class="text-left border-b border-slate-300 text-xs text-slate-600">
+            <th class="py-1.5 pl-3 pr-3">Setting</th>
+            <th class="py-1.5 pr-3 text-right">Value</th>
+            <th class="py-1.5 pr-3">Scope</th>
+            <th class="py-1.5 pr-3">Effective</th>
+            <th class="py-1.5 pr-3">Status</th>
+            <th class="py-1.5 pr-3">Note</th>
+            <th class="py-1.5 pr-3"></th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for o in overrides %}
+          <tr class="border-b border-slate-100 {% if o.status == 'superseded' %}text-slate-400{% endif %}">
+            <td class="py-1.5 pl-3 pr-3 font-medium">{{ o.label }}
+              <span class="block text-[11px] text-slate-400">{{ o.row.key }}</span></td>
+            <td class="py-1.5 pr-3 text-right">{{ o.display_value }}</td>
+            <td class="py-1.5 pr-3">{{ o.row.asset_type|default:"All" }}</td>
+            <td class="py-1.5 pr-3 whitespace-nowrap">{{ o.row.effective_date|date:"Y-m-d" }}</td>
+            <td class="py-1.5 pr-3">
+              <span class="text-xs rounded px-1.5 py-0.5
+                {% if o.status == 'active' %}bg-emerald-50 text-emerald-700
+                {% elif o.status == 'scheduled' %}bg-amber-50 text-amber-700
+                {% elif o.status == 'unknown key' %}bg-red-50 text-red-700
+                {% else %}bg-slate-100 text-slate-500{% endif %}">{{ o.status }}</span>
+            </td>
+            <td class="py-1.5 pr-3 text-slate-500">{{ o.row.note }}</td>
+            <td class="py-1.5 pr-3 text-right">
+              <form method="post" action="{% url 'override-delete' o.row.pk %}"
+                    onsubmit="return confirm('Delete this override?')">
+                {% csrf_token %}
+                <button type="submit" class="text-xs text-red-600 underline">Delete</button>
+              </form>
+            </td>
+          </tr>
+          {% empty %}
+          <tr><td colspan="7" class="py-8 px-3 text-center text-slate-500">No overrides —
+            analyses use the <code>config.py</code> defaults.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
   </section>
 
   <section>
     <div class="flex items-center gap-3 mb-2">
-      <h2 class="text-sm font-bold uppercase tracking-wider text-slate-500">Effective values</h2>
+      <h2 class="text-sm font-semibold">Effective values</h2>
       <form method="get" class="flex items-center gap-1 text-xs text-slate-600">
         <label for="id_preview_scope">for</label>
         <select name="asset_type" id="id_preview_scope" onchange="this.form.submit()"

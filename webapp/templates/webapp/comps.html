@@ -7,61 +7,63 @@
     <span class="text-sm text-slate-500">{{ total }} comp{{ total|pluralize }}</span>
   </div>
 
-  <form method="get" class="flex gap-2 mb-3 items-end">
-    <label class="text-xs text-slate-600">State
-      <select name="state" class="block border border-slate-300 rounded px-2 py-1 text-sm">
-        <option value="">All</option>
-        {% for s in state_options %}<option value="{{ s }}" {% if s == state %}selected{% endif %}>{{ s }}</option>{% endfor %}
-      </select>
-    </label>
-    <label class="text-xs text-slate-600">Min NRSF
-      <input type="number" name="min_nrsf" value="{{ min_nrsf }}" min="0" step="1000"
-             class="block border border-slate-300 rounded px-2 py-1 text-sm w-28">
-    </label>
-    <button type="submit" class="bg-accent-700 text-white text-sm px-3 py-1.5 rounded">Filter</button>
-    <a href="{% url 'comps' %}" class="text-sm text-slate-500 underline">Clear</a>
-    <a href="?state={{ state }}&min_nrsf={{ min_nrsf }}&format=csv"
-       class="ml-auto text-sm text-accent-700 underline">Export CSV</a>
-  </form>
+  <div class="bg-white border border-slate-200 rounded-lg">
+    <form method="get" class="flex flex-wrap gap-2 items-end p-3 border-b border-slate-200">
+      <label class="text-xs text-slate-600">State
+        <select name="state" class="block border border-slate-300 rounded px-2 py-1 text-sm">
+          <option value="">All</option>
+          {% for s in state_options %}<option value="{{ s }}" {% if s == state %}selected{% endif %}>{{ s }}</option>{% endfor %}
+        </select>
+      </label>
+      <label class="text-xs text-slate-600">Min NRSF
+        <input type="number" name="min_nrsf" value="{{ min_nrsf }}" min="0" step="1000"
+               class="block border border-slate-300 rounded px-2 py-1 text-sm w-28">
+      </label>
+      <button type="submit" class="bg-accent-700 text-white text-sm px-3 py-1.5 rounded">Filter</button>
+      <a href="{% url 'comps' %}" class="text-sm text-slate-500 underline">Clear</a>
+      <a href="?state={{ state }}&min_nrsf={{ min_nrsf }}&format=csv"
+         class="ml-auto text-sm text-accent-700 underline">Export CSV</a>
+    </form>
 
-  <div class="overflow-x-auto">
-    <table class="w-full text-sm border-collapse">
-      <thead>
-        <tr class="text-left border-b border-slate-300 text-xs text-slate-600">
-          <th class="py-1.5 pr-3">Property</th>
-          <th class="py-1.5 pr-3">City</th>
-          <th class="py-1.5 pr-3">ST</th>
-          <th class="py-1.5 pr-3 text-right">NRSF</th>
-          <th class="py-1.5 pr-3 text-right">Units</th>
-          <th class="py-1.5 pr-3 text-right">Occ.</th>
-          <th class="py-1.5 pr-3 text-right">Adj. NOI</th>
-          <th class="py-1.5 pr-3 text-right">Rev/SF</th>
-          <th class="py-1.5 pr-3 text-right">NOI/SF</th>
-          <th class="py-1.5 pr-3">Analyzed</th>
-          <th class="py-1.5">Source PDF</th>
-        </tr>
-      </thead>
-      <tbody>
-        {% for r in rows %}
-        <tr class="border-b border-slate-100">
-          <td class="py-1.5 pr-3 font-medium">{{ r.property_name }}</td>
-          <td class="py-1.5 pr-3">{{ r.city|default:"" }}</td>
-          <td class="py-1.5 pr-3">{{ r.state|default:"" }}</td>
-          <td class="py-1.5 pr-3 text-right">{{ r.nrsf|floatformat:0 }}</td>
-          <td class="py-1.5 pr-3 text-right">{{ r.total_units|default_if_none:"" }}</td>
-          <td class="py-1.5 pr-3 text-right">{% if r.occupancy is not None %}{% widthratio r.occupancy 1 100 %}%{% endif %}</td>
-          <td class="py-1.5 pr-3 text-right">{% if r.adjusted_noi is not None %}${{ r.adjusted_noi|floatformat:0 }}{% endif %}</td>
-          <td class="py-1.5 pr-3 text-right">{{ r.revenue_per_sf|floatformat:2 }}</td>
-          <td class="py-1.5 pr-3 text-right">{{ r.noi_per_sf|floatformat:2 }}</td>
-          <td class="py-1.5 pr-3 whitespace-nowrap">{{ r.analysis_date|default:"" }}</td>
-          <td class="py-1.5 text-slate-500 truncate max-w-[16rem]">{{ r.pdf_filename }}</td>
-        </tr>
-        {% empty %}
-        <tr><td colspan="11" class="py-4 text-slate-500">No comps yet — every
-          completed analysis adds its property here automatically.</td></tr>
-        {% endfor %}
-      </tbody>
-    </table>
+    <div class="overflow-x-auto">
+      <table class="w-full text-sm border-collapse">
+        <thead>
+          <tr class="text-left border-b border-slate-300 text-xs text-slate-600">
+            <th class="py-1.5 pl-3 pr-3">Property</th>
+            <th class="py-1.5 pr-3">City</th>
+            <th class="py-1.5 pr-3">ST</th>
+            <th class="py-1.5 pr-3 text-right">NRSF</th>
+            <th class="py-1.5 pr-3 text-right">Units</th>
+            <th class="py-1.5 pr-3 text-right">Occ.</th>
+            <th class="py-1.5 pr-3 text-right">Adj. NOI</th>
+            <th class="py-1.5 pr-3 text-right">Rev/SF</th>
+            <th class="py-1.5 pr-3 text-right">NOI/SF</th>
+            <th class="py-1.5 pr-3">Analyzed</th>
+            <th class="py-1.5 pr-3">Source PDF</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for r in rows %}
+          <tr class="border-b border-slate-100">
+            <td class="py-1.5 pl-3 pr-3 font-medium">{{ r.property_name }}</td>
+            <td class="py-1.5 pr-3">{{ r.city|default:"" }}</td>
+            <td class="py-1.5 pr-3">{{ r.state|default:"" }}</td>
+            <td class="py-1.5 pr-3 text-right">{{ r.nrsf|floatformat:0 }}</td>
+            <td class="py-1.5 pr-3 text-right">{{ r.total_units|default_if_none:"" }}</td>
+            <td class="py-1.5 pr-3 text-right">{% if r.occupancy is not None %}{% widthratio r.occupancy 1 100 %}%{% endif %}</td>
+            <td class="py-1.5 pr-3 text-right">{% if r.adjusted_noi is not None %}${{ r.adjusted_noi|floatformat:0 }}{% endif %}</td>
+            <td class="py-1.5 pr-3 text-right">{{ r.revenue_per_sf|floatformat:2 }}</td>
+            <td class="py-1.5 pr-3 text-right">{{ r.noi_per_sf|floatformat:2 }}</td>
+            <td class="py-1.5 pr-3 whitespace-nowrap">{{ r.analysis_date|default:"" }}</td>
+            <td class="py-1.5 pr-3 text-slate-500 truncate max-w-[16rem]">{{ r.pdf_filename }}</td>
+          </tr>
+          {% empty %}
+          <tr><td colspan="11" class="py-8 px-3 text-center text-slate-500">No comps yet — every
+            completed analysis adds its property here automatically.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
   </div>
 </div>
 {% endblock %}
