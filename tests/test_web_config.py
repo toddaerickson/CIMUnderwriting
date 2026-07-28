@@ -417,3 +417,82 @@ def test_comps_page_empty_db(client, operator, tmp_path, monkeypatch):
     resp = client.get("/comps/")
     assert resp.status_code == 200
     assert b"No comps yet" in resp.content
+
+
+# ── Phase 5A: settings page ──────────────────────────────────────────
+
+@pytest.mark.django_db
+def test_settings_page_add_list_delete(client, operator):
+    from webapp.models import ConfigOverride
+
+    resp = client.post("/settings/", {
+        "key": "GATES.min_irr_5yr", "value": "12", "asset_type": "",
+        "effective_date": "2026-07-01", "note": "tighten"})
+    assert resp.status_code == 302
+    row = ConfigOverride.objects.get()
+    assert row.value == 0.12
+
+    content = client.get("/settings/").content.decode()
+    assert "GATES.min_irr_5yr" in content
+    assert "12%" in content                       # display units
+    assert "tighten" in content
+
+    resp = client.post(f"/settings/overrides/{row.pk}/delete/")
+    assert resp.status_code == 302
+    assert ConfigOverride.objects.count() == 0
+
+
+@pytest.mark.django_db
+def test_settings_page_rejects_bad_value(client, operator):
+    from webapp.models import ConfigOverride
+
+    resp = client.post("/settings/", {
+        "key": "EXPENSE_BENCHMARKS.property_tax", "value": "5",
+        "asset_type": "", "effective_date": "2026-07-01"})
+    assert resp.status_code == 200                # re-rendered with errors
+    assert b"two numbers" in resp.content
+    assert ConfigOverride.objects.count() == 0
+
+
+@pytest.mark.django_db
+def test_settings_status_badges(client, operator):
+    import datetime as dt
+
+    from django.utils import timezone
+
+    from webapp.models import ConfigOverride
+
+    today = timezone.localdate()
+    ConfigOverride.objects.create(key="GATES.min_irr_5yr", value=0.11,
+                                  effective_date=today - dt.timedelta(days=90))
+    ConfigOverride.objects.create(key="GATES.min_irr_5yr", value=0.12,
+                                  effective_date=today - dt.timedelta(days=1))
+    ConfigOverride.objects.create(key="GATES.min_irr_5yr", value=0.15,
+                                  effective_date=today + dt.timedelta(days=30))
+    ConfigOverride.objects.create(key="GATES.retired_key", value=1,
+                                  effective_date=today)
+    content = client.get("/settings/").content.decode()
+    assert content.count("superseded") == 1
+    assert content.count("scheduled") == 1
+    assert "unknown key" in content
+
+
+@pytest.mark.django_db
+def test_settings_effective_preview_by_asset_type(client, operator):
+    import datetime as dt
+
+    from webapp.models import ConfigOverride
+
+    ConfigOverride.objects.create(key="GATES.min_irr_5yr", value=0.14,
+                                  asset_type="Boat & RV Storage",
+                                  effective_date=dt.date(2026, 1, 1))
+    default_view = client.get("/settings/").content.decode()
+    brv = client.get("/settings/?asset_type=Boat+%26+RV+Storage").content.decode()
+    # Substring presence alone is self-fulfilling: the override row's
+    # "14%" renders in the Overrides table of BOTH responses (review
+    # finding). Assert the scope-sensitive part: the BRV preview adds
+    # one more "14%" (its effective cell) than the global preview.
+    assert brv.count("14%") == default_view.count("14%") + 1
+    # and only the BRV preview marks the key changed
+    assert brv.count("font-semibold text-accent-700") == \
+        default_view.count("font-semibold text-accent-700") + 1

@@ -76,10 +76,8 @@
           <div class="px-2 text-xs font-bold uppercase tracking-wider text-slate-500 mb-1">Reference</div>
           <a href="{% url 'comps' %}"
              class="block px-2 py-1.5 md:py-0.5 rounded {% if request.resolver_match.url_name == 'comps' %}bg-accent-700 text-white{% else %}hover:bg-slate-100{% endif %}">Comps</a>
-          <span class="flex items-center justify-between px-2 py-1.5 md:py-0.5 rounded text-slate-400 cursor-not-allowed">
-            Settings
-            <span class="text-[10px] uppercase tracking-wide text-slate-300">soon</span>
-          </span>
+          <a href="{% url 'settings' %}"
+             class="block px-2 py-1.5 md:py-0.5 rounded {% if request.resolver_match.url_name == 'settings' %}bg-accent-700 text-white{% else %}hover:bg-slate-100{% endif %}">Settings</a>
         </div>
       </nav>
 

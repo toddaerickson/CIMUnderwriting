@@ -13,6 +13,7 @@ from django.utils import timezone
 from django.views.decorators.http import require_POST
 from django_htmx.http import HttpResponseClientRedirect
 
+import config as cfg
 from webapp import forms as assumptions_forms
 from webapp import results as results_ctx
 from webapp import services
@@ -390,3 +391,92 @@ def comps(request):
         "state_options": sorted({(r["state"] or "").upper()
                                  for r in all_rows if r["state"]}),
     })
+
+
+# ── Phase 5: settings (config overrides) ────────────────────────────
+
+@login_required
+def settings_page(request):
+    from gui.deal_manager import ASSET_TYPES
+    from webapp.forms import (ConfigOverrideForm, format_override_value,
+                              override_key_registry)
+    from webapp.models import ConfigOverride
+
+    if request.method == "POST":
+        form = ConfigOverrideForm(request.POST)
+        if form.is_valid():
+            row = form.save()
+            messages.success(request, f"Override added: {row}.")
+            return redirect("settings")
+    else:
+        form = ConfigOverrideForm()
+
+    registry = override_key_registry()
+    today = timezone.localdate()
+
+    # Status per row, judged within its own (key, scope) lane: the
+    # winning row is "active", later-dated rows are "scheduled", the
+    # rest "superseded"; keys config.py no longer defines: "unknown key".
+    # services.override_precedence is THE tie-break — same function the
+    # resolver sorts by, so the badge can never disagree with a run.
+    rows = list(ConfigOverride.objects.all())
+    winners = {}
+    for r in rows:
+        if r.effective_date > today or r.key not in registry:
+            continue
+        lane = (r.key, r.asset_type)
+        w = winners.get(lane)
+        if w is None or services.override_precedence(r) > \
+                services.override_precedence(w):
+            winners[lane] = r
+    overrides = []
+    for r in rows:
+        if r.key not in registry:
+            status = "unknown key"
+        elif r.effective_date > today:
+            status = "scheduled"
+        elif winners.get((r.key, r.asset_type)) is r:
+            status = "active"
+        else:
+            status = "superseded"
+        overrides.append({
+            "row": r, "status": status,
+            "display_value": format_override_value(r.key, r.value),
+            "label": registry.get(r.key, {}).get("label", r.key),
+        })
+
+    # Effective-values preview for the selected scope. dotted_get works
+    # against both the config module and the eff mapping (str-enum keys),
+    # including top-level scalars like SOLVER_TARGET_IRR — one traversal,
+    # no special cases (review finding).
+    from webapp.forms import dotted_get
+
+    sel = request.GET.get("asset_type", "")
+    if sel not in ASSET_TYPES:
+        sel = ""
+    eff = services.effective_config(sel)
+    deltas = services.resolve_config_overrides(sel, today)
+    groups = {}
+    for key, spec in registry.items():
+        groups.setdefault(spec["group"], []).append({
+            "key": key, "label": spec["label"],
+            "default": format_override_value(key, dotted_get(cfg, key)),
+            "effective": format_override_value(key, dotted_get(eff, key)),
+            "changed": key in deltas,
+        })
+
+    return render(request, "webapp/settings.html", {
+        "form": form, "overrides": overrides, "groups": groups,
+        "asset_types": ASSET_TYPES, "selected_asset_type": sel,
+    })
+
+
+@login_required
+@require_POST
+def override_delete(request, pk):
+    from webapp.models import ConfigOverride
+
+    row = get_object_or_404(ConfigOverride, pk=pk)
+    row.delete()
+    messages.success(request, f"Deleted override {row.key}.")
+    return redirect("settings")

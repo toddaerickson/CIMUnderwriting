@@ -488,6 +488,15 @@ class ConfigOverrideForm(forms.Form):
         self.fields["asset_type"].choices = (
             [("", "All asset types")] + [(a, a) for a in ASSET_TYPES])
 
+        base = "border border-slate-300 rounded px-2 py-1 text-sm block"
+        self.fields["key"].widget.attrs["class"] = base + " max-w-[22rem]"
+        self.fields["value"].widget.attrs.update(
+            {"class": base + " w-32", "placeholder": "12  or  1.4, 2.6"})
+        self.fields["asset_type"].widget.attrs["class"] = base
+        self.fields["effective_date"].widget.attrs["class"] = base
+        self.fields["note"].widget.attrs.update(
+            {"class": base + " w-44", "placeholder": "why"})
+
     def clean(self):
         cleaned = super().clean()
         key, raw = cleaned.get("key"), cleaned.get("value")
