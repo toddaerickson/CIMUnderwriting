@@ -558,6 +558,7 @@ def _analysis_worker(run_pk):
                     custom_scenarios=overrides.get("scenario_overrides"),
                     custom_va_scenarios=overrides.get("va_scenario_overrides"),
                     solver_target_irr=solver_irr,
+                    enrich=True,
                 )
 
         meta = build_deal_meta(cim, result, deal.deal_dir,
@@ -582,6 +583,17 @@ def _analysis_worker(run_pk):
             "adjusted_noi": result.adjusted_noi,
             "expense_ratio": result.expense_ratio,
             "errors": result.errors,
+            # Provenance: which tier supplied each demographic field
+            # (CIM/override vs Census vs default) + why enrichment
+            # skipped, so a blank population is explainable from the run
+            # record instead of a daemon-thread log.
+            "enrichment": {
+                "fields_enriched": result.enrichment.fields_enriched,
+                "geocode_success": result.enrichment.geocode_success,
+                "census_success": result.enrichment.census_success,
+                "errors": result.enrichment.errors,
+                "source_log": result.enrichment.source_log,
+            } if result.enrichment else None,
         })
         # Both writes below must land together: if anything past the
         # AnalysisRun "done" flip raises (e.g. building deal_updates),

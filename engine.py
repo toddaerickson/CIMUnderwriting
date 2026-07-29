@@ -116,11 +116,18 @@ def extract_pdf_data(pdf_path: str, cim_overrides: dict = None,
     return result
 
 
+#: Demographic fields the Census enrichment can fill — the re-enrichment
+#: gate in run_analysis() only calls out when one of these is still None.
+ENRICHABLE_FIELDS = ("population_1mi", "population_3mi", "population_5mi",
+                     "median_hhi_3mi")
+
+
 def run_analysis(result: AnalysisResult, progress: Callable = None,
                   output_dir: str = None,
                   custom_scenarios: dict = None,
                   custom_va_scenarios: dict = None,
-                  solver_target_irr: float = None) -> AnalysisResult:
+                  solver_target_irr: float = None,
+                  enrich: bool = False) -> AnalysisResult:
     """
     Run full analysis pipeline on an already-extracted CIMData.
 
@@ -132,6 +139,12 @@ def run_analysis(result: AnalysisResult, progress: Callable = None,
         solver_target_irr: per-analysis max-offer IRR target; None keeps
             the config.SOLVER_TARGET_IRR default (solver binds it as a
             function default at import, so a parameter is the only seam)
+        enrich: re-run Census enrichment before analyzing. Extraction-time
+            enrichment ran before the analyst could correct address/city/
+            state in the assumptions form, so a fixed address never got a
+            second chance at geocoding. Tier-1 precedence makes the re-run
+            safe: CIM/analyst values always win; Census only fills gaps.
+            Off by default so the CLI and tests stay network-free.
 
     Returns:
         Updated AnalysisResult with all analysis fields populated
@@ -144,6 +157,19 @@ def run_analysis(result: AnalysisResult, progress: Callable = None,
 
     from data.comp_db import CompDatabase
     comp_db = CompDatabase()
+
+    if enrich and any(getattr(cim_data, f, None) is None
+                      for f in ENRICHABLE_FIELDS):
+        try:
+            from extract.enrichment import enrich_cim_data
+            enrichment = enrich_cim_data(cim_data, comp_db=comp_db)
+            result.enrichment = enrichment
+            for err in enrichment.errors:
+                msg = f"Enrichment: {err}"
+                if msg not in result.errors:
+                    result.errors.append(msg)
+        except Exception as e:
+            result.errors.append(f"Enrichment failed: {e}")
 
     # Step 1: Financial analysis
     _progress(1, 9, "Analyzing financials...")

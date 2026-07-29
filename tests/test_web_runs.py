@@ -171,6 +171,61 @@ def test_engine_end_to_end_with_overrides(tmp_path, monkeypatch):
         assert item["severity"] in {"High", "Medium", "Low"}
 
 
+def test_run_analysis_enrich_true_refills_missing_demographics(tmp_path,
+                                                               monkeypatch):
+    """enrich=True re-runs Census enrichment when a demographic field is
+    still None — the post-assumptions second chance a corrected address
+    never got — and surfaces the enrichment's own errors on the result."""
+    monkeypatch.setattr("data.comp_db.COMP_DB_PATH", str(tmp_path / "comps.db"))
+    from engine import AnalysisResult, run_analysis
+    from extract.enrichment import EnrichmentResult
+
+    calls = {"n": 0}
+
+    def fake_enrich(cim_data, census_api_key=None, comp_db=None):
+        calls["n"] += 1
+        cim_data.population_3mi = 80_000
+        res = EnrichmentResult(fields_enriched=1, geocode_success=True)
+        res.errors.append("Cannot fetch demographics without geocoded address")
+        return res
+
+    monkeypatch.setattr("extract.enrichment.enrich_cim_data", fake_enrich)
+
+    result = AnalysisResult(pdf_path=str(tmp_path / "expo.pdf"))
+    result.cim_data = _sample_cim()  # demographics unset → gate fires
+    result = run_analysis(result, output_dir=str(tmp_path), enrich=True)
+
+    assert calls["n"] == 1
+    assert result.cim_data.population_3mi == 80_000
+    assert result.enrichment.fields_enriched == 1
+    assert ("Enrichment: Cannot fetch demographics without geocoded address"
+            in result.errors)
+
+
+def test_run_analysis_enrichment_never_called_when_complete_or_off(
+        tmp_path, monkeypatch):
+    """The Census call is skipped when every enrichable field is already
+    present (no pointless API traffic), and never happens on the default
+    enrich=False path (CLI and tests stay network-free)."""
+    monkeypatch.setattr("data.comp_db.COMP_DB_PATH", str(tmp_path / "comps.db"))
+    from engine import ENRICHABLE_FIELDS, AnalysisResult, run_analysis
+
+    def boom(*args, **kwargs):
+        raise AssertionError("enrichment must not be called")
+    monkeypatch.setattr("extract.enrichment.enrich_cim_data", boom)
+
+    cim = _sample_cim()
+    for f in ENRICHABLE_FIELDS:
+        setattr(cim, f, 60_000)
+    result = AnalysisResult(pdf_path=str(tmp_path / "expo.pdf"))
+    result.cim_data = cim
+    run_analysis(result, output_dir=str(tmp_path), enrich=True)  # complete → skip
+
+    result2 = AnalysisResult(pdf_path=str(tmp_path / "expo2.pdf"))
+    result2.cim_data = _sample_cim()  # incomplete, but enrich defaults False
+    run_analysis(result2, output_dir=str(tmp_path))
+
+
 @pytest.fixture
 def fake_run(monkeypatch):
     """Stand-in for engine.run_analysis: fills the result fields the
@@ -178,12 +233,13 @@ def fake_run(monkeypatch):
     calls = {}
 
     def _fake(result, progress=None, output_dir=None, custom_scenarios=None,
-              custom_va_scenarios=None, solver_target_irr=None):
+              custom_va_scenarios=None, solver_target_irr=None, enrich=False):
         calls["cim_data"] = result.cim_data
         calls["output_dir"] = output_dir
         calls["custom_scenarios"] = custom_scenarios
         calls["custom_va_scenarios"] = custom_va_scenarios
         calls["solver_target_irr"] = solver_target_irr
+        calls["enrich"] = enrich
         if progress:
             progress(9, 9, "Generating memo & model...")
         name = result.cim_data.property_name.replace(" ", "_")
@@ -280,6 +336,8 @@ def test_worker_success_updates_run_and_deal(deals_dir, fake_run):
     assert fake_run["custom_va_scenarios"] == {"base": {"target_occupancy": 0.9}}
     assert fake_run["solver_target_irr"] == 0.12
     assert fake_run["output_dir"] == deal.deal_dir
+    # The web path must re-run enrichment (post-assumptions Census pass)
+    assert fake_run["enrich"] is True
 
     deal.refresh_from_db()
     assert deal.recommendation == "PURSUE"
