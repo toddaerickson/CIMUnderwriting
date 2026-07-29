@@ -388,12 +388,22 @@ def build_overrides(cleaned, post, deal, eff=None) -> dict:
     mix = parse_unit_mix(post)
     if mix is not None and mix != _normalize_unit_mix(snapshot.get("unit_mix")):
         cim_o["unit_mix"] = mix
-    # Bind a newly set verification to the location it certified — gate 7
-    # treats a verification recorded for a different msa/city as stale, so
-    # a later location edit can't inherit a pass it never earned.
+    # Bind a verification to the location it certified — gate 7 treats a
+    # verification recorded for a different msa/city as stale, so a later
+    # location edit can't inherit a pass it never earned. The pristine PDF
+    # snapshot never contains market_verification, so the bound form's
+    # prefilled value rides along on EVERY save — compare against the
+    # previously SAVED override, not the snapshot: re-stamp only when the
+    # analyst actually changed the verification; otherwise carry the old
+    # stamp forward so an msa-only edit is detected as stale (adversary
+    # re-review finding).
+    prev = (deal.assumption_overrides or {}).get("cim_overrides", {})
     if cim_o.get("market_verification"):
-        cim_o["market_verified_location"] = (
-            cleaned.get("msa") or cleaned.get("city") or "")
+        if cim_o["market_verification"] != prev.get("market_verification"):
+            cim_o["market_verified_location"] = (
+                cleaned.get("msa") or cleaned.get("city") or "")
+        elif prev.get("market_verified_location") is not None:
+            cim_o["market_verified_location"] = prev["market_verified_location"]
     if cim_o:
         out["cim_overrides"] = cim_o
 

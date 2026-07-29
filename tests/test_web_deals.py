@@ -299,3 +299,43 @@ def test_market_verification_roundtrip_and_old_snapshots():
     assert out["cim_overrides"]["market_verified_location"] == "Abilene, TX"
 
     assert not AssumptionsForm(data={"market_verification": "bogus"}).is_valid()
+
+
+@pytest.mark.django_db
+def test_msa_edit_alone_does_not_restamp_verification_location():
+    """Adversary re-review reproduction: the prefilled verification rides
+    along on every save (snapshot never contains it) — an msa-only edit
+    must carry the OLD stamp forward, not re-bless the new location."""
+    from django.http import QueryDict
+    from webapp.forms import AssumptionsForm, build_overrides
+    from webapp.models import Deal
+
+    deal = Deal.objects.create(deal_id="stamp", property_name="S",
+                               cim_json={"property_name": "S"})
+    # Save 1: analyst verifies Dallas as top-50
+    f1 = AssumptionsForm(data={"market_verification": "top_50",
+                               "msa": "Dallas-Fort Worth, TX"})
+    assert f1.is_valid(), f1.errors
+    deal.assumption_overrides = build_overrides(f1.cleaned_data,
+                                                QueryDict(""), deal)
+    assert (deal.assumption_overrides["cim_overrides"]
+            ["market_verified_location"] == "Dallas-Fort Worth, TX")
+    deal.save()
+
+    # Save 2: only the msa changes; verification rides along prefilled
+    f2 = AssumptionsForm(data={"market_verification": "top_50",
+                               "msa": "Abilene, TX"})
+    assert f2.is_valid(), f2.errors
+    out2 = build_overrides(f2.cleaned_data, QueryDict(""), deal)
+    # stamp carried forward — gate 7 will flag Abilene as unverified
+    assert (out2["cim_overrides"]["market_verified_location"]
+            == "Dallas-Fort Worth, TX")
+
+    # Save 3: analyst re-verifies explicitly (changed value) → re-stamp
+    deal.assumption_overrides = out2
+    deal.save()
+    f3 = AssumptionsForm(data={"market_verification": "strong_secondary",
+                               "msa": "Abilene, TX"})
+    assert f3.is_valid(), f3.errors
+    out3 = build_overrides(f3.cleaned_data, QueryDict(""), deal)
+    assert out3["cim_overrides"]["market_verified_location"] == "Abilene, TX"
