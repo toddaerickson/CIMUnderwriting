@@ -101,6 +101,16 @@ class CIMData:
     market_verification: Optional[str] = None
     market_verified_location: Optional[str] = None
 
+    # Rate positioning & momentum drivers (screening-framework additions).
+    # in_place_avg_rent_psf: analyst override; when None the engine
+    # derives occupied-weighted $/SF/mo from the unit mix.
+    # street_rate_trend: rising | flat | falling (None = unknown) — feeds
+    # the ECRI-in-falling-market risk flag. t3_annualized_revenue: T3
+    # annualized $ for the momentum screen vs T12.
+    in_place_avg_rent_psf: Optional[float] = None
+    street_rate_trend: Optional[str] = None
+    t3_annualized_revenue: Optional[float] = None
+
     # Market rent (for value-add analysis)
     market_rent_psf: Optional[float] = None  # $/SF/month at market rates
 

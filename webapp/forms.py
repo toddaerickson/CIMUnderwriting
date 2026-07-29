@@ -46,7 +46,7 @@ VA_PARAMS = [p for p, _ in VA_PARAM_LABELS]
 VA_NON_PCT = {"months_to_stabilize"}
 
 CIM_CHAR_FIELDS = ["property_name", "address", "city", "state", "msa",
-                   "market_verification"]
+                   "market_verification", "street_rate_trend"]
 CIM_INT_FIELDS = ["year_built", "year_expanded", "total_units",
                   "population_1mi", "population_3mi", "population_5mi"]
 CIM_FLOAT_FIELDS = ["acreage", "nrsf", "ss_driveup_sf", "ss_enclosed_sf",
@@ -54,7 +54,8 @@ CIM_FLOAT_FIELDS = ["acreage", "nrsf", "ss_driveup_sf", "ss_enclosed_sf",
                     "asking_price", "capex_estimate", "ttm_gpr", "other_income",
                     "ttm_egr", "ttm_total_revenue", "ttm_total_expenses",
                     "cim_yr1_noi", "ttm_noi", "median_hhi_3mi", "market_rent_psf",
-                    "competitive_supply_sf_3mi", "pipeline_supply_sf_3mi"]
+                    "competitive_supply_sf_3mi", "pipeline_supply_sf_3mi",
+                    "in_place_avg_rent_psf", "t3_annualized_revenue"]
 
 # Gate-7 analyst resolution: the auto top-50 substring match can't see
 # "strong secondary market" (a criteria-sanctioned pass) — the analyst
@@ -64,6 +65,13 @@ MARKET_VERIFICATION_CHOICES = [
     ("top_50", "Top-50 MSA (verified)"),
     ("strong_secondary", "Strong secondary market"),
     ("neither", "Neither — fails gate"),
+]
+
+STREET_RATE_TREND_CHOICES = [
+    ("", "Unknown"),
+    ("rising", "Rising"),
+    ("flat", "Flat"),
+    ("falling", "Falling"),
 ]
 CIM_PCT_FIELDS = ["cc_pct", "physical_occupancy", "economic_occupancy", "mgmt_fee_pct"]
 CIM_SCALAR_FIELDS = CIM_CHAR_FIELDS + CIM_INT_FIELDS + CIM_FLOAT_FIELDS + CIM_PCT_FIELDS
@@ -97,7 +105,10 @@ SECTION_INCOME = [
 SECTION_DEMOGRAPHICS = [
     ("population_1mi", "Population 1-mi"), ("population_3mi", "Population 3-mi"),
     ("population_5mi", "Population 5-mi"), ("median_hhi_3mi", "Median HHI 3-mi ($)"),
-    ("market_rent_psf", "Market Rent ($/SF/mo)"),
+    ("market_rent_psf", "Street Rate ($/SF/mo)"),
+    ("in_place_avg_rent_psf", "In-Place Rent ($/SF/mo)"),
+    ("street_rate_trend", "Street-Rate Trend"),
+    ("t3_annualized_revenue", "T3 Annualized Revenue ($)"),
     ("competitive_supply_sf_3mi", "Competitive Supply SF (3-mi, excl. subject)"),
     ("pipeline_supply_sf_3mi", "Pipeline SF (3-mi)"),
     ("market_verification", "Market Verification (Gate 7)"),
@@ -159,6 +170,9 @@ class AssumptionsForm(forms.Form):
         # rendered as a constrained dropdown, not free text.
         self.fields["market_verification"] = forms.ChoiceField(
             required=False, choices=MARKET_VERIFICATION_CHOICES,
+            widget=forms.Select(attrs={"class": INPUT_CSS}))
+        self.fields["street_rate_trend"] = forms.ChoiceField(
+            required=False, choices=STREET_RATE_TREND_CHOICES,
             widget=forms.Select(attrs={"class": INPUT_CSS}))
         self.fields["accept_noi_discrepancy"] = forms.BooleanField(
             required=False,

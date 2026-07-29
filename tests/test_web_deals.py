@@ -339,3 +339,30 @@ def test_msa_edit_alone_does_not_restamp_verification_location():
     assert f3.is_valid(), f3.errors
     out3 = build_overrides(f3.cleaned_data, QueryDict(""), deal)
     assert out3["cim_overrides"]["market_verified_location"] == "Abilene, TX"
+
+
+@pytest.mark.django_db
+def test_new_driver_fields_roundtrip_and_old_snapshots():
+    """Rate/momentum drivers survive save/initial plumbing; snapshots
+    written before the fields existed resolve to None."""
+    from django.http import QueryDict
+    from webapp.forms import AssumptionsForm, build_initial, build_overrides
+    from webapp.models import Deal
+
+    deal = Deal.objects.create(deal_id="drv", property_name="D",
+                               cim_json={"property_name": "D"})
+    init = build_initial(deal)
+    assert init["in_place_avg_rent_psf"] is None
+    assert init["street_rate_trend"] is None
+    assert init["t3_annualized_revenue"] is None
+
+    form = AssumptionsForm(data={"in_place_avg_rent_psf": "1.15",
+                                 "street_rate_trend": "falling",
+                                 "t3_annualized_revenue": "540000"})
+    assert form.is_valid(), form.errors
+    out = build_overrides(form.cleaned_data, QueryDict(""), deal)
+    assert out["cim_overrides"]["in_place_avg_rent_psf"] == 1.15
+    assert out["cim_overrides"]["street_rate_trend"] == "falling"
+    assert out["cim_overrides"]["t3_annualized_revenue"] == 540000.0
+
+    assert not AssumptionsForm(data={"street_rate_trend": "sideways"}).is_valid()
