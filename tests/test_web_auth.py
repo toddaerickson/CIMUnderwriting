@@ -139,3 +139,16 @@ def test_health_disk_probe_skipped_without_env(client):
     resp = client.get("/health/")
     assert resp.status_code == 200
     assert resp.json()["disk"] is True
+
+
+@pytest.mark.django_db
+def test_health_disk_ok_on_pristine_mount(client, monkeypatch, settings):
+    """First boot: disk mounted but no data on it yet (runbook steps 4-5
+    haven't run). The probe must pass on the mount alone — requiring the
+    data files made the first deploy's health check unsatisfiable."""
+    monkeypatch.setenv("CIM_DEALS_DIR", "/deals")
+    monkeypatch.setenv("COMP_DB_PATH", "/cim_comps.db")
+    settings.CIM_DEALS_DIR = "/deals"  # parent "/" is always a mount
+    resp = client.get("/health/")
+    assert resp.status_code == 200
+    assert resp.json()["disk"] is True
