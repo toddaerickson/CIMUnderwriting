@@ -98,7 +98,7 @@ SECTION_DEMOGRAPHICS = [
     ("population_1mi", "Population 1-mi"), ("population_3mi", "Population 3-mi"),
     ("population_5mi", "Population 5-mi"), ("median_hhi_3mi", "Median HHI 3-mi ($)"),
     ("market_rent_psf", "Market Rent ($/SF/mo)"),
-    ("competitive_supply_sf_3mi", "Competitive Supply SF (3-mi)"),
+    ("competitive_supply_sf_3mi", "Competitive Supply SF (3-mi, excl. subject)"),
     ("pipeline_supply_sf_3mi", "Pipeline SF (3-mi)"),
     ("market_verification", "Market Verification (Gate 7)"),
 ]
@@ -388,6 +388,12 @@ def build_overrides(cleaned, post, deal, eff=None) -> dict:
     mix = parse_unit_mix(post)
     if mix is not None and mix != _normalize_unit_mix(snapshot.get("unit_mix")):
         cim_o["unit_mix"] = mix
+    # Bind a newly set verification to the location it certified — gate 7
+    # treats a verification recorded for a different msa/city as stale, so
+    # a later location edit can't inherit a pass it never earned.
+    if cim_o.get("market_verification"):
+        cim_o["market_verified_location"] = (
+            cleaned.get("msa") or cleaned.get("city") or "")
     if cim_o:
         out["cim_overrides"] = cim_o
 

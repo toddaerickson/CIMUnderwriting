@@ -290,9 +290,12 @@ def test_market_verification_roundtrip_and_old_snapshots():
                                cim_json={"property_name": "MV"})  # pre-field snapshot
     assert build_initial(deal)["market_verification"] is None
 
-    form = AssumptionsForm(data={"market_verification": "top_50"})
+    form = AssumptionsForm(data={"market_verification": "top_50",
+                                 "msa": "Abilene, TX"})
     assert form.is_valid(), form.errors
     out = build_overrides(form.cleaned_data, QueryDict(""), deal)
     assert out["cim_overrides"]["market_verification"] == "top_50"
+    # the verification is bound to the location it certified
+    assert out["cim_overrides"]["market_verified_location"] == "Abilene, TX"
 
     assert not AssumptionsForm(data={"market_verification": "bogus"}).is_valid()

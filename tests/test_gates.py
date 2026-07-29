@@ -246,3 +246,48 @@ def test_oversupply_gate_zero_competitive_sf_computes(mock_cim_data):
     g5 = next(g for g in gates if g["gate"] == 5)
     assert g5["result"] == "PASS"
     assert "0.7 SF/capita" in g5["actual"]
+
+
+# ── Adversary-review repairs ───────────────────────────────────────────
+
+def test_oversupply_gate_negative_input_degrades_to_tbd(mock_cim_data):
+    """Legacy override files bypass form validation — a negative value
+    must degrade to TBD with a reason, never flip the comparison sign."""
+    mock_cim_data.population_3mi = -75_000
+    mock_cim_data.competitive_supply_sf_3mi = 300_000.0
+    gates = evaluate_gates(mock_cim_data, {}, {})
+    g5 = next(g for g in gates if g["gate"] == 5)
+    assert g5["result"] == "TBD"
+    assert "negative or zero" in g5["note"]
+
+
+def test_oversupply_gate_non_numeric_input_does_not_crash(mock_cim_data):
+    """A hand-edited legacy JSON value must not take down all 7 gates."""
+    mock_cim_data.population_3mi = 75_000
+    mock_cim_data.competitive_supply_sf_3mi = "300,000"
+    gates = evaluate_gates(mock_cim_data, {}, {})
+    g5 = next(g for g in gates if g["gate"] == 5)
+    assert g5["result"] == "TBD"
+    assert "not numeric" in g5["note"]
+    assert len(gates) == 7   # every other gate still evaluated
+
+
+def test_msa_gate_stale_verification_for_other_location(mock_cim_data):
+    """A verification stamped for one location must not bless another."""
+    mock_cim_data.msa = "Abilene, TX"
+    mock_cim_data.city = "Abilene"
+    mock_cim_data.market_verification = "strong_secondary"
+    mock_cim_data.market_verified_location = "Waco, TX"
+    gates = evaluate_gates(mock_cim_data, {}, {})
+    g7 = next(g for g in gates if g["gate"] == 7)
+    assert g7["result"] == "TBD"
+    assert "Waco" in g7["note"] and "re-verify" in g7["note"]
+
+
+def test_msa_gate_verification_matching_location_passes(mock_cim_data):
+    mock_cim_data.msa = "Abilene, TX"
+    mock_cim_data.market_verification = "strong_secondary"
+    mock_cim_data.market_verified_location = "Abilene, TX"
+    gates = evaluate_gates(mock_cim_data, {}, {})
+    g7 = next(g for g in gates if g["gate"] == 7)
+    assert g7["result"] == "PASS"

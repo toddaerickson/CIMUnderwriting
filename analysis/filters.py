@@ -147,15 +147,30 @@ def evaluate_gates(cim_data, scenario_results=None, va_results=None,
     # NRSF within 3 mi) / 3-mi population. Without those inputs the gate
     # stays TBD and says exactly which fields unlock it.
     supply = cim_data.new_supply_mentions
-    comp_sf = getattr(cim_data, "competitive_supply_sf_3mi", None)
-    pop = cim_data.population_3mi
-    if comp_sf is not None and pop:
-        pipe_sf = getattr(cim_data, "pipeline_supply_sf_3mi", None) or 0
-        subject_sf = cim_data.nrsf or 0
-        sf_pc = (comp_sf + pipe_sf + subject_sf) / pop
-        limit = GATES["max_sf_per_capita"]
+    limit = GATES["max_sf_per_capita"]
+    # Values can arrive from legacy JSON override files and old snapshots
+    # that bypass form validation — a bad value must degrade THIS gate to
+    # TBD with a reason, never crash the run or flip the comparison sign.
+    sf_pc = None
+    input_problem = ""
+    try:
+        comp_sf = getattr(cim_data, "competitive_supply_sf_3mi", None)
+        comp_sf = None if comp_sf is None else float(comp_sf)
+        pipe_sf = float(getattr(cim_data, "pipeline_supply_sf_3mi", None) or 0)
+        subject_sf = float(cim_data.nrsf or 0)
+        pop = cim_data.population_3mi
+        pop = None if pop is None else float(pop)
+        if comp_sf is not None and pop is not None:
+            if pop <= 0 or comp_sf < 0 or pipe_sf < 0 or subject_sf < 0:
+                input_problem = ("supply/population input negative or zero — "
+                                 "fix the value in assumptions")
+            else:
+                sf_pc = (comp_sf + pipe_sf + subject_sf) / pop
+    except (TypeError, ValueError):
+        input_problem = "supply/population input not numeric — fix the value"
+    if sf_pc is not None:
         note = (f"({comp_sf:,.0f} competitive + {pipe_sf:,.0f} pipeline + "
-                f"{subject_sf:,.0f} subject SF) / {pop:,} pop = "
+                f"{subject_sf:,.0f} subject SF) / {pop:,.0f} pop = "
                 f"{sf_pc:.1f} SF/capita (equilibrium ~7-8)")
         if supply:
             note += f". Supply mentions: {supply[:120]}"
@@ -168,15 +183,17 @@ def evaluate_gates(cim_data, scenario_results=None, va_results=None,
             "note": note,
         })
     else:
+        note = (f"Supply mentions: {supply[:160]}. " if supply else "")
+        note += (input_problem or
+                 "Enter Competitive Supply SF (3-mi) — and population — "
+                 "in assumptions to compute SF/capita")
         gates.append({
             "gate": 5,
             "name": "No Oversupply Flag",
-            "threshold": f"≤ {GATES['max_sf_per_capita']:.0f} SF/capita",
+            "threshold": f"≤ {limit:.0f} SF/capita",
             "actual": "See notes" if supply else "N/A",
             "result": "TBD",
-            "note": (f"Supply mentions: {supply[:160]}. " if supply else "")
-                    + "Enter Competitive Supply SF (3-mi) — and population — "
-                      "in assumptions to compute SF/capita",
+            "note": note,
         })
 
     # Gate 6: NOI step-up ≤ 15% (CIM Yr1 vs TTM)
@@ -210,6 +227,18 @@ def evaluate_gates(cim_data, scenario_results=None, va_results=None,
     msa = cim_data.msa or cim_data.city or ""
     msa_match = any(m.lower() in msa.lower() for m in TOP_50_MSAS) if msa else False
     verification = getattr(cim_data, "market_verification", None) or ""
+    # A verification recorded for a different msa/city is stale — a later
+    # location edit must not inherit a pass it never earned. Legacy
+    # verifications without a stamped location are grandfathered.
+    verified_for = getattr(cim_data, "market_verified_location", None)
+    if verification and verified_for and \
+            verified_for.strip().lower() != msa.strip().lower():
+        verification = ""
+        stale_note = (f"Market verification was recorded for "
+                      f"“{verified_for}” but location is now “{msa}” — "
+                      f"re-verify in assumptions")
+    else:
+        stale_note = ""
     # Explicit analyst verification outranks the auto-match: a coincidental
     # substring hit (e.g. a "Dallas" 60 miles out) must not silently
     # override a recorded "neither" verdict.
@@ -222,7 +251,8 @@ def evaluate_gates(cim_data, scenario_results=None, va_results=None,
     elif msa_match:
         result, note = "PASS", ""
     else:
-        result, note = "TBD", ("MSA not auto-matched to top-50 — set Market "
+        result, note = "TBD", (stale_note or
+                               "MSA not auto-matched to top-50 — set Market "
                                "Verification in assumptions to resolve")
     gates.append({
         "gate": 7,
