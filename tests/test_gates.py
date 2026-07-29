@@ -136,6 +136,52 @@ def test_rate_bridge_risk_fires(mock_cim_data):
     assert any("street-rate" in r["risk"] for r in risks["risks"])
 
 
+def test_ecri_falling_market_risk(mock_cim_data):
+    """ECRI bridge + falling street rates flags a High risk; unknown
+    trend must not trigger it."""
+    from analysis.risks import identify_risks
+    mock_cim_data.street_rate_trend = "falling"
+    risks = identify_risks(mock_cim_data, [], {}, {},
+                           {"rent_gap_pct": 0.18})
+    assert any("falling street-rate" in r["risk"].lower() and
+               r["severity"] == "High" for r in risks["risks"])
+    # no flag when trend unknown
+    mock_cim_data.street_rate_trend = None
+    risks2 = identify_risks(mock_cim_data, [], {}, {},
+                            {"rent_gap_pct": 0.18})
+    assert not any("falling street-rate" in r["risk"].lower()
+                   for r in risks2["risks"])
+
+
+def test_negative_momentum_risk(mock_cim_data):
+    """T3-annualized revenue below T12 flags a Medium momentum risk with
+    the percentage delta in the description."""
+    from analysis.risks import identify_risks
+    mock_cim_data.ttm_total_revenue = 560_000.0
+    mock_cim_data.t3_annualized_revenue = 512_000.0
+    risks = identify_risks(mock_cim_data, [], {}, {}, {})
+    hit = [r for r in risks["risks"] if "momentum" in r["risk"].lower()]
+    assert hit and hit[0]["severity"] == "Medium"
+    assert "-8.6%" in hit[0]["description"]
+
+
+def test_negative_momentum_no_trigger_when_t3_missing(mock_cim_data):
+    """No T3 data — no momentum flag."""
+    from analysis.risks import identify_risks
+    mock_cim_data.t3_annualized_revenue = None
+    risks = identify_risks(mock_cim_data, [], {}, {}, {})
+    assert not any("momentum" in r["risk"].lower() for r in risks["risks"])
+
+
+def test_negative_momentum_no_trigger_when_t3_at_or_above_t12(mock_cim_data):
+    """T3-annualized at or above T12 — no momentum flag."""
+    from analysis.risks import identify_risks
+    mock_cim_data.ttm_total_revenue = 560_000.0
+    mock_cim_data.t3_annualized_revenue = 560_000.0
+    risks = identify_risks(mock_cim_data, [], {}, {}, {})
+    assert not any("momentum" in r["risk"].lower() for r in risks["risks"])
+
+
 def test_summarize_all_pass(mock_cim_data):
     """All-passing gates yield PURSUE recommendation."""
     mock_cim_data.population_3mi = 75_000

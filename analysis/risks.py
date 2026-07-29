@@ -46,6 +46,42 @@ def identify_risks(cim_data, gate_results: list, financial_analysis: dict,
     # Valuation risks
     risks.extend(_valuation_risks(cim_data, scenario_results))
 
+    # ECRI bridge in a falling street-rate market (criteria watch item):
+    # the in-place-to-market gap closes from above, not below.
+    gap = (rent_analysis or {}).get("rent_gap_pct")
+    if (gap is not None and gap >= GATES["rate_bridge_gap_threshold"]
+            and getattr(cim_data, "street_rate_trend", None) == "falling"):
+        risks.append({
+            "category": "Market",
+            "risk": "ECRI bridge in falling street-rate market",
+            "description": (f"In-place rents are {gap:.0%} below street "
+                            f"while street rates are falling — the gap "
+                            f"closes from above; the assumed rent bridge "
+                            f"may not exist."),
+            "severity": "High",
+            "mitigation": ("Verify street-rate trend against operator "
+                           "reports and comps; underwrite the bridge to "
+                           "current street rates, not peak."),
+        })
+
+    # Negative revenue momentum: T3-annualized below T12.
+    t3 = getattr(cim_data, "t3_annualized_revenue", None)
+    t12 = cim_data.ttm_total_revenue or cim_data.ttm_egr
+    if t3 and t12 and t12 > 0 and t3 < t12:
+        pct = t3 / t12 - 1
+        risks.append({
+            "category": "Financial",
+            "risk": "Negative revenue momentum (T3 vs T12)",
+            "description": (f"T3-annualized revenue ${t3:,.0f} is "
+                            f"{pct:.1%} vs T12 ${t12:,.0f} — revenue is "
+                            f"rolling over while underwriting assumes "
+                            f"growth."),
+            "severity": "Medium",
+            "mitigation": ("Confirm with monthly operating statements; "
+                           "haircut Year-1 revenue growth to the T3 "
+                           "run-rate."),
+        })
+
     # Sort by severity
     severity_order = {"High": 0, "Medium": 1, "Low": 2}
     risks.sort(key=lambda r: severity_order.get(r.get("severity", "Low"), 3))
