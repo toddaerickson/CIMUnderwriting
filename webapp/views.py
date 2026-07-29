@@ -173,13 +173,21 @@ def deal_assumptions(request, pk):
         preview_cleaned = getattr(form, "cleaned_data", None) or {}
         preview_post = request.POST
     else:
-        form = assumptions_forms.AssumptionsForm(
-            initial=assumptions_forms.build_initial(deal, eff))
+        initial = assumptions_forms.build_initial(deal, eff)
+        form = assumptions_forms.AssumptionsForm(initial=initial)
         rows = assumptions_forms.unit_mix_rows(deal)
         status = 200
-        # First paint has no in-progress edits — mirrors the SAVED state,
-        # not a submission (see assumptions_preview for the live path).
-        preview_cleaned = {}
+        # First paint has no in-progress edits, but it must still reflect
+        # the deal's SAVED overrides (not just the raw CIM snapshot) — an
+        # empty `cleaned` makes build_overrides' delta loop skip every
+        # field (cleaned.get(name) is always None), so cim_overrides would
+        # come back {} regardless of what's actually saved, and the strip
+        # would show pre-override numbers until the analyst's first edit.
+        # build_initial's output is already in the same whole-number-percent,
+        # exp_<key>-keyed shape build_overrides expects from cleaned_data —
+        # it's the merged snapshot+saved-overrides state, so reusing it here
+        # reconstructs that same saved state instead of a stale one.
+        preview_cleaned = initial
         preview_post = QueryDict("")
 
     # First-paint model-strip + expense-row context — the same computation

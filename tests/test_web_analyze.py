@@ -567,3 +567,32 @@ def test_model_view_renders_all_regions(client, django_user_model, settings, tmp
                    'name="exp_property_tax"', 'id="exp-used-property_tax"',
                    "hx-post", "Save &amp; Run Analysis"):
         assert marker in html, marker
+
+
+@pytest.mark.django_db
+def test_model_view_get_reflects_saved_overrides(client, django_user_model,
+                                                  settings, tmp_path):
+    """First paint must show the SAVED-override state, not the raw CIM
+    snapshot — regression for build_preview_cim(deal, {}, ...) dropping
+    every saved cim_override because an empty `cleaned` short-circuits
+    build_overrides' delta loop (cleaned.get(name) is always None)."""
+    settings.CIM_DEALS_DIR = str(tmp_path)
+    user = django_user_model.objects.create_user(username="op", password="x")
+    client.force_login(user)
+    from webapp.models import Deal
+    deal = Deal.objects.create(
+        deal_id="mv-ov", property_name="MV-OV", extract_status="done",
+        cim_json={"property_name": "MV-OV", "state": "TX", "nrsf": 50_000.0,
+                  "expense_lines": [], "population_3mi": 75_000,
+                  "competitive_supply_sf_3mi": 300_000.0,
+                  "pipeline_supply_sf_3mi": 0.0},
+        # Analyst previously saved a much higher competitive-supply figure.
+        # Pre-override SF/capita: (300k + 0 + 50k) / 75k = 4.6667 -> "4.7".
+        # Post-override SF/capita: (700k + 0 + 50k) / 75k = 10.0 -> "10.0".
+        assumption_overrides={
+            "cim_overrides": {"competitive_supply_sf_3mi": 700_000.0}})
+    resp = client.get(f"/deals/{deal.pk}/assumptions/")
+    html = resp.content.decode()
+    assert resp.status_code == 200
+    assert "10.0" in html
+    assert "4.7" not in html
