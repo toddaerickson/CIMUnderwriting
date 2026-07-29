@@ -366,3 +366,30 @@ def test_new_driver_fields_roundtrip_and_old_snapshots():
     assert out["cim_overrides"]["t3_annualized_revenue"] == 540000.0
 
     assert not AssumptionsForm(data={"street_rate_trend": "sideways"}).is_valid()
+
+
+@pytest.mark.django_db
+def test_expense_line_overrides_roundtrip():
+    from django.http import QueryDict
+    from webapp.forms import AssumptionsForm, build_initial, build_overrides
+    from webapp.models import Deal
+
+    deal = Deal.objects.create(deal_id="exp", property_name="E",
+                               cim_json={"property_name": "E"})
+    form = AssumptionsForm(data={"exp_property_tax": "55405",
+                                 "exp_payroll": "12600"})
+    assert form.is_valid(), form.errors
+    out = build_overrides(form.cleaned_data, QueryDict(""), deal)
+    assert out["expense_line_overrides"] == {"property_tax": 55405.0,
+                                             "payroll": 12600.0}
+    # blanks mean no override; empty dict key entirely absent
+    f2 = AssumptionsForm(data={})
+    assert f2.is_valid()
+    assert "expense_line_overrides" not in build_overrides(
+        f2.cleaned_data, QueryDict(""), deal)
+    # negative rejected by field validation
+    assert not AssumptionsForm(data={"exp_insurance": "-5"}).is_valid()
+    # saved values round-trip into initial
+    deal.assumption_overrides = out
+    deal.save()
+    assert build_initial(deal)["exp_property_tax"] == 55405.0

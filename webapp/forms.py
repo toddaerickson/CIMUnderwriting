@@ -164,6 +164,10 @@ class AssumptionsForm(forms.Form):
             for bound in ("low", "high"):
                 self.fields[f"rc_{key}_{bound}"] = forms.FloatField(
                     required=False, min_value=0, widget=_num())
+        from registry import EXPENSE_KEYS
+        for key in EXPENSE_KEYS:
+            self.fields[f"exp_{key}"] = forms.FloatField(
+                required=False, min_value=0, widget=_num())
         self.fields["solver_target_irr"] = forms.FloatField(
             required=False, min_value=0, widget=_num())
         # Declared in CIM_CHAR_FIELDS for the save/initial plumbing, but
@@ -266,6 +270,8 @@ def build_initial(deal, eff=None) -> dict:
         initial[f"rc_{key}_high"] = round(float(high), 4)
     initial["solver_target_irr"] = _pct_display(
         saved.get("solver_target_irr", eff["SOLVER_TARGET_IRR"]))
+    for key, val in (saved.get("expense_line_overrides") or {}).items():
+        initial[f"exp_{key}"] = val
     return initial
 
 
@@ -431,6 +437,12 @@ def build_overrides(cleaned, post, deal, eff=None) -> dict:
         delta = round(rev - exp - noi, 2)
         if abs(delta) > noi_recon_tolerance(rev):
             out["noi_reconciliation"] = {"accepted": True, "delta": delta}
+
+    from registry import EXPENSE_KEYS
+    exp_o = {k: cleaned[f"exp_{k}"] for k in EXPENSE_KEYS
+             if cleaned.get(f"exp_{k}") is not None}
+    if exp_o:
+        out["expense_line_overrides"] = exp_o
 
     scen = _submitted_sections(cleaned, "scen", SCENARIO_PARAMS, eff["SCENARIO_DEFAULTS"])
     if scen != _rounded_sections(eff["SCENARIO_DEFAULTS"], SCENARIO_PARAMS):
