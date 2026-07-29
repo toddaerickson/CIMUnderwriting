@@ -47,10 +47,19 @@ def identify_risks(cim_data, gate_results: list, financial_analysis: dict,
     risks.extend(_valuation_risks(cim_data, scenario_results))
 
     # ECRI bridge in a falling street-rate market (criteria watch item):
-    # the in-place-to-market gap closes from above, not below.
+    # the in-place-to-market gap closes from above, not below. This
+    # trend-confirmed flag is strictly more informative than the generic
+    # "trend unverified" rate-bridge risk from _rate_bridge_risks — when
+    # it fires, suppress the generic one so the pair doesn't consume two
+    # of the five "why deal could fail" slots for the same issue.
     gap = (rent_analysis or {}).get("rent_gap_pct")
-    if (gap is not None and gap >= GATES["rate_bridge_gap_threshold"]
-            and getattr(cim_data, "street_rate_trend", None) == "falling"):
+    ecri_falling_fires = (
+        gap is not None and gap >= GATES["rate_bridge_gap_threshold"]
+        and getattr(cim_data, "street_rate_trend", None) == "falling"
+    )
+    if ecri_falling_fires:
+        risks[:] = [r for r in risks
+                    if r["risk"] != "Rate-driven bridge — street-rate trend unverified"]
         risks.append({
             "category": "Market",
             "risk": "ECRI bridge in falling street-rate market",
@@ -64,10 +73,12 @@ def identify_risks(cim_data, gate_results: list, financial_analysis: dict,
                            "current street rates, not peak."),
         })
 
-    # Negative revenue momentum: T3-annualized below T12.
+    # Negative revenue momentum: T3-annualized below T12. t3 == 0.0 is a
+    # legitimate "no T3 revenue" case (maximal negative momentum), so
+    # this must check `is not None`, not truthiness.
     t3 = getattr(cim_data, "t3_annualized_revenue", None)
     t12 = cim_data.ttm_total_revenue or cim_data.ttm_egr
-    if t3 and t12 and t12 > 0 and t3 < t12:
+    if t3 is not None and t12 and t12 > 0 and t3 < t12:
         pct = t3 / t12 - 1
         risks.append({
             "category": "Financial",
