@@ -29,12 +29,24 @@
 
   <form method="post" class="space-y-3">
     {% csrf_token %}
-    {% if form.errors %}
-    <div class="rounded-md border border-red-200 bg-red-50 px-4 py-2 text-sm text-red-800">
-      Some fields could not be saved — check the highlighted values.
-      {{ form.errors }}
+    {# Single, always-visible action bar — the form is long and analysts
+       save/run from any scroll position; buttons live here and only here.
+       top-14 clears the fixed mobile hamburger; the error banner lives
+       INSIDE the sticky wrapper so validation failures stay visible at
+       any scroll position instead of sliding under the bar. #}
+    <div class="sticky top-14 md:top-0 z-20 -mx-1 px-1 py-2 bg-slate-50/95 backdrop-blur border-b border-slate-200 space-y-2">
+      <div class="flex items-center justify-end gap-2">
+        <button type="submit" class="border border-slate-300 text-slate-700 hover:bg-slate-50 text-sm px-4 py-1.5 rounded bg-white">Save Assumptions</button>
+        <button type="submit" name="run" value="1"
+                class="bg-accent-700 text-white text-sm px-4 py-1.5 rounded">Save &amp; Run Analysis</button>
+      </div>
+      {% if form.errors %}
+      <div class="rounded-md border border-red-200 bg-red-50 px-4 py-2 text-sm text-red-800">
+        Some fields could not be saved — check the highlighted values.
+        {{ form.errors }}
+      </div>
+      {% endif %}
     </div>
-    {% endif %}
 
     <details open class="bg-white border border-slate-200 rounded-lg">
       <summary class="cursor-pointer select-none px-4 py-2 text-sm font-semibold">Property</summary>
@@ -212,11 +224,6 @@
       </div>
     </details>
 
-    <div class="flex items-center gap-2">
-      <button type="submit" name="run" value="1"
-              class="bg-accent-700 text-white text-sm px-4 py-1.5 rounded">Save &amp; Run Analysis</button>
-      <button type="submit" class="border border-slate-300 text-slate-700 hover:bg-slate-50 text-sm px-4 py-1.5 rounded">Save Assumptions</button>
-    </div>
   </form>
 </div>
 {% endblock %}
