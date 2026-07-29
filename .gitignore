@@ -46,8 +46,9 @@ SS_Returns_Model_*.xlsx
 # Dropbox extended attributes
 *.pdf:com.dropbox.attrs
 
-# Claude Code local state
-.claude/
+# Claude Code local state (settings.json is tracked so worktree sessions inherit the permission allowlist)
+.claude/*
+!.claude/settings.json
 .superpowers/
 
 # Django front end
