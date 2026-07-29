@@ -45,14 +45,26 @@ VA_PARAM_LABELS = [
 VA_PARAMS = [p for p, _ in VA_PARAM_LABELS]
 VA_NON_PCT = {"months_to_stabilize"}
 
-CIM_CHAR_FIELDS = ["property_name", "address", "city", "state", "msa"]
+CIM_CHAR_FIELDS = ["property_name", "address", "city", "state", "msa",
+                   "market_verification"]
 CIM_INT_FIELDS = ["year_built", "year_expanded", "total_units",
                   "population_1mi", "population_3mi", "population_5mi"]
 CIM_FLOAT_FIELDS = ["acreage", "nrsf", "ss_driveup_sf", "ss_enclosed_sf",
                     "brv_enclosed_sf", "brv_covered_sf", "brv_open_sf",
                     "asking_price", "capex_estimate", "ttm_gpr", "other_income",
                     "ttm_egr", "ttm_total_revenue", "ttm_total_expenses",
-                    "cim_yr1_noi", "ttm_noi", "median_hhi_3mi", "market_rent_psf"]
+                    "cim_yr1_noi", "ttm_noi", "median_hhi_3mi", "market_rent_psf",
+                    "competitive_supply_sf_3mi", "pipeline_supply_sf_3mi"]
+
+# Gate-7 analyst resolution: the auto top-50 substring match can't see
+# "strong secondary market" (a criteria-sanctioned pass) — the analyst
+# records the verification here and the gate resolves on it.
+MARKET_VERIFICATION_CHOICES = [
+    ("", "Unverified"),
+    ("top_50", "Top-50 MSA (verified)"),
+    ("strong_secondary", "Strong secondary market"),
+    ("neither", "Neither — fails gate"),
+]
 CIM_PCT_FIELDS = ["cc_pct", "physical_occupancy", "economic_occupancy", "mgmt_fee_pct"]
 CIM_SCALAR_FIELDS = CIM_CHAR_FIELDS + CIM_INT_FIELDS + CIM_FLOAT_FIELDS + CIM_PCT_FIELDS
 
@@ -86,6 +98,9 @@ SECTION_DEMOGRAPHICS = [
     ("population_1mi", "Population 1-mi"), ("population_3mi", "Population 3-mi"),
     ("population_5mi", "Population 5-mi"), ("median_hhi_3mi", "Median HHI 3-mi ($)"),
     ("market_rent_psf", "Market Rent ($/SF/mo)"),
+    ("competitive_supply_sf_3mi", "Competitive Supply SF (3-mi)"),
+    ("pipeline_supply_sf_3mi", "Pipeline SF (3-mi)"),
+    ("market_verification", "Market Verification (Gate 7)"),
 ]
 
 INPUT_CSS = "w-full border border-slate-300 rounded px-2 py-1 text-sm"
@@ -140,6 +155,11 @@ class AssumptionsForm(forms.Form):
                     required=False, min_value=0, widget=_num())
         self.fields["solver_target_irr"] = forms.FloatField(
             required=False, min_value=0, widget=_num())
+        # Declared in CIM_CHAR_FIELDS for the save/initial plumbing, but
+        # rendered as a constrained dropdown, not free text.
+        self.fields["market_verification"] = forms.ChoiceField(
+            required=False, choices=MARKET_VERIFICATION_CHOICES,
+            widget=forms.Select(attrs={"class": INPUT_CSS}))
         self.fields["accept_noi_discrepancy"] = forms.BooleanField(
             required=False,
             widget=forms.CheckboxInput(
@@ -416,7 +436,8 @@ def build_overrides(cleaned, post, deal, eff=None) -> dict:
 
 # ── Phase 5: config override registry + form ────────────────────────
 
-GATES_INT_KEYS = {"population_3mi", "unproven_vintage_year"}
+GATES_INT_KEYS = {"population_3mi", "unproven_vintage_year",
+                  "max_sf_per_capita"}
 EXPENSE_PCT_KEYS = {"mgmt_fee_pct", "opex_revenue_ratio"}
 RC_LEGACY_ALIASES = {"non_cc_per_sf", "cc_per_sf", "site_work_per_sf"}
 # total_opex is recomputed from the line items by get_regional_benchmarks

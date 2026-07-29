@@ -22,6 +22,10 @@ GATES = {
     "max_noi_step_up": 0.15,       # CIM Yr1 NOI vs TTM — flag if exceeded
     "min_irr_5yr": 0.10,
     "min_yield_on_cost": 0.08,
+    # Oversupply screen: (subject + competitive + pipeline NRSF within
+    # 3 mi) / 3-mi population. National equilibrium runs ~7-8 SF/capita;
+    # above this threshold the market is oversupplied.
+    "max_sf_per_capita": 10,
 }
 
 # ── Expense Benchmarks ($/NRSF/yr, stabilized non-climate-controlled) ─

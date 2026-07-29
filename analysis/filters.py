@@ -142,17 +142,42 @@ def evaluate_gates(cim_data, scenario_results=None, va_results=None,
                 "Pending scenario analysis",
     })
 
-    # Gate 5: No oversupply flag
+    # Gate 5: No oversupply flag — data-driven when the analyst enters
+    # competitive supply; SF/capita = (subject + competitive + pipeline
+    # NRSF within 3 mi) / 3-mi population. Without those inputs the gate
+    # stays TBD and says exactly which fields unlock it.
     supply = cim_data.new_supply_mentions
-    gates.append({
-        "gate": 5,
-        "name": "No Oversupply Flag",
-        "threshold": "No material new supply",
-        "actual": "See notes" if supply else "N/A",
-        "result": "TBD",
-        "note": f"Supply mentions: {supply[:200]}" if supply else
-                "No supply data found — verify pipeline manually",
-    })
+    comp_sf = getattr(cim_data, "competitive_supply_sf_3mi", None)
+    pop = cim_data.population_3mi
+    if comp_sf is not None and pop:
+        pipe_sf = getattr(cim_data, "pipeline_supply_sf_3mi", None) or 0
+        subject_sf = cim_data.nrsf or 0
+        sf_pc = (comp_sf + pipe_sf + subject_sf) / pop
+        limit = GATES["max_sf_per_capita"]
+        note = (f"({comp_sf:,.0f} competitive + {pipe_sf:,.0f} pipeline + "
+                f"{subject_sf:,.0f} subject SF) / {pop:,} pop = "
+                f"{sf_pc:.1f} SF/capita (equilibrium ~7-8)")
+        if supply:
+            note += f". Supply mentions: {supply[:120]}"
+        gates.append({
+            "gate": 5,
+            "name": "No Oversupply Flag",
+            "threshold": f"≤ {limit:.0f} SF/capita",
+            "actual": f"{sf_pc:.1f} SF/capita",
+            "result": "PASS" if sf_pc <= limit else "FAIL",
+            "note": note,
+        })
+    else:
+        gates.append({
+            "gate": 5,
+            "name": "No Oversupply Flag",
+            "threshold": f"≤ {GATES['max_sf_per_capita']:.0f} SF/capita",
+            "actual": "See notes" if supply else "N/A",
+            "result": "TBD",
+            "note": (f"Supply mentions: {supply[:160]}. " if supply else "")
+                    + "Enter Competitive Supply SF (3-mi) — and population — "
+                      "in assumptions to compute SF/capita",
+        })
 
     # Gate 6: NOI step-up ≤ 15% (CIM Yr1 vs TTM)
     ttm_noi = cim_data.ttm_noi
@@ -179,16 +204,33 @@ def evaluate_gates(cim_data, scenario_results=None, va_results=None,
             "note": "TTM and/or CIM Yr1 NOI not extracted",
         })
 
-    # Gate 7: Major city / Top-50 MSA
+    # Gate 7: Major city / Top-50 MSA — the criteria allow "Top-50 MSA or
+    # strong secondary market". Auto-PASS on a top-50 substring match;
+    # otherwise the analyst's recorded verification resolves the gate.
     msa = cim_data.msa or cim_data.city or ""
     msa_match = any(m.lower() in msa.lower() for m in TOP_50_MSAS) if msa else False
+    verification = getattr(cim_data, "market_verification", None) or ""
+    # Explicit analyst verification outranks the auto-match: a coincidental
+    # substring hit (e.g. a "Dallas" 60 miles out) must not silently
+    # override a recorded "neither" verdict.
+    if verification == "top_50":
+        result, note = "PASS", "Analyst-verified: Top-50 MSA"
+    elif verification == "strong_secondary":
+        result, note = "PASS", "Analyst-verified: strong secondary market"
+    elif verification == "neither":
+        result, note = "FAIL", "Analyst-verified: neither Top-50 nor strong secondary"
+    elif msa_match:
+        result, note = "PASS", ""
+    else:
+        result, note = "TBD", ("MSA not auto-matched to top-50 — set Market "
+                               "Verification in assumptions to resolve")
     gates.append({
         "gate": 7,
         "name": "Major City / Top-50 MSA",
-        "threshold": "Top-50 MSA",
+        "threshold": "Top-50 MSA or strong secondary",
         "actual": msa if msa else "N/A",
-        "result": "PASS" if msa_match else "TBD",
-        "note": "" if msa_match else "MSA not identified or not in top-50 — verify manually",
+        "result": result,
+        "note": note,
     })
 
     return gates

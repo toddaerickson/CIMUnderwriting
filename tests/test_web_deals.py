@@ -276,3 +276,23 @@ def test_noi_identity_derived_negative_expenses_blocks():
     form = _income_form(ttm_total_revenue=300_000, ttm_noi=400_000)
     assert not form.is_valid()
     assert "negative" in str(form.non_field_errors())
+
+
+@pytest.mark.django_db
+def test_market_verification_roundtrip_and_old_snapshots():
+    """New ChoiceField survives the save/initial plumbing; snapshots
+    written before the field existed resolve to None, not a crash."""
+    from django.http import QueryDict
+    from webapp.forms import AssumptionsForm, build_initial, build_overrides
+    from webapp.models import Deal
+
+    deal = Deal.objects.create(deal_id="mv", property_name="MV",
+                               cim_json={"property_name": "MV"})  # pre-field snapshot
+    assert build_initial(deal)["market_verification"] is None
+
+    form = AssumptionsForm(data={"market_verification": "top_50"})
+    assert form.is_valid(), form.errors
+    out = build_overrides(form.cleaned_data, QueryDict(""), deal)
+    assert out["cim_overrides"]["market_verification"] == "top_50"
+
+    assert not AssumptionsForm(data={"market_verification": "bogus"}).is_valid()
