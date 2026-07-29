@@ -291,3 +291,17 @@ def test_msa_gate_verification_matching_location_passes(mock_cim_data):
     gates = evaluate_gates(mock_cim_data, {}, {})
     g7 = next(g for g in gates if g["gate"] == 7)
     assert g7["result"] == "PASS"
+
+
+def test_msa_gate_blank_location_stamp_flags_later_fill_in(mock_cim_data):
+    """A verification stamped while msa/city were blank ('' stamp) must
+    go stale when a location is later filled in — '' is a real stamp,
+    not a legacy grandfather."""
+    mock_cim_data.msa = "Podunk, TX"
+    mock_cim_data.city = "Podunk"
+    mock_cim_data.market_verification = "top_50"
+    mock_cim_data.market_verified_location = ""
+    gates = evaluate_gates(mock_cim_data, {}, {})
+    g7 = next(g for g in gates if g["gate"] == 7)
+    assert g7["result"] == "TBD"
+    assert "re-verify" in g7["note"]

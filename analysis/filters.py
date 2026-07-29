@@ -231,7 +231,10 @@ def evaluate_gates(cim_data, scenario_results=None, va_results=None,
     # location edit must not inherit a pass it never earned. Legacy
     # verifications without a stamped location are grandfathered.
     verified_for = getattr(cim_data, "market_verified_location", None)
-    if verification and verified_for and \
+    # "" is a real stamp (verified while location was blank) — only None
+    # means "no stamp" (legacy grandfather). Truthiness here would let a
+    # blank-location verification bless any later msa fill-in.
+    if verification and verified_for is not None and \
             verified_for.strip().lower() != msa.strip().lower():
         verification = ""
         stale_note = (f"Market verification was recorded for "
