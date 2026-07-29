@@ -46,11 +46,18 @@ def health(request):
     # (Render). Dev/CI leave these unset and skip it. Without this, an
     # unmounted disk is invisible — CompDatabase() fabricates an empty
     # comps DB and uploads land on the ephemeral container FS.
+    # Probes the MOUNT (parent of each configured path), not the data
+    # files: on first boot the deal dirs and comp DB legitimately don't
+    # exist until the cutover runbook creates them (steps 4-5), but the
+    # disk mount must — an unmounted disk has no /data mount point, so
+    # this still 503s on a lost or misrouted mount.
     disk_ok = True
     if os.environ.get("CIM_DEALS_DIR"):
-        disk_ok = os.path.isdir(settings.CIM_DEALS_DIR)
+        mount = os.path.dirname(str(settings.CIM_DEALS_DIR).rstrip("/"))
+        disk_ok = os.path.ismount(mount)
     if disk_ok and os.environ.get("COMP_DB_PATH"):
-        disk_ok = os.path.exists(os.environ["COMP_DB_PATH"])
+        mount = os.path.dirname(os.environ["COMP_DB_PATH"].rstrip("/"))
+        disk_ok = os.path.ismount(mount)
     if not disk_ok:
         logger.error("health check: data disk missing or env misrouted")
     ok = db_ok and disk_ok
