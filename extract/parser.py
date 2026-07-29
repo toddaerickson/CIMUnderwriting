@@ -89,6 +89,17 @@ class CIMData:
 
     # Supply pipeline
     new_supply_mentions: Optional[str] = None
+    # Analyst-entered supply metrics (CIMs rarely state them; gate 5 turns
+    # data-driven when present): existing competitor NRSF and
+    # under-construction/planned NRSF within 3 miles.
+    competitive_supply_sf_3mi: Optional[float] = None
+    pipeline_supply_sf_3mi: Optional[float] = None
+    # Analyst market verification for gate 7: top_50 | strong_secondary |
+    # neither (None = unverified). market_verified_location is stamped
+    # automatically at save with the msa/city the verification certified;
+    # gate 7 treats a verification for a different location as stale.
+    market_verification: Optional[str] = None
+    market_verified_location: Optional[str] = None
 
     # Market rent (for value-add analysis)
     market_rent_psf: Optional[float] = None  # $/SF/month at market rates

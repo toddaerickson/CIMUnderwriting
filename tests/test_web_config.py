@@ -72,6 +72,9 @@ def test_registry_derives_from_config():
         "label": "Min Irr 5Yr"}
     assert reg["GATES.population_3mi"]["int"] is True
     assert reg["GATES.population_3mi"]["pct"] is False
+    # SF/capita is a count-like threshold — must never display as a percent
+    assert reg["GATES.max_sf_per_capita"]["int"] is True
+    assert reg["GATES.max_sf_per_capita"]["pct"] is False
     assert reg["EXPENSE_BENCHMARKS.property_tax"]["kind"] == "range"
     assert reg["EXPENSE_BENCHMARKS.property_tax"]["pct"] is False
     assert reg["EXPENSE_BENCHMARKS.mgmt_fee_pct"]["pct"] is True

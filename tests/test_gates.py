@@ -148,3 +148,160 @@ def test_summarize_all_pass(mock_cim_data):
     summary = summarize_gates(gates)
     # Should not recommend DECLINE if the only failures are TBD gates
     assert summary["recommendation"] in ("PURSUE", "PURSUE WITH CAVEATS", "DECLINE")
+
+
+# ── Gate 5: data-driven oversupply (SF/capita) ─────────────────────────
+
+def test_oversupply_gate_pass_under_threshold(mock_cim_data):
+    """(300k comp + 50k pipeline + 50k subject) / 75k pop = 5.3 SF/capita."""
+    mock_cim_data.population_3mi = 75_000
+    mock_cim_data.competitive_supply_sf_3mi = 300_000.0
+    mock_cim_data.pipeline_supply_sf_3mi = 50_000.0
+    gates = evaluate_gates(mock_cim_data, {}, {})
+    g5 = next(g for g in gates if g["gate"] == 5)
+    assert g5["result"] == "PASS"
+    assert "5.3 SF/capita" in g5["actual"]
+
+
+def test_oversupply_gate_fail_over_threshold(mock_cim_data):
+    """(700k comp + 100k pipeline + 50k subject) / 75k = 11.3 > 10."""
+    mock_cim_data.population_3mi = 75_000
+    mock_cim_data.competitive_supply_sf_3mi = 700_000.0
+    mock_cim_data.pipeline_supply_sf_3mi = 100_000.0
+    gates = evaluate_gates(mock_cim_data, {}, {})
+    g5 = next(g for g in gates if g["gate"] == 5)
+    assert g5["result"] == "FAIL"
+
+
+def test_oversupply_gate_tbd_without_supply_input(mock_cim_data):
+    """No competitive-SF input → TBD, note names the unlocking fields."""
+    mock_cim_data.population_3mi = 75_000
+    mock_cim_data.competitive_supply_sf_3mi = None
+    gates = evaluate_gates(mock_cim_data, {}, {})
+    g5 = next(g for g in gates if g["gate"] == 5)
+    assert g5["result"] == "TBD"
+    assert "Competitive Supply SF" in g5["note"]
+
+
+def test_oversupply_gate_pipeline_optional(mock_cim_data):
+    """Pipeline SF blank counts as zero, not TBD."""
+    mock_cim_data.population_3mi = 75_000
+    mock_cim_data.competitive_supply_sf_3mi = 300_000.0
+    mock_cim_data.pipeline_supply_sf_3mi = None
+    gates = evaluate_gates(mock_cim_data, {}, {})
+    g5 = next(g for g in gates if g["gate"] == 5)
+    assert g5["result"] == "PASS"
+
+
+# ── Gate 7: analyst market verification ────────────────────────────────
+
+def test_msa_gate_auto_pass_top50(mock_cim_data):
+    gates = evaluate_gates(mock_cim_data, {}, {})   # Dallas-Fort Worth MSA
+    g7 = next(g for g in gates if g["gate"] == 7)
+    assert g7["result"] == "PASS"
+
+
+def test_msa_gate_strong_secondary_passes(mock_cim_data):
+    mock_cim_data.msa = "Abilene, TX"
+    mock_cim_data.city = "Abilene"
+    mock_cim_data.market_verification = "strong_secondary"
+    gates = evaluate_gates(mock_cim_data, {}, {})
+    g7 = next(g for g in gates if g["gate"] == 7)
+    assert g7["result"] == "PASS"
+    assert "strong secondary" in g7["note"]
+
+
+def test_msa_gate_neither_fails(mock_cim_data):
+    mock_cim_data.msa = "Nowhere, TX"
+    mock_cim_data.city = "Nowhere"
+    mock_cim_data.market_verification = "neither"
+    gates = evaluate_gates(mock_cim_data, {}, {})
+    g7 = next(g for g in gates if g["gate"] == 7)
+    assert g7["result"] == "FAIL"
+
+
+def test_msa_gate_unverified_stays_tbd(mock_cim_data):
+    mock_cim_data.msa = "Nowhere, TX"
+    mock_cim_data.city = "Nowhere"
+    mock_cim_data.market_verification = None
+    gates = evaluate_gates(mock_cim_data, {}, {})
+    g7 = next(g for g in gates if g["gate"] == 7)
+    assert g7["result"] == "TBD"
+    assert "Market Verification" in g7["note"]
+
+
+def test_msa_gate_analyst_neither_overrides_automatch(mock_cim_data):
+    """Explicit 'neither' beats a coincidental substring auto-match."""
+    mock_cim_data.market_verification = "neither"   # msa stays Dallas (auto-match)
+    gates = evaluate_gates(mock_cim_data, {}, {})
+    g7 = next(g for g in gates if g["gate"] == 7)
+    assert g7["result"] == "FAIL"
+
+
+def test_oversupply_gate_zero_competitive_sf_computes(mock_cim_data):
+    """0 competitive SF is a legitimate rural input — computes, not TBD."""
+    mock_cim_data.population_3mi = 75_000
+    mock_cim_data.competitive_supply_sf_3mi = 0.0
+    gates = evaluate_gates(mock_cim_data, {}, {})
+    g5 = next(g for g in gates if g["gate"] == 5)
+    assert g5["result"] == "PASS"
+    assert "0.7 SF/capita" in g5["actual"]
+
+
+# ── Adversary-review repairs ───────────────────────────────────────────
+
+def test_oversupply_gate_negative_input_degrades_to_tbd(mock_cim_data):
+    """Legacy override files bypass form validation — a negative value
+    must degrade to TBD with a reason, never flip the comparison sign."""
+    mock_cim_data.population_3mi = -75_000
+    mock_cim_data.competitive_supply_sf_3mi = 300_000.0
+    gates = evaluate_gates(mock_cim_data, {}, {})
+    g5 = next(g for g in gates if g["gate"] == 5)
+    assert g5["result"] == "TBD"
+    assert "negative or zero" in g5["note"]
+
+
+def test_oversupply_gate_non_numeric_input_does_not_crash(mock_cim_data):
+    """A hand-edited legacy JSON value must not take down all 7 gates."""
+    mock_cim_data.population_3mi = 75_000
+    mock_cim_data.competitive_supply_sf_3mi = "300,000"
+    gates = evaluate_gates(mock_cim_data, {}, {})
+    g5 = next(g for g in gates if g["gate"] == 5)
+    assert g5["result"] == "TBD"
+    assert "not numeric" in g5["note"]
+    assert len(gates) == 7   # every other gate still evaluated
+
+
+def test_msa_gate_stale_verification_for_other_location(mock_cim_data):
+    """A verification stamped for one location must not bless another."""
+    mock_cim_data.msa = "Abilene, TX"
+    mock_cim_data.city = "Abilene"
+    mock_cim_data.market_verification = "strong_secondary"
+    mock_cim_data.market_verified_location = "Waco, TX"
+    gates = evaluate_gates(mock_cim_data, {}, {})
+    g7 = next(g for g in gates if g["gate"] == 7)
+    assert g7["result"] == "TBD"
+    assert "Waco" in g7["note"] and "re-verify" in g7["note"]
+
+
+def test_msa_gate_verification_matching_location_passes(mock_cim_data):
+    mock_cim_data.msa = "Abilene, TX"
+    mock_cim_data.market_verification = "strong_secondary"
+    mock_cim_data.market_verified_location = "Abilene, TX"
+    gates = evaluate_gates(mock_cim_data, {}, {})
+    g7 = next(g for g in gates if g["gate"] == 7)
+    assert g7["result"] == "PASS"
+
+
+def test_msa_gate_blank_location_stamp_flags_later_fill_in(mock_cim_data):
+    """A verification stamped while msa/city were blank ('' stamp) must
+    go stale when a location is later filled in — '' is a real stamp,
+    not a legacy grandfather."""
+    mock_cim_data.msa = "Podunk, TX"
+    mock_cim_data.city = "Podunk"
+    mock_cim_data.market_verification = "top_50"
+    mock_cim_data.market_verified_location = ""
+    gates = evaluate_gates(mock_cim_data, {}, {})
+    g7 = next(g for g in gates if g["gate"] == 7)
+    assert g7["result"] == "TBD"
+    assert "re-verify" in g7["note"]
