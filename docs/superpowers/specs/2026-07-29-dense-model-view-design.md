@@ -99,13 +99,42 @@ normal CSRF, htmx sends the token):
 - Failure → swap in a "preview unavailable" badge; editing and Save are
   never blocked by preview problems. No DB writes on this path, ever.
 
+## Row semantics (operator review round 1 — applies to EVERY row)
+
+Three columns everywhere, macro/demographic data included:
+`Extracted (read-only: CIM, or Census for demographics) | Analyst
+override (editable; blank = no override) | Final/Used`.
+
+**Coalesce rule: Used = override if present, else extracted** (for
+demographics: else Census fill, else blank). No computed value is
+uncorrectable — population, HHI, and every header-strip input can be
+overridden like any other field; the strip recomputes from Final values.
+
+Expense lines only: the benchmark discipline applies ON TOP of the
+coalesce — if Final sits below the benchmark floor (or the TX formula
+exceeds it), the engine uses the adjusted value and the Flag column says
+so. The row shows coalesce AND adjustment; nothing is silent.
+
 ## Provenance tags
 
-Per editable row, a small source tag: `CIM` (snapshot value, untouched) /
-`you` (override differs from snapshot) / `Census` (enrichment source_log
-tier 2) / `derived` (computed default, e.g. in-place rent from unit mix).
-Data sources: `deal.cim_json` vs `assumption_overrides` vs the run
-payload's `enrichment.source_log` (PR #11).
+Per row, a small source tag on the Final value: `CIM` (extracted,
+untouched) / `you` (override) / `Census` (enrichment source_log tier 2) /
+`derived` (computed default, e.g. in-place rent from unit mix) /
+`benchmark` (adjustment engaged — see Flag). Data sources:
+`deal.cim_json` vs `assumption_overrides` vs the run payload's
+`enrichment.source_log` (PR #11).
+
+## Extraction feedback loop (operator review round 1)
+
+Every deal already stores the extracted snapshot (`cim_json`) and the
+analyst's overrides — their delta is a permanent per-deal record of
+extraction failures. Process (not code in this PR): after an underwrite,
+run an **extraction post-mortem** — diff overrides vs extracted, re-read
+the PDF text at each miss, patch the parser, and land the real CIM text
+snippet as a parser regression test. Insights split by durability:
+parser fixes + fixtures → repo (CI-guarded); cross-CIM format patterns →
+assistant memory. First candidate: the Abilene portfolio CIM ($1
+property-tax garbage, missed expense lines, per-property tables).
 
 ## Error handling
 
