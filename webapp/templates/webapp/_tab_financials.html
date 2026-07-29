@@ -39,8 +39,8 @@
         <tbody>
           {% for row in benchmark_rows %}
           <tr class="border-b border-slate-100">
-            <td class="py-1.5 pl-3 pr-3">{{ row.category }}</td>
-            <td class="py-1.5 pr-3 text-right">{% if row.cim is not None %}${{ row.cim|floatformat:2 }}{% else %}—{% endif %}</td>
+            <td class="py-1.5 pl-3 pr-3">{{ row.label }}</td>
+            <td class="py-1.5 pr-3 text-right">{% if row.cim_per_sf is not None %}${{ row.cim_per_sf|floatformat:2 }}{% else %}—{% endif %}</td>
             <td class="py-1.5 pr-3 text-right">${{ row.low|floatformat:2 }}</td>
             <td class="py-1.5 pr-3 text-right">${{ row.high|floatformat:2 }}</td>
           </tr>

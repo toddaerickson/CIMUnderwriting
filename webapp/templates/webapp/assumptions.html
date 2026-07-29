@@ -27,7 +27,9 @@
   </details>
   {% endif %}
 
-  <form method="post" class="space-y-3">
+  <form method="post" class="space-y-3"
+        hx-post="{% url 'deal-assumptions-preview' deal.pk %}"
+        hx-trigger="change delay:400ms" hx-target="#model-strip" hx-swap="outerHTML">
     {% csrf_token %}
     {# Single, always-visible action bar — the form is long and analysts
        save/run from any scroll position; buttons live here and only here.
@@ -48,6 +50,13 @@
       {% endif %}
     </div>
 
+    {# Live model strip — first paint from the render context, htmx
+       replaces #model-strip in place (outerHTML) on every field change.
+       Inputs never live inside this wrapper, so focus is never stolen. #}
+    <div class="bg-white border border-slate-200 rounded-lg px-4 py-3">
+      {% include "webapp/_model_preview.html" %}
+    </div>
+
     <details open class="bg-white border border-slate-200 rounded-lg">
       <summary class="cursor-pointer select-none px-4 py-2 text-sm font-semibold">Property</summary>
       <div class="px-4 pb-3 grid gap-x-4 gap-y-2 sm:grid-cols-3">
@@ -61,7 +70,7 @@
     </details>
 
     <details open class="bg-white border border-slate-200 rounded-lg">
-      <summary class="cursor-pointer select-none px-4 py-2 text-sm font-semibold">Size &amp; Occupancy</summary>
+      <summary class="cursor-pointer select-none px-4 py-2 text-sm font-semibold">Size</summary>
       <div class="px-4 pb-3 grid gap-x-4 gap-y-2 sm:grid-cols-3">
         {% for it in sec_size %}
         <label class="block text-xs text-slate-600">
@@ -70,30 +79,95 @@
         </label>
         {% endfor %}
       </div>
-      <div class="px-4 pb-3">
-        <div class="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1">Replacement Cost Benchmarks ($/SF)</div>
-        <div class="overflow-x-auto">
-          <table class="text-sm border-collapse">
-            <thead>
-              <tr class="text-left text-xs text-slate-600 border-b border-slate-200">
-                <th class="py-1 pr-3">Facility Type</th>
-                <th class="py-1 pr-2">Hard Low</th><th class="py-1 pr-2">Hard High</th>
-                <th class="py-1 pr-2">Site Low</th><th class="py-1 pr-2">Site High</th>
-              </tr>
-            </thead>
-            <tbody>
-              {% for r in rc_rows %}
-              <tr class="border-b border-slate-100">
-                <td class="py-1 pr-3 whitespace-nowrap text-xs text-slate-600">{{ r.label }}</td>
-                {% for cell in r.cells %}<td class="py-1 pr-2 w-28">{{ cell }}</td>{% endfor %}
-              </tr>
-              {% endfor %}
-              <tr>
-                <td class="py-1 pr-3 whitespace-nowrap text-xs text-slate-600">Soft Cost % / Dev Profit %</td>
-                {% for cell in rc_soft %}<td class="py-1 pr-2 w-28">{{ cell }}</td>{% endfor %}
-              </tr>
-            </tbody>
-          </table>
+    </details>
+
+    <details open class="bg-white border border-slate-200 rounded-lg">
+      <summary class="cursor-pointer select-none px-4 py-2 text-sm font-semibold">Demographics</summary>
+      <div class="px-4 pb-3 grid gap-x-4 gap-y-2 sm:grid-cols-3">
+        {% for it in sec_demo %}
+        <label class="block text-xs text-slate-600">
+          {% if it.flag %}<span class="required-flag text-red-600 font-bold" title="Required for IRR modeling">!</span> {% endif %}{{ it.label }}
+          {{ it.bf }}
+        </label>
+        {% endfor %}
+      </div>
+    </details>
+
+    <details open class="bg-white border border-slate-200 rounded-lg">
+      <summary class="cursor-pointer select-none px-4 py-2 text-sm font-semibold">Drivers</summary>
+      <div class="px-4 pb-3 overflow-x-auto">
+        <table class="w-full text-sm border-collapse">
+          <thead>
+            <tr class="text-left text-xs text-slate-600 border-b border-slate-200">
+              <th class="py-1 pr-3">Driver</th>
+              <th class="py-1 pr-3">Extracted</th>
+              <th class="py-1 pr-3">Value</th>
+              <th class="py-1">Source</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in driver_rows %}
+            <tr class="border-b border-slate-100">
+              <td class="py-1 pr-3 whitespace-nowrap text-xs text-slate-600">
+                {% if row.bf.name in missing_required %}<span class="required-flag text-red-600 font-bold" title="Required for IRR modeling">!</span> {% endif %}{{ row.label }}
+              </td>
+              <td class="py-1 pr-3 text-xs text-slate-400">{{ row.extracted|default:"—" }}</td>
+              <td class="py-1 pr-3 w-40">{{ row.bf }}</td>
+              <td class="py-1 text-xs text-slate-400">{{ row.source }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </details>
+
+    <details open class="bg-white border border-slate-200 rounded-lg">
+      <summary class="cursor-pointer select-none px-4 py-2 text-sm font-semibold">Income &amp; Expenses</summary>
+      <div class="px-4 pb-3 space-y-3">
+        <div class="grid gap-x-4 gap-y-2 sm:grid-cols-4">
+          {% for it in sec_income %}
+          <label class="block text-xs text-slate-600">
+            {% if it.flag %}<span class="required-flag text-red-600 font-bold" title="Required for IRR modeling">!</span> {% endif %}{{ it.label }}
+            {{ it.bf }}
+          </label>
+          {% endfor %}
+          {% if form.show_noi_accept %}
+          <label class="sm:col-span-4 flex items-center gap-2 text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded px-2 py-1.5">
+            {{ form.accept_noi_discrepancy }}
+            Accept stated NOI anyway — the discrepancy is recorded with the run
+          </label>
+          {% endif %}
+        </div>
+        <div>
+          <div class="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1">Expense Benchmarks (state-adjusted, $/NRSF/yr) — analyst input beats CIM</div>
+          <div class="overflow-x-auto">
+            <table class="w-full text-sm border-collapse">
+              <thead>
+                <tr class="text-left text-xs text-slate-600 border-b border-slate-200">
+                  <th class="py-1 pr-3">Category</th>
+                  <th class="py-1 pr-2 text-right">CIM $/SF</th>
+                  <th class="py-1 pr-2 text-right">Low</th>
+                  <th class="py-1 pr-2 text-right">High</th>
+                  <th class="py-1 pr-2 whitespace-nowrap">Input ($)</th>
+                  <th class="py-1 pr-2 text-right">Used</th>
+                  <th class="py-1 whitespace-nowrap">Flag</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for r in benchmark_rows %}
+                <tr class="border-b border-slate-100">
+                  <td class="py-1 pr-3 whitespace-nowrap text-xs text-slate-600">{{ r.label }}</td>
+                  <td class="py-1 pr-2 text-right">{% if r.cim_per_sf is not None %}${{ r.cim_per_sf|floatformat:2 }}{% else %}&mdash;{% endif %}</td>
+                  <td class="py-1 pr-2 text-right">${{ r.low|floatformat:2 }}</td>
+                  <td class="py-1 pr-2 text-right">${{ r.high|floatformat:2 }}</td>
+                  <td class="py-1 pr-2 w-28">{{ r.bf }}</td>
+                  <td class="py-1 pr-2 text-right"><span id="exp-used-{{ r.key }}">{% if r.used is not None %}${{ r.used|floatformat:0 }}{% else %}&mdash;{% endif %}</span></td>
+                  <td class="py-1 whitespace-nowrap"><span id="exp-flag-{{ r.key }}" class="{% if 'BELOW' in r.flag %}text-amber-700{% elif r.flag == 'IN RANGE' or r.flag == 'FORMULA' %}text-emerald-700{% else %}text-slate-500{% endif %}">{{ r.flag|default:"" }}</span></td>
+                </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
         </div>
       </div>
     </details>
@@ -118,49 +192,6 @@
         <button type="button" hx-get="{% url 'unit-mix-row' %}" hx-target="#um-body" hx-swap="beforeend"
                 class="mt-2 text-sm text-accent-700 hover:underline">+ Add row</button>
         <p class="mt-1 text-xs text-slate-500">Rows with a zero count are dropped on save.</p>
-      </div>
-    </details>
-
-    <details open class="bg-white border border-slate-200 rounded-lg">
-      <summary class="cursor-pointer select-none px-4 py-2 text-sm font-semibold">Income &amp; Expenses</summary>
-      <div class="px-4 pb-3 grid gap-4 lg:grid-cols-2">
-        <div class="grid gap-x-4 gap-y-2 sm:grid-cols-2 content-start">
-          {% for it in sec_income %}
-          <label class="block text-xs text-slate-600">
-            {% if it.flag %}<span class="required-flag text-red-600 font-bold" title="Required for IRR modeling">!</span> {% endif %}{{ it.label }}
-            {{ it.bf }}
-          </label>
-          {% endfor %}
-          {% if form.show_noi_accept %}
-          <label class="sm:col-span-2 flex items-center gap-2 text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded px-2 py-1.5">
-            {{ form.accept_noi_discrepancy }}
-            Accept stated NOI anyway — the discrepancy is recorded with the run
-          </label>
-          {% endif %}
-        </div>
-        <div>
-          <div class="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1">Expense Benchmarks (state-adjusted, $/NRSF/yr)</div>
-          <div class="overflow-x-auto">
-            <table class="w-full text-sm border-collapse">
-              <thead>
-                <tr class="text-left text-xs text-slate-600 border-b border-slate-200">
-                  <th class="py-1 pr-3">Category</th><th class="py-1 pr-2 text-right">CIM $/SF</th>
-                  <th class="py-1 pr-2 text-right">Low</th><th class="py-1 text-right">High</th>
-                </tr>
-              </thead>
-              <tbody>
-                {% for r in benchmark_rows %}
-                <tr class="border-b border-slate-100">
-                  <td class="py-1 pr-3 whitespace-nowrap text-xs text-slate-600">{{ r.category }}</td>
-                  <td class="py-1 pr-2 text-right">{% if r.cim %}${{ r.cim|floatformat:2 }}{% else %}&mdash;{% endif %}</td>
-                  <td class="py-1 pr-2 text-right">${{ r.low|floatformat:2 }}</td>
-                  <td class="py-1 text-right">${{ r.high|floatformat:2 }}</td>
-                </tr>
-                {% endfor %}
-              </tbody>
-            </table>
-          </div>
-        </div>
       </div>
     </details>
 
@@ -212,15 +243,32 @@
       </div>
     </details>
 
-    <details open class="bg-white border border-slate-200 rounded-lg">
-      <summary class="cursor-pointer select-none px-4 py-2 text-sm font-semibold">Demographics</summary>
-      <div class="px-4 pb-3 grid gap-x-4 gap-y-2 sm:grid-cols-3">
-        {% for it in sec_demo %}
-        <label class="block text-xs text-slate-600">
-          {% if it.flag %}<span class="required-flag text-red-600 font-bold" title="Required for IRR modeling">!</span> {% endif %}{{ it.label }}
-          {{ it.bf }}
-        </label>
-        {% endfor %}
+    <details class="bg-white border border-slate-200 rounded-lg">
+      <summary class="cursor-pointer select-none px-4 py-2 text-sm font-semibold">Replacement Cost Benchmarks ($/SF)</summary>
+      <div class="px-4 pb-3">
+        <div class="overflow-x-auto">
+          <table class="text-sm border-collapse">
+            <thead>
+              <tr class="text-left text-xs text-slate-600 border-b border-slate-200">
+                <th class="py-1 pr-3">Facility Type</th>
+                <th class="py-1 pr-2">Hard Low</th><th class="py-1 pr-2">Hard High</th>
+                <th class="py-1 pr-2">Site Low</th><th class="py-1 pr-2">Site High</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for r in rc_rows %}
+              <tr class="border-b border-slate-100">
+                <td class="py-1 pr-3 whitespace-nowrap text-xs text-slate-600">{{ r.label }}</td>
+                {% for cell in r.cells %}<td class="py-1 pr-2 w-28">{{ cell }}</td>{% endfor %}
+              </tr>
+              {% endfor %}
+              <tr>
+                <td class="py-1 pr-3 whitespace-nowrap text-xs text-slate-600">Soft Cost % / Dev Profit %</td>
+                {% for cell in rc_soft %}<td class="py-1 pr-2 w-28">{{ cell }}</td>{% endfor %}
+              </tr>
+            </tbody>
+          </table>
+        </div>
       </div>
     </details>
 

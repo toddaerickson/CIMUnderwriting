@@ -499,27 +499,42 @@ def model_strip_context(deal, cim, fin, form) -> dict:
     }
 
 
-def expense_benchmark_rows(deal) -> list[dict]:
-    """Read-only reference table: CIM $/SF vs state-adjusted benchmarks."""
+def expense_benchmark_rows(deal, expense_lines=None) -> list[dict]:
+    """Reference table: CIM $/SF vs state-adjusted benchmarks, per category
+    `{key, label, cim_value, cim_per_sf, low, high, used, flag}`.
+
+    `expense_lines` — the `expense_analysis["lines"]` from the SAME
+    analyze_financials() call driving the model-strip/preview — supplies
+    `used` (analyst-adjusted value) and `flag` per benchmark_key. Callers
+    without a `fin` handy (e.g. the read-only financials tab) get `used`/
+    `flag` as None; `key`/`label`/`cim_value`/`cim_per_sf`/`low`/`high`
+    are always populated from the deal's own snapshot.
+    """
+    from analysis.financials import _map_expense_lines
     from config import EXPENSE_BENCHMARKS, get_regional_benchmarks
     from registry import EXPENSE_CATEGORIES
 
     snapshot = deal.cim_json or {}
     state = (snapshot.get("state") or deal.state or "").upper()
-    nrsf = snapshot.get("nrsf") or 0
     benchmarks = get_regional_benchmarks(state) if state else EXPENSE_BENCHMARKS
-    cim_exp = {}
-    if nrsf:
-        for line in snapshot.get("expense_lines") or []:
-            if line.get("t12"):
-                cim_exp[(line.get("label") or "").lower()] = line["t12"] / nrsf
+    cim = cim_from_dict(snapshot)
+    nrsf = cim.nrsf or 0
+    cim_map = _map_expense_lines(cim)
+    used_by_key = {l.get("benchmark_key"): l for l in (expense_lines or [])}
+
     rows = []
     for cat in EXPENSE_CATEGORIES:
         low, high = benchmarks.get(cat.key, (0, 0))
-        cim_val = next((val for kw in cat.parse_keywords
-                        for label, val in cim_exp.items() if kw in label), None)
-        rows.append({"category": cat.display_name, "cim": cim_val,
-                     "low": low, "high": high})
+        cim_value = cim_map.get(cat.key)
+        used_line = used_by_key.get(cat.key)
+        rows.append({
+            "key": cat.key, "label": cat.display_name,
+            "cim_value": cim_value,
+            "cim_per_sf": (cim_value / nrsf) if (cim_value and nrsf) else None,
+            "low": low, "high": high,
+            "used": used_line.get("adjusted_value") if used_line else None,
+            "flag": used_line.get("flag") if used_line else None,
+        })
     return rows
 
 

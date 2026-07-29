@@ -6,7 +6,8 @@ from django.conf import settings
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.db import connection
-from django.http import FileResponse, Http404, HttpResponse, JsonResponse
+from django.http import (FileResponse, Http404, HttpResponse, JsonResponse,
+                         QueryDict)
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils import timezone
@@ -169,18 +170,63 @@ def deal_assumptions(request, pk):
             return redirect("deal-assumptions", pk=deal.pk)
         rows = assumptions_forms.parse_unit_mix(request.POST) or []
         status = 422
+        preview_cleaned = getattr(form, "cleaned_data", None) or {}
+        preview_post = request.POST
     else:
         form = assumptions_forms.AssumptionsForm(
             initial=assumptions_forms.build_initial(deal, eff))
         rows = assumptions_forms.unit_mix_rows(deal)
         status = 200
+        # First paint has no in-progress edits — mirrors the SAVED state,
+        # not a submission (see assumptions_preview for the live path).
+        preview_cleaned = {}
+        preview_post = QueryDict("")
+
+    # First-paint model-strip + expense-row context — the same computation
+    # the live htmx preview does, so the page never opens on stale "—"
+    # placeholders that only resolve after the analyst's first edit. A
+    # broken/legacy snapshot must not 500 the page (same resilience
+    # posture as assumptions_preview).
+    try:
+        cim, ov = services.build_preview_cim(deal, preview_cleaned, preview_post)
+        saved_exp_overrides = (deal.assumption_overrides or {}).get(
+            "expense_line_overrides")
+        from analysis.financials import analyze_financials
+        fin = analyze_financials(
+            cim, expense_line_overrides=(
+                ov.get("expense_line_overrides") or saved_exp_overrides))
+        strip_ctx = services.model_strip_context(deal, cim, fin, form)
+    except Exception:
+        logger.exception("assumptions initial strip failed for deal %s", deal.pk)
+        fin = {}
+        strip_ctx = {
+            "population_3mi": None, "median_hhi_3mi": None,
+            "sf_per_capita": None, "sf_per_capita_problem": "unavailable",
+            "sf_per_capita_limit": cfg.GATES.get("max_sf_per_capita"),
+            "noi_state": "—", "expense_lines": [],
+        }
+
+    expense_lines = (fin.get("expense_analysis") or {}).get("lines", [])
+    benchmark_rows = services.expense_benchmark_rows(deal, expense_lines)
+    for row in benchmark_rows:
+        row["bf"] = form[f"exp_{row['key']}"]
+
+    latest_run = deal.runs.first()
+    source_log = {}
+    if latest_run is not None:
+        source_log = ((latest_run.result_json or {}).get("enrichment") or {}
+                      ).get("source_log", {})
+
     f = assumptions_forms
-    return render(request, "webapp/assumptions.html", {
+    ctx = {
         "deal": deal, "form": form, "report": report,
         "missing_fields": report.get("missing", []),
+        "missing_required": missing_required,
         "warnings": deal.extract_warnings,
         "unit_rows": rows,
-        "benchmark_rows": services.expense_benchmark_rows(deal),
+        "benchmark_rows": benchmark_rows,
+        "driver_rows": f.model_rows(form, f.SECTION_DRIVERS, deal.cim_json or {},
+                                    source_log),
         "sec_property": f.section_fields(form, f.SECTION_PROPERTY, missing_required),
         "sec_size": f.section_fields(form, f.SECTION_SIZE, missing_required),
         "sec_income": f.section_fields(form, f.SECTION_INCOME, missing_required),
@@ -191,7 +237,9 @@ def deal_assumptions(request, pk):
         "rc_soft": [form["rc_soft_cost_pct_low"], form["rc_soft_cost_pct_high"],
                     form["rc_dev_profit_pct_low"], form["rc_dev_profit_pct_high"]],
         "solver_field": form["solver_target_irr"],
-    }, status=status)
+    }
+    ctx.update(strip_ctx)
+    return render(request, "webapp/assumptions.html", ctx, status=status)
 
 
 @login_required

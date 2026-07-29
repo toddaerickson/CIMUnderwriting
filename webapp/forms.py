@@ -86,17 +86,15 @@ SECTION_PROPERTY = [
     ("city", "City"), ("state", "State"), ("msa", "MSA"),
     ("year_built", "Year Built"), ("year_expanded", "Year Expanded"),
     ("acreage", "Acreage"),
+    ("market_verification", "Market Verification (Gate 7)"),
 ]
 SECTION_SIZE = [
     ("nrsf", "NRSF"), ("total_units", "Total Units"), ("cc_pct", "CC (%)"),
-    ("physical_occupancy", "Physical Occupancy (%)"),
-    ("economic_occupancy", "Economic Occupancy (%)"),
     ("ss_driveup_sf", "SS Drive-Up SF"), ("ss_enclosed_sf", "SS Enclosed SF"),
     ("brv_enclosed_sf", "BRV Enclosed SF"), ("brv_covered_sf", "BRV Covered SF"),
     ("brv_open_sf", "BRV Open Parking SF"),
 ]
 SECTION_INCOME = [
-    ("asking_price", "Asking Price ($)"), ("capex_estimate", "CapEx Estimate ($)"),
     ("ttm_gpr", "Gross Potential Rent ($)"), ("other_income", "Other Income ($)"),
     ("ttm_egr", "Effective Gross Revenue ($)"), ("ttm_total_revenue", "Total Revenue ($)"),
     ("ttm_total_expenses", "Total Expenses ($)"), ("cim_yr1_noi", "CIM Year 1 NOI ($)"),
@@ -105,13 +103,26 @@ SECTION_INCOME = [
 SECTION_DEMOGRAPHICS = [
     ("population_1mi", "Population 1-mi"), ("population_3mi", "Population 3-mi"),
     ("population_5mi", "Population 5-mi"), ("median_hhi_3mi", "Median HHI 3-mi ($)"),
+]
+# Dense-model-view drivers: the fields that actually move the screen/IRR
+# outcome, surfaced as their own vertical block (model_rows()) right after
+# Property so the analyst sees them before anything else. Supersedes their
+# Task-1 temporary homes in SECTION_INCOME/SECTION_SIZE/SECTION_DEMOGRAPHICS
+# — each field lives in exactly one section now.
+SECTION_DRIVERS = [
+    ("asking_price", "Asking Price ($)"), ("capex_estimate", "CapEx Estimate ($)"),
+    ("physical_occupancy", "Physical Occupancy (%)"),
+    ("economic_occupancy", "Economic Occupancy (%)"),
     ("market_rent_psf", "Street Rate ($/SF/mo)"),
     ("in_place_avg_rent_psf", "In-Place Rent ($/SF/mo)"),
     ("street_rate_trend", "Street-Rate Trend"),
     ("t3_annualized_revenue", "T3 Annualized Revenue ($)"),
-    ("competitive_supply_sf_3mi", "Competitive Supply SF (3-mi, excl. subject)"),
+    # Excludes the subject property — matches the SF/capita gate's own
+    # inputs (analysis.filters.sf_per_capita_inputs adds subject SF back
+    # in separately). Kept short here to fit the dense row; the full
+    # "excl. subject" caveat lives in this comment, not the label.
+    ("competitive_supply_sf_3mi", "Competitive Supply SF (3-mi)"),
     ("pipeline_supply_sf_3mi", "Pipeline SF (3-mi)"),
-    ("market_verification", "Market Verification (Gate 7)"),
 ]
 
 INPUT_CSS = "w-full border border-slate-300 rounded px-2 py-1 text-sm"
@@ -305,6 +316,50 @@ def unit_mix_rows(deal) -> list[dict]:
 def section_fields(form, pairs, missing_required):
     return [{"bf": form[name], "label": label,
              "flag": name in missing_required} for name, label in pairs]
+
+
+def _display_value(v):
+    """Comma-grouped, trailing-zero-trimmed string for a raw snapshot
+    value (model_rows' read-only 'extracted' column); non-numeric values
+    (e.g. street_rate_trend's "rising") pass through unchanged."""
+    if v is None or isinstance(v, bool) or not isinstance(v, (int, float)):
+        return v
+    return f"{v:,.2f}".rstrip("0").rstrip(".")
+
+
+def model_rows(form, pairs, snapshot, source_log=None):
+    """Vertical driver rows: label | extracted (read-only) | input.
+    source: 'you' when the bound/initial value differs from snapshot;
+    'Census' when the snapshot value was tier-2 enrichment (extract-time
+    enrichment runs BEFORE the snapshot is saved, so Census fills live
+    inside cim_json — the run payload's enrichment.source_log is the
+    only way to tell them from CIM-extracted values).
+
+    Percent fields (physical_occupancy etc.) are stored as decimals
+    (0.92) in the snapshot but displayed/submitted as whole numbers (92)
+    everywhere else on this page (build_initial/build_overrides) — snap
+    is converted the same way BEFORE comparing/displaying, or every
+    percent driver would show a decimal next to its whole-number input
+    and read as "you edited this" on every load.
+    """
+    source_log = source_log or {}
+    rows = []
+    for name, label in pairs:
+        snap = snapshot.get(name)
+        if name in CIM_PCT_FIELDS and snap is not None:
+            snap = _pct_display(snap)
+        bf = form[name]
+        cur = bf.value()
+        if cur not in (None, "", snap):
+            src = "you"
+        elif snap is not None:
+            src = ("Census" if source_log.get(name, {}).get("tier") == 2
+                   else "CIM")
+        else:
+            src = ""
+        rows.append({"label": label, "bf": bf,
+                     "extracted": _display_value(snap), "source": src})
+    return rows
 
 
 def scenario_grid(form):

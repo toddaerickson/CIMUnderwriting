@@ -545,3 +545,25 @@ def test_assumptions_preview_contract(client, django_user_model, settings, tmp_p
     assert deal.assumption_overrides == {}
 
     assert client.get(f"/deals/{deal.pk}/assumptions/preview/").status_code == 405
+
+
+# ── T7: vertical model view (template rebuild) ──────────────────────────
+
+@pytest.mark.django_db
+def test_model_view_renders_all_regions(client, django_user_model, settings, tmp_path):
+    settings.CIM_DEALS_DIR = str(tmp_path)
+    user = django_user_model.objects.create_user(username="op", password="x")
+    client.force_login(user)
+    from webapp.models import Deal
+    deal = Deal.objects.create(
+        deal_id="mv", property_name="MV", extract_status="done",
+        cim_json={"property_name": "MV", "state": "TX", "nrsf": 50_000.0,
+                  "expense_lines": [], "population_3mi": 75_000})
+    resp = client.get(f"/deals/{deal.pk}/assumptions/")
+    html = resp.content.decode()
+    assert resp.status_code == 200
+    for marker in ('id="model-strip"', "Street Rate ($/SF/mo)",
+                   "In-Place Rent ($/SF/mo)", "T3 Annualized Revenue",
+                   'name="exp_property_tax"', 'id="exp-used-property_tax"',
+                   "hx-post", "Save &amp; Run Analysis"):
+        assert marker in html, marker
