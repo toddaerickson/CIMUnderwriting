@@ -80,5 +80,18 @@
       "/home/terickson/CIM_Analyst",
       "/home/terickson/CIM_Analyst/gui"
     ]
+  },
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "for W in /home/terickson/CIM_Analyst/.superpowers/sdd/*/progress.md; do [ -f \"$W\" ] || continue; echo \"IN-FLIGHT SDD BUILD LEDGER ($W) \u2014 an implementation plan is mid-execution. Resume it: invoke superpowers:subagent-driven-development, follow the ledger below (trust it and git log over recollection; tasks with a complete line are DONE):\"; tail -40 \"$W\"; done",
+            "timeout": 10
+          }
+        ]
+      }
+    ]
   }
 }
