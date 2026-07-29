@@ -40,6 +40,7 @@
 | `CIM_DEALS_DIR` | Deal folders root | Fixed in `render.yaml`: `/data/deals` (on the disk) |
 | `COMP_DB_PATH` | Comp SQLite DB path | Fixed in `render.yaml`: `/data/cim_comps.db` (on the disk) |
 | `CIM_OVERRIDES_DIR` | Per-deal override JSONs | Fixed in `render.yaml`: `/data/overrides` (on the disk) |
+| `UW_TEMPLATE_PATH` | Blank XLSM underwriting template | Fixed in `render.yaml`: `/data/template_uw.xlsm` (on the disk — the file is gitignored via `*.xlsm`, so it never ships in the build; transferred in runbook step 5) |
 | `PYTHON_VERSION` | Render Python runtime pin | Fixed in `render.yaml`: `3.12.6` |
 
 ## Cutover runbook (after PR 5C merges — operator gates marked ⚑)
@@ -59,6 +60,7 @@ Ship-dark ends here. Railway keeps serving Streamlit until step 8; nothing below
    scp -s -r deals/ <ssh-address>:/data/deals/
    scp -s data/cim_comps.db <ssh-address>:/data/cim_comps.db
    scp -s -r overrides/ <ssh-address>:/data/overrides/
+   scp -s template_uw.xlsm <ssh-address>:/data/template_uw.xlsm
    ```
    Fallback if scp misbehaves: `tar cz deals data/cim_comps.db overrides | ssh <ssh-address> "tar xz -C /data --strip-components=0"` then move `data/cim_comps.db` → `/data/cim_comps.db` in the Render shell. Verify once with a single small file BEFORE cutover day.
 6. **Import + verify data** — Render Shell: `python manage.py import_deals` → imported count matches the folder count; then in the browser: log in → Deal Pipeline shows the legacy deal(s) with downloads → Comps shows 9 rows → Settings loads.
