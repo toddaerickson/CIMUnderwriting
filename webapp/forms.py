@@ -90,6 +90,18 @@ SECTION_DEMOGRAPHICS = [
 
 INPUT_CSS = "w-full border border-slate-300 rounded px-2 py-1 text-sm"
 
+# Revenue − Expenses = NOI identity tolerance. CIM rounding makes exact
+# equality unrealistic; a miss beyond max($1k, 1% of revenue) is a
+# data-entry or extraction error unless the analyst explicitly accepts it
+# (legitimate below-the-line items exist). The acceptance + delta are
+# recorded in the saved assumptions so the discrepancy stays auditable.
+NOI_RECON_TOLERANCE_ABS = 1_000.0
+NOI_RECON_TOLERANCE_PCT = 0.01
+
+
+def noi_recon_tolerance(revenue: float) -> float:
+    return max(NOI_RECON_TOLERANCE_ABS, NOI_RECON_TOLERANCE_PCT * abs(revenue))
+
 
 def _text():
     return forms.TextInput(attrs={"class": INPUT_CSS})
@@ -128,9 +140,56 @@ class AssumptionsForm(forms.Form):
                     required=False, min_value=0, widget=_num())
         self.fields["solver_target_irr"] = forms.FloatField(
             required=False, min_value=0, widget=_num())
+        self.fields["accept_noi_discrepancy"] = forms.BooleanField(
+            required=False,
+            widget=forms.CheckboxInput(
+                attrs={"class": "rounded border-slate-300"}))
+        # Set by clean(): tells the template to reveal the accept checkbox.
+        self.show_noi_accept = False
 
     def clean_state(self):
         return (self.cleaned_data.get("state") or "").upper()
+
+    def clean(self):
+        """Income identity: Revenue − Expenses = NOI.
+
+        The form round-trips the merged CIM-snapshot + override values, so
+        this checks the exact triple the analysis will use. Exactly two
+        present → the third is derived. All three present and off by more
+        than the tolerance → block, unless the analyst ticks the accept
+        checkbox (recorded via build_overrides for auditability).
+        """
+        cleaned = super().clean()
+        rev = cleaned.get("ttm_total_revenue")
+        exp = cleaned.get("ttm_total_expenses")
+        noi = cleaned.get("ttm_noi")
+        present = sum(v is not None for v in (rev, exp, noi))
+        if present == 2:
+            if rev is None:
+                cleaned["ttm_total_revenue"] = round(noi + exp, 2)
+            elif exp is None:
+                derived = round(rev - noi, 2)
+                if derived < 0:
+                    raise forms.ValidationError(
+                        f"TTM NOI ${noi:,.0f} exceeds Total Revenue "
+                        f"${rev:,.0f} — expenses would be negative. "
+                        f"Check the two entered values.")
+                cleaned["ttm_total_expenses"] = derived
+            else:
+                cleaned["ttm_noi"] = round(rev - exp, 2)
+        elif present == 3:
+            delta = rev - exp - noi
+            tol = noi_recon_tolerance(rev)
+            if abs(delta) > tol and not cleaned.get("accept_noi_discrepancy"):
+                self.show_noi_accept = True
+                raise forms.ValidationError(
+                    f"Income identity check failed: Revenue ${rev:,.0f} − "
+                    f"Expenses ${exp:,.0f} = ${rev - exp:,.0f}, but TTM NOI "
+                    f"is entered as ${noi:,.0f} — off by ${abs(delta):,.0f} "
+                    f"(tolerance ${tol:,.0f}). Fix the inputs, or tick "
+                    f"“Accept stated NOI anyway” to proceed with "
+                    f"the discrepancy recorded.")
+        return cleaned
 
 
 # ── Initial values (decimals → whole-number display) ────────────────
@@ -311,6 +370,17 @@ def build_overrides(cleaned, post, deal, eff=None) -> dict:
         cim_o["unit_mix"] = mix
     if cim_o:
         out["cim_overrides"] = cim_o
+
+    # Audit trail for an analyst-accepted Revenue−Expenses≠NOI mismatch:
+    # recorded only when the acceptance actually mattered, so the run's
+    # applied_overrides carries the discrepancy forever.
+    rev, exp, noi = (cleaned.get("ttm_total_revenue"),
+                     cleaned.get("ttm_total_expenses"),
+                     cleaned.get("ttm_noi"))
+    if cleaned.get("accept_noi_discrepancy") and None not in (rev, exp, noi):
+        delta = round(rev - exp - noi, 2)
+        if abs(delta) > noi_recon_tolerance(rev):
+            out["noi_reconciliation"] = {"accepted": True, "delta": delta}
 
     scen = _submitted_sections(cleaned, "scen", SCENARIO_PARAMS, eff["SCENARIO_DEFAULTS"])
     if scen != _rounded_sections(eff["SCENARIO_DEFAULTS"], SCENARIO_PARAMS):

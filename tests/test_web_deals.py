@@ -194,3 +194,85 @@ def test_build_deal_meta_import_deals_round_trip_no_drift(tmp_path, settings):
     unclassified = set(meta) - IMPORTED - EXEMPT_DISPLAY_ONLY
     assert unclassified == set(), (
         f"build_deal_meta grew keys import_deals doesn't map: {unclassified}")
+
+
+# ── Revenue − Expenses = NOI identity (AssumptionsForm.clean) ──────────
+
+def _income_form(**vals):
+    from webapp.forms import AssumptionsForm
+    return AssumptionsForm(data={k: str(v) for k, v in vals.items()})
+
+
+def test_noi_identity_consistent_triple_passes():
+    form = _income_form(ttm_total_revenue=560_000, ttm_total_expenses=220_000,
+                        ttm_noi=340_000)
+    assert form.is_valid(), form.errors
+    assert form.show_noi_accept is False
+
+
+def test_noi_identity_blocks_beyond_tolerance():
+    form = _income_form(ttm_total_revenue=560_000, ttm_total_expenses=220_000,
+                        ttm_noi=400_000)
+    assert not form.is_valid()
+    err = str(form.non_field_errors())
+    assert "off by $60,000" in err
+    assert form.show_noi_accept is True
+
+
+def test_noi_identity_within_tolerance_passes():
+    # delta $500 < tolerance max($1k, 1% × $560k = $5.6k)
+    form = _income_form(ttm_total_revenue=560_000, ttm_total_expenses=220_000,
+                        ttm_noi=339_500)
+    assert form.is_valid(), form.errors
+
+
+@pytest.mark.django_db
+def test_noi_identity_accept_records_discrepancy():
+    from django.http import QueryDict
+    from webapp.forms import build_overrides
+    from webapp.models import Deal
+
+    form = _income_form(ttm_total_revenue=560_000, ttm_total_expenses=220_000,
+                        ttm_noi=400_000, accept_noi_discrepancy="on")
+    assert form.is_valid(), form.errors
+    deal = Deal.objects.create(deal_id="recon", property_name="Recon",
+                               cim_json={"ttm_noi": 340_000.0})
+    out = build_overrides(form.cleaned_data, QueryDict(""), deal)
+    assert out["noi_reconciliation"] == {"accepted": True, "delta": -60_000.0}
+    # the stated (accepted) NOI still overrides the snapshot value
+    assert out["cim_overrides"]["ttm_noi"] == 400_000.0
+
+
+@pytest.mark.django_db
+def test_noi_identity_accept_within_tolerance_not_recorded():
+    from django.http import QueryDict
+    from webapp.forms import build_overrides
+    from webapp.models import Deal
+
+    form = _income_form(ttm_total_revenue=560_000, ttm_total_expenses=220_000,
+                        ttm_noi=340_000, accept_noi_discrepancy="on")
+    assert form.is_valid(), form.errors
+    deal = Deal.objects.create(deal_id="recon2", property_name="Recon2",
+                               cim_json={})
+    out = build_overrides(form.cleaned_data, QueryDict(""), deal)
+    assert "noi_reconciliation" not in out
+
+
+def test_noi_identity_derives_missing_third():
+    form = _income_form(ttm_total_revenue=560_000, ttm_total_expenses=220_000)
+    assert form.is_valid(), form.errors
+    assert form.cleaned_data["ttm_noi"] == 340_000.0
+
+    form = _income_form(ttm_total_expenses=220_000, ttm_noi=340_000)
+    assert form.is_valid(), form.errors
+    assert form.cleaned_data["ttm_total_revenue"] == 560_000.0
+
+    form = _income_form(ttm_total_revenue=560_000, ttm_noi=340_000)
+    assert form.is_valid(), form.errors
+    assert form.cleaned_data["ttm_total_expenses"] == 220_000.0
+
+
+def test_noi_identity_derived_negative_expenses_blocks():
+    form = _income_form(ttm_total_revenue=300_000, ttm_noi=400_000)
+    assert not form.is_valid()
+    assert "negative" in str(form.non_field_errors())
