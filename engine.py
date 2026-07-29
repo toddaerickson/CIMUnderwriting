@@ -127,7 +127,8 @@ def run_analysis(result: AnalysisResult, progress: Callable = None,
                   custom_scenarios: dict = None,
                   custom_va_scenarios: dict = None,
                   solver_target_irr: float = None,
-                  enrich: bool = False) -> AnalysisResult:
+                  enrich: bool = False,
+                  expense_line_overrides: dict = None) -> AnalysisResult:
     """
     Run full analysis pipeline on an already-extracted CIMData.
 
@@ -145,6 +146,11 @@ def run_analysis(result: AnalysisResult, progress: Callable = None,
             second chance at geocoding. Tier-1 precedence makes the re-run
             safe: CIM/analyst values always win; Census only fills gaps.
             Off by default so the CLI and tests stay network-free.
+        expense_line_overrides: dict[benchmark_key, float] of analyst-
+            entered expense line values (dense model view). Beats the
+            CIM-extracted value for the same line; the benchmark
+            adjustment still applies on top. None everywhere the CLI
+            path runs, so run.py behavior is unchanged.
 
     Returns:
         Updated AnalysisResult with all analysis fields populated
@@ -174,7 +180,9 @@ def run_analysis(result: AnalysisResult, progress: Callable = None,
     # Step 1: Financial analysis
     _progress(1, 9, "Analyzing financials...")
     from analysis.financials import analyze_financials
-    result.financial_analysis = analyze_financials(cim_data, comp_db=comp_db)
+    result.financial_analysis = analyze_financials(
+        cim_data, comp_db=comp_db,
+        expense_line_overrides=expense_line_overrides)
     result.adjusted_noi = result.financial_analysis.get(
         "adjusted_ttm_noi", {}).get("analyst_adjusted_noi")
     result.expense_ratio = result.financial_analysis.get(

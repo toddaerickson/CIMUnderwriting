@@ -559,6 +559,8 @@ def _analysis_worker(run_pk):
                     custom_va_scenarios=overrides.get("va_scenario_overrides"),
                     solver_target_irr=solver_irr,
                     enrich=True,
+                    expense_line_overrides=overrides.get(
+                        "expense_line_overrides"),
                 )
 
         meta = build_deal_meta(cim, result, deal.deal_dir,

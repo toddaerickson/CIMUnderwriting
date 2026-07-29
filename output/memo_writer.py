@@ -370,7 +370,10 @@ def _add_section_4(doc, fin, cim_data):
 
         for line in lines:
             row = table.add_row().cells
-            row[0].text = line["category"]
+            category = line["category"]
+            if line.get("source") == "analyst":
+                category += " (analyst)"
+            row[0].text = category
             row[1].text = _fmt_currency(line.get("cim_value"))
             pn = line.get("per_nrsf")
             row[2].text = f"${pn:.2f}" if pn else "N/A"
