@@ -453,6 +453,52 @@ def find_upload_duplicates(filename: str) -> list[dict]:
     return dupes
 
 
+def build_preview_cim(deal, cleaned, post):
+    """Merged cim_data + overrides for PREVIEW ONLY — never persisted.
+
+    Mirrors the save path's cim_overrides application (deal_assumptions /
+    _analysis_worker) but stops short of writing anything: no Deal.save,
+    no AnalysisRun row.
+    """
+    from webapp.forms import build_overrides
+
+    cim = cim_from_dict(deal.cim_json or {})
+    ov = build_overrides(cleaned, post, deal)
+    _apply_overrides(cim, dict(ov.get("cim_overrides", {})))
+    return cim, ov
+
+
+def model_strip_context(deal, cim, fin, form) -> dict:
+    """Context for the dense-model-view preview partial: SF/capita,
+    the Revenue−Expenses=NOI chip, and the expense-line OOB targets.
+
+    The NOI chip is recomputed from the merged `cim` values (not from
+    form.errors) — the preview must show a state even when the form's
+    clean() rejected the submission, since a rejected form still leaves
+    cleaned_data populated for the individually-valid fields.
+    """
+    from analysis.filters import sf_per_capita
+    from webapp.forms import noi_recon_tolerance
+
+    spc, spc_problem = sf_per_capita(cim)
+    rev, exp, noi = cim.ttm_total_revenue, cim.ttm_total_expenses, cim.ttm_noi
+    if None not in (rev, exp, noi):
+        delta = round(rev - exp - noi, 2)
+        noi_state = ("ok" if abs(delta) <= noi_recon_tolerance(rev)
+                     else f"off by ${abs(delta):,.0f}")
+    else:
+        noi_state = "—"
+    return {
+        "deal": deal,
+        "population_3mi": cim.population_3mi,
+        "median_hhi_3mi": cim.median_hhi_3mi,
+        "sf_per_capita": spc, "sf_per_capita_problem": spc_problem,
+        "sf_per_capita_limit": cfg.GATES["max_sf_per_capita"],
+        "noi_state": noi_state,
+        "expense_lines": (fin.get("expense_analysis") or {}).get("lines", []),
+    }
+
+
 def expense_benchmark_rows(deal) -> list[dict]:
     """Read-only reference table: CIM $/SF vs state-adjusted benchmarks."""
     from config import EXPENSE_BENCHMARKS, get_regional_benchmarks

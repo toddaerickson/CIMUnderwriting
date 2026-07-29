@@ -1,0 +1,26 @@
+<div id="model-strip" class="grid grid-cols-2 sm:grid-cols-4 gap-2 text-sm">
+  <div>
+    <span class="text-xs uppercase tracking-wide text-slate-500 block">Population 3-mi</span>
+    <span class="font-semibold">{{ population_3mi|default:"—" }}</span>
+  </div>
+  <div>
+    <span class="text-xs uppercase tracking-wide text-slate-500 block">SF / capita (≤ {{ sf_per_capita_limit }})</span>
+    {% if sf_per_capita is not None %}
+      <span class="font-semibold {% if sf_per_capita > sf_per_capita_limit %}text-red-700{% else %}text-emerald-700{% endif %}">{{ sf_per_capita|floatformat:1 }}</span>
+    {% else %}
+      <span class="text-slate-400" title="{{ sf_per_capita_problem }}">—</span>
+    {% endif %}
+  </div>
+  <div>
+    <span class="text-xs uppercase tracking-wide text-slate-500 block">Median HHI 3-mi</span>
+    <span class="font-semibold">{{ median_hhi_3mi|default:"—" }}</span>
+  </div>
+  <div>
+    <span class="text-xs uppercase tracking-wide text-slate-500 block">Rev − Exp = NOI</span>
+    <span id="noi-chip" class="font-semibold {% if noi_state != 'ok' and noi_state != '—' %}text-amber-700{% else %}text-emerald-700{% endif %}">{{ noi_state }}</span>
+  </div>
+</div>
+{% for l in expense_lines %}
+<span id="exp-used-{{ l.benchmark_key }}" hx-swap-oob="true">${{ l.adjusted_value|floatformat:0 }}</span>
+<span id="exp-flag-{{ l.benchmark_key }}" hx-swap-oob="true">{{ l.flag|default:"" }}</span>
+{% endfor %}

@@ -9,6 +9,49 @@ from config import GATES, TOP_50_MSAS
 from registry import ScenarioType
 
 
+def sf_per_capita_inputs(cim_data):
+    """Raw SF/capita components — single formula source for both the
+    gate-5 note (which needs the individual figures) and the public
+    sf_per_capita() summary.
+
+    Returns (comp_sf, pipe_sf, subject_sf, pop, sf_pc, input_problem).
+    sf_pc is None when inputs are missing or invalid; input_problem is
+    the human reason ("" when simply not yet entered).
+    """
+    comp_sf = None
+    pipe_sf = None
+    subject_sf = None
+    pop = None
+    sf_pc = None
+    input_problem = ""
+    # Values can arrive from legacy JSON override files and old snapshots
+    # that bypass form validation — a bad value must degrade THIS gate to
+    # TBD with a reason, never crash the run or flip the comparison sign.
+    try:
+        comp_sf = getattr(cim_data, "competitive_supply_sf_3mi", None)
+        comp_sf = None if comp_sf is None else float(comp_sf)
+        pipe_sf = float(getattr(cim_data, "pipeline_supply_sf_3mi", None) or 0)
+        subject_sf = float(cim_data.nrsf or 0)
+        pop = cim_data.population_3mi
+        pop = None if pop is None else float(pop)
+        if comp_sf is not None and pop is not None:
+            if pop <= 0 or comp_sf < 0 or pipe_sf < 0 or subject_sf < 0:
+                input_problem = ("supply/population input negative or zero — "
+                                 "fix the value in assumptions")
+            else:
+                sf_pc = (comp_sf + pipe_sf + subject_sf) / pop
+    except (TypeError, ValueError):
+        input_problem = "supply/population input not numeric — fix the value"
+    return comp_sf, pipe_sf, subject_sf, pop, sf_pc, input_problem
+
+
+def sf_per_capita(cim_data):
+    """(value, problem): value None when inputs missing/invalid; problem
+    is the human reason ("" when simply not yet entered)."""
+    _, _, _, _, sf_pc, input_problem = sf_per_capita_inputs(cim_data)
+    return sf_pc, input_problem
+
+
 def evaluate_gates(cim_data, scenario_results=None, va_results=None,
                    source_log=None) -> list[dict]:
     """
@@ -148,26 +191,8 @@ def evaluate_gates(cim_data, scenario_results=None, va_results=None,
     # stays TBD and says exactly which fields unlock it.
     supply = cim_data.new_supply_mentions
     limit = GATES["max_sf_per_capita"]
-    # Values can arrive from legacy JSON override files and old snapshots
-    # that bypass form validation — a bad value must degrade THIS gate to
-    # TBD with a reason, never crash the run or flip the comparison sign.
-    sf_pc = None
-    input_problem = ""
-    try:
-        comp_sf = getattr(cim_data, "competitive_supply_sf_3mi", None)
-        comp_sf = None if comp_sf is None else float(comp_sf)
-        pipe_sf = float(getattr(cim_data, "pipeline_supply_sf_3mi", None) or 0)
-        subject_sf = float(cim_data.nrsf or 0)
-        pop = cim_data.population_3mi
-        pop = None if pop is None else float(pop)
-        if comp_sf is not None and pop is not None:
-            if pop <= 0 or comp_sf < 0 or pipe_sf < 0 or subject_sf < 0:
-                input_problem = ("supply/population input negative or zero — "
-                                 "fix the value in assumptions")
-            else:
-                sf_pc = (comp_sf + pipe_sf + subject_sf) / pop
-    except (TypeError, ValueError):
-        input_problem = "supply/population input not numeric — fix the value"
+    comp_sf, pipe_sf, subject_sf, pop, sf_pc, input_problem = (
+        sf_per_capita_inputs(cim_data))
     if sf_pc is not None:
         note = (f"({comp_sf:,.0f} competitive + {pipe_sf:,.0f} pipeline + "
                 f"{subject_sf:,.0f} subject SF) / {pop:,.0f} pop = "

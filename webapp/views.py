@@ -195,6 +195,28 @@ def deal_assumptions(request, pk):
 
 
 @login_required
+@require_POST
+def assumptions_preview(request, pk):
+    """Live-preview htmx partial: recompute SF/capita, the NOI identity
+    chip, and expense-line figures from the in-progress form POST —
+    never writes (no Deal.save, no AnalysisRun row)."""
+    deal = get_object_or_404(Deal, pk=pk)
+    form = assumptions_forms.AssumptionsForm(request.POST)
+    form.is_valid()   # populate cleaned_data; preview shows, never blocks
+    cleaned = getattr(form, "cleaned_data", None) or {}
+    cim, ov = services.build_preview_cim(deal, cleaned, request.POST)
+    from analysis.financials import analyze_financials
+    try:
+        fin = analyze_financials(
+            cim, expense_line_overrides=ov.get("expense_line_overrides"))
+    except Exception:
+        logger.exception("preview financials failed")
+        fin = {}
+    return render(request, "webapp/_model_preview.html",
+                  services.model_strip_context(deal, cim, fin, form))
+
+
+@login_required
 def unit_mix_row(request):
     return render(request, "webapp/_unit_mix_row.html", {"row": {}})
 

@@ -506,3 +506,42 @@ def test_parse_unit_mix_logs_dropped_rows(caplog):
         rows = parse_unit_mix(post)
     assert len(rows) == 1
     assert "unit-mix row dropped" in caplog.text
+
+
+# ── T6: live-preview endpoint (server-computed htmx partial) ───────────
+
+@pytest.mark.django_db
+def test_assumptions_preview_contract(client, django_user_model, settings, tmp_path):
+    from webapp.models import AnalysisRun, Deal
+    settings.CIM_DEALS_DIR = str(tmp_path)
+    user = django_user_model.objects.create_user(username="op", password="x")
+    client.force_login(user)
+    deal = Deal.objects.create(
+        deal_id="pv", property_name="PV",
+        cim_json={"property_name": "PV", "state": "TX", "nrsf": 50_000.0,
+                  "population_3mi": 75_000, "ttm_egr": 550_000.0})
+    runs_before = AnalysisRun.objects.count()
+
+    resp = client.post(f"/deals/{deal.pk}/assumptions/preview/", {
+        "competitive_supply_sf_3mi": "300000",
+        "population_3mi": "75000",
+        "ttm_total_revenue": "560000", "ttm_total_expenses": "220000",
+        "ttm_noi": "340000",
+    })
+    assert resp.status_code == 200
+    html = resp.content.decode()
+    # (300k competitive + 0 pipeline + 50k subject) / 75k pop = 4.6667,
+    # floatformat:1 renders "4.7" — NOT "7.0" (the sketch's number didn't
+    # match its own stated inputs; fixed here to the true arithmetic).
+    assert "4.7" in html
+    assert 'id="model-strip"' in html
+    assert 'id="noi-chip"' in html
+    # preview must never write
+    assert AnalysisRun.objects.count() == runs_before
+    deal.refresh_from_db()
+    # Deal.assumption_overrides defaults to {} (JSONField default=dict,
+    # not nullable) — confirming it's still the untouched default is the
+    # "never writes" check, not an `is None` comparison.
+    assert deal.assumption_overrides == {}
+
+    assert client.get(f"/deals/{deal.pk}/assumptions/preview/").status_code == 405
