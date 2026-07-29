@@ -37,5 +37,7 @@ services:
         value: /data/cim_comps.db
       - key: CIM_OVERRIDES_DIR
         value: /data/overrides
+      - key: UW_TEMPLATE_PATH
+        value: /data/template_uw.xlsm   # gitignored (*.xlsm) so never in the build; lives on the disk
       - key: PYTHON_VERSION
         value: "3.12.6"
