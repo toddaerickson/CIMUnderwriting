@@ -459,6 +459,38 @@ def test_saved_values_render_on_next_get(client, operator, deals_dir, fake_extra
     assert b'value="85' in resp.content
 
 
+def test_in_place_rent_and_gap(mock_cim_data):
+    from analysis.rent_analysis import analyze_rents
+    from extract.parser import UnitType
+
+    mock_cim_data.unit_mix = [
+        UnitType(size_label="10x10", sf=100.0, count=100, rate=95.0),
+        UnitType(size_label="10x20", sf=200.0, count=50, rate=160.0),
+    ]
+    mock_cim_data.market_rent_psf = 1.20   # street rate
+    r = analyze_rents(mock_cim_data)
+    # (95*100 + 160*50) / (100*100 + 200*50) = 17,500 / 20,000 = 0.875
+    assert r["in_place_avg_rent_psf"] == 0.88
+    assert r["in_place_rent_source"] == "derived"
+    assert r["rent_gap_pct"] == round((1.20 - 0.88) / 1.20, 4)
+
+    mock_cim_data.in_place_avg_rent_psf = 1.00   # analyst override wins
+    r2 = analyze_rents(mock_cim_data)
+    assert r2["in_place_avg_rent_psf"] == 1.00
+    assert r2["in_place_rent_source"] == "override"
+
+
+def test_in_place_rent_none_when_no_unit_mix_or_override(mock_cim_data):
+    """Empty unit mix (early-return branch) must not KeyError or divide by zero."""
+    from analysis.rent_analysis import analyze_rents
+
+    mock_cim_data.unit_mix = []
+    r = analyze_rents(mock_cim_data)
+    assert r["in_place_avg_rent_psf"] is None
+    assert r["in_place_rent_source"] is None
+    assert r["rent_gap_pct"] is None
+
+
 def test_parse_unit_mix_logs_dropped_rows(caplog):
     """A non-numeric row is skipped, but never silently (audit check 3)."""
     from django.http import QueryDict
