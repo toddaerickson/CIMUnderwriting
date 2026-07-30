@@ -260,16 +260,25 @@ def assumptions_preview(request, pk):
     form = assumptions_forms.AssumptionsForm(request.POST)
     form.is_valid()   # populate cleaned_data; preview shows, never blocks
     cleaned = getattr(form, "cleaned_data", None) or {}
-    cim, ov = services.build_preview_cim(deal, cleaned, request.POST)
     from analysis.financials import analyze_financials
+    # A broken/legacy snapshot (or a parse surprise from in-progress form
+    # values) must not 500 the preview — same resilience posture as
+    # deal_assumptions' first-paint strip (see its comment above).
     try:
+        cim, ov = services.build_preview_cim(deal, cleaned, request.POST)
         fin = analyze_financials(
             cim, expense_line_overrides=ov.get("expense_line_overrides"))
+        strip_ctx = services.model_strip_context(deal, cim, fin, form)
     except Exception:
-        logger.exception("preview financials failed")
-        fin = {}
-    return render(request, "webapp/_model_preview.html",
-                  services.model_strip_context(deal, cim, fin, form))
+        logger.exception("preview financials failed for deal %s", deal.pk)
+        strip_ctx = {
+            "deal": deal,
+            "population_3mi": None, "median_hhi_3mi": None,
+            "sf_per_capita": None, "sf_per_capita_problem": "unavailable",
+            "sf_per_capita_limit": cfg.GATES.get("max_sf_per_capita"),
+            "noi_state": "—", "expense_lines": [],
+        }
+    return render(request, "webapp/_model_preview.html", strip_ctx)
 
 
 @login_required

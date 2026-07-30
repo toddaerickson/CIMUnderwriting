@@ -7,6 +7,7 @@ Conversion happens ONLY in build_initial (×100) and build_overrides
 the raw submitted strings untouched.
 """
 import logging
+import math
 
 from django import forms
 from django.utils import timezone
@@ -400,7 +401,16 @@ def parse_unit_mix(post) -> list[dict] | None:
             count = int(float(count or 0))
             sf = float(sf or 0)
             rate = float(rate or 0)
-        except ValueError:
+            if not (math.isfinite(sf) and math.isfinite(rate)):
+                # "inf"/"nan"/"1e400"-style values float-parse cleanly (no
+                # ValueError) but would propagate inf/nan into NOI math
+                # downstream — treat them as invalid the same way a
+                # non-numeric string is.
+                raise ValueError("non-finite sf/rate")
+        except (ValueError, OverflowError):
+            # OverflowError: int(float("inf")) — a Count value that
+            # float-parses to infinity ("inf"/"Infinity"/"1e400") raises
+            # OverflowError, not ValueError, on the int() conversion.
             logger.warning(
                 "unit-mix row dropped on save (non-numeric values): "
                 "label=%r count=%r sf=%r rate=%r", label, count, sf, rate)

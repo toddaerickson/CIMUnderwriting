@@ -596,3 +596,102 @@ def test_model_view_get_reflects_saved_overrides(client, django_user_model,
     assert resp.status_code == 200
     assert "10.0" in html
     assert "4.7" not in html
+
+
+# ── T9: non-finite unit-mix values must not 500 ────────────────────────
+#
+# A Count value that float-parses to infinity ("inf"/"Infinity"/"1e400")
+# raises OverflowError on int(float(count)) — the old `except ValueError`
+# didn't catch it, so it 500'd both Save and the live preview (which
+# fires on every keystroke). An SF/rate of "inf"/"nan" doesn't raise at
+# all; it float-parses cleanly and would propagate into NOI arithmetic
+# instead. Both must take the same drop-the-row fallback as a plain
+# non-numeric string.
+
+def test_parse_unit_mix_drops_non_finite_values(caplog):
+    from django.http import QueryDict
+
+    from webapp.forms import parse_unit_mix
+
+    post = QueryDict(mutable=True)
+    post.setlist("um_label", ["10x10", "10x20", "10x30"])
+    post.setlist("um_count", ["inf", "50", "40"])      # OverflowError on int()
+    post.setlist("um_sf", ["100", "inf", "150"])        # parses, never raises
+    post.setlist("um_rate", ["95", "165", "125"])
+    post.setlist("um_cc", ["0", "0", "0"])
+    with caplog.at_level("WARNING", logger="cim_analyst.web"):
+        rows = parse_unit_mix(post)
+    assert len(rows) == 1
+    assert rows[0]["size_label"] == "10x30"
+    assert caplog.text.count("unit-mix row dropped") == 2
+
+
+@pytest.mark.django_db
+def test_save_unit_mix_with_non_finite_values_does_not_500(client, operator,
+                                                           deals_dir, fake_extract):
+    deal = _extracted_deal(client, deals_dir, fake_extract)
+    resp = _post_assumptions(client, deal, {
+        "um_count": ["inf", "50"],   # row 0: infinite count
+        "um_sf": ["100", "inf"],     # row 1: infinite sf
+    })
+    assert resp.status_code == 302
+    deal.refresh_from_db()
+    assert deal.assumption_overrides["cim_overrides"]["unit_mix"] == []
+
+
+@pytest.mark.django_db
+def test_assumptions_preview_survives_non_finite_unit_mix(client, django_user_model,
+                                                           settings, tmp_path):
+    """The preview fires on every form change (400ms delay) — one bad
+    value must not freeze the model strip for the whole session."""
+    settings.CIM_DEALS_DIR = str(tmp_path)
+    user = django_user_model.objects.create_user(username="op", password="x")
+    client.force_login(user)
+    from webapp.models import Deal
+    deal = Deal.objects.create(
+        deal_id="pv-inf", property_name="PV-INF", extract_status="done",
+        cim_json={"property_name": "PV-INF", "state": "TX", "nrsf": 50_000.0,
+                  "population_3mi": 75_000})
+
+    resp = client.post(f"/deals/{deal.pk}/assumptions/preview/", {
+        "um_label": ["10x10"], "um_count": ["inf"], "um_sf": ["100"],
+        "um_rate": ["95"], "um_cc": ["0"],
+    })
+    assert resp.status_code == 200
+    assert 'id="model-strip"' in resp.content.decode()
+
+    resp2 = client.post(f"/deals/{deal.pk}/assumptions/preview/", {
+        "um_label": ["10x10"], "um_count": ["100"], "um_sf": ["inf"],
+        "um_rate": ["95"], "um_cc": ["0"],
+    })
+    assert resp2.status_code == 200
+    assert 'id="model-strip"' in resp2.content.decode()
+
+
+@pytest.mark.django_db
+def test_assumptions_preview_degrades_on_unexpected_error(client, django_user_model,
+                                                          settings, tmp_path,
+                                                          monkeypatch):
+    """Defense-in-depth: assumptions_preview must degrade to the fallback
+    model-strip context (never 500) on ANY unexpected build_preview_cim
+    failure — same resilience posture as deal_assumptions' first-paint
+    strip, for parse surprises beyond the unit-mix fix above."""
+    settings.CIM_DEALS_DIR = str(tmp_path)
+    user = django_user_model.objects.create_user(username="op", password="x")
+    client.force_login(user)
+    from webapp import services
+    from webapp.models import Deal
+    deal = Deal.objects.create(
+        deal_id="pv-boom", property_name="PV-BOOM", extract_status="done",
+        cim_json={"property_name": "PV-BOOM", "state": "TX", "nrsf": 50_000.0,
+                  "population_3mi": 75_000})
+
+    def _boom(*a, **k):
+        raise RuntimeError("simulated parse surprise")
+
+    monkeypatch.setattr(services, "build_preview_cim", _boom)
+    resp = client.post(f"/deals/{deal.pk}/assumptions/preview/", {})
+    assert resp.status_code == 200
+    html = resp.content.decode()
+    assert 'id="model-strip"' in html
+    assert 'id="noi-chip"' in html
