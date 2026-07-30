@@ -103,7 +103,7 @@
 
     <details open class="bg-white border border-slate-200 rounded-lg">
       <summary class="cursor-pointer select-none px-4 py-2 text-sm font-semibold">Size</summary>
-      <div class="px-4 pb-3 grid gap-x-4 gap-y-1.5 sm:grid-cols-3 lg:grid-cols-4">
+      <div class="px-4 pb-3 grid gap-x-4 gap-y-1.5 sm:grid-cols-3 xl:grid-cols-4">
         {% for it in sec_size %}
         <label class="grid grid-cols-[9rem_1fr] items-center gap-x-2 text-xs text-slate-600">
           <span>{% if it.flag %}<span class="required-flag text-red-600 font-bold" title="Required for IRR modeling">!</span> {% endif %}{{ it.label }}</span>
@@ -115,7 +115,7 @@
 
     <details open class="bg-white border border-slate-200 rounded-lg">
       <summary class="cursor-pointer select-none px-4 py-2 text-sm font-semibold">Demographics</summary>
-      <div class="px-4 pb-3 grid gap-x-4 gap-y-1.5 sm:grid-cols-2 lg:grid-cols-4">
+      <div class="px-4 pb-3 grid gap-x-4 gap-y-1.5 sm:grid-cols-2 xl:grid-cols-4">
         {% for it in sec_demo %}
         <label class="grid grid-cols-[9rem_1fr] items-center gap-x-2 text-xs text-slate-600">
           <span>{% if it.flag %}<span class="required-flag text-red-600 font-bold" title="Required for IRR modeling">!</span> {% endif %}{{ it.label }}</span>
