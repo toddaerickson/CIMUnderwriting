@@ -19,8 +19,25 @@
     <span class="text-xs uppercase tracking-wide text-slate-500 block">Rev − Exp = NOI</span>
     <span id="noi-chip" class="font-semibold {% if noi_state != 'ok' and noi_state != '—' %}text-amber-700{% else %}text-emerald-700{% endif %}">{{ noi_state }}</span>
   </div>
+  {% comment %} These spans exist only as out-of-band swap targets for the
+     benchmark table's exp-used-*/exp-flag-* cells (Income & Expenses
+     section) — never meant to be seen here. Nested (a `hidden` grid child
+     is dropped from grid layout, no visual effect) rather than a sibling
+     after #model-strip's closing tag so it rides inside the same
+     hx-swap="outerHTML" replacement every preview refresh: htmx strips
+     matched hx-swap-oob elements from the response fragment before the
+     main swap runs, so without nesting, each refresh would leave one more
+     empty leftover wrapper stranded after #model-strip forever. On a
+     plain (non-htmx) render — the initial page load, and every include of
+     this partial from assumptions.html — there's no ajax response for
+     htmx's OOB extraction to run on, so without `hidden` these would
+     render as bare, unstyled duplicate text under the model strip.
+     htmx's OOB matching (allowNestedOobSwaps, on by default) still finds
+     and swaps them correctly by id regardless of nesting depth. {% endcomment %}
+  <div class="hidden">
+    {% for l in expense_lines %}
+    <span id="exp-used-{{ l.benchmark_key }}" hx-swap-oob="true">${{ l.adjusted_value|floatformat:0 }}</span>
+    <span id="exp-flag-{{ l.benchmark_key }}" hx-swap-oob="true">{{ l.flag|default:"" }}</span>
+    {% endfor %}
+  </div>
 </div>
-{% for l in expense_lines %}
-<span id="exp-used-{{ l.benchmark_key }}" hx-swap-oob="true">${{ l.adjusted_value|floatformat:0 }}</span>
-<span id="exp-flag-{{ l.benchmark_key }}" hx-swap-oob="true">{{ l.flag|default:"" }}</span>
-{% endfor %}
