@@ -103,7 +103,7 @@ class CIMData:
 
     # Rate positioning & momentum drivers (screening-framework additions).
     # in_place_avg_rent_psf: analyst override; when None the engine
-    # derives occupied-weighted $/SF/mo from the unit mix.
+    # derives a count-weighted scheduled $/SF/mo from the unit mix.
     # street_rate_trend: rising | flat | falling (None = unknown) — feeds
     # the ECRI-in-falling-market risk flag. t3_annualized_revenue: T3
     # annualized $ for the momentum screen vs T12.

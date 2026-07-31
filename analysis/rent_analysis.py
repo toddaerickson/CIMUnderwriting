@@ -86,7 +86,7 @@ def analyze_rents(cim_data, comp_db=None) -> dict:
         "total_monthly_revenue": total_monthly_rev,
         "weighted_avg_rent_per_sf_mo": wavg_rent_per_sf,
         "weighted_avg_rent_per_sf_yr": wavg_rent_per_sf * 12 if wavg_rent_per_sf else None,
-        "rent_gap_analysis": _analyze_rent_gap(cim_data, wavg_rent_per_sf, comp_db),
+        "rent_gap_analysis": _analyze_rent_gap(cim_data, in_place or wavg_rent_per_sf, comp_db),
         "revenue_concentration": {
             "largest_type": max_rev_type,
             "pct_of_revenue": max_rev / total_monthly_rev if total_monthly_rev else None,
@@ -99,7 +99,12 @@ def analyze_rents(cim_data, comp_db=None) -> dict:
 
 
 def _in_place_rent_psf(cim_data):
-    """Occupied-weighted in-place $/SF/mo; analyst override wins."""
+    """Scheduled (count-weighted) in-place $/SF/mo from the unit mix;
+    analyst override wins. Not occupancy-weighted — unit_mix rates are
+    asking/scheduled rates for ALL units regardless of occupancy, so this
+    is systematically above true occupied in-place rent whenever
+    occupancy < 100%. Supply the true occupied rent via the analyst
+    override field if the comparison needs it."""
     override = getattr(cim_data, "in_place_avg_rent_psf", None)
     if override is not None:
         return override, "override"

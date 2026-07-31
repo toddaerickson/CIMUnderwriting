@@ -282,7 +282,18 @@ def _compute_in_place_rent_psf(cim_data) -> float:
     Compute weighted-average in-place rent per SF per month from unit mix.
 
     Falls back to GPR / (NRSF * 12 * occupancy) if no unit mix.
+
+    The analyst override (CIMData.in_place_avg_rent_psf) wins first, same
+    coalesce rule analysis/rent_analysis._in_place_rent_psf already
+    applies — this helper used to skip it, so a saved override reached
+    the ECRI risk flag but not detect_value_add/run_value_add_scenarios/
+    compute_va_irr_at_price/the memo/the Excel, which could print two
+    different in-place rents for the same deal (one section reads the
+    override, the rest re-derive the unadjusted unit-mix average).
     """
+    override = getattr(cim_data, "in_place_avg_rent_psf", None)
+    if override is not None:
+        return override
     if cim_data.unit_mix:
         total_sf = 0
         total_rent = 0
