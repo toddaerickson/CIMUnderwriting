@@ -23,7 +23,7 @@ projection that D, E and G all read from.
 | A | Model error-check register | — | Medium-small | Standard |
 | B | Transaction costs + variable hold period | — | Medium | **High-risk** (money math) |
 | D | Sources & Uses + capital stack | B | Small | Standard |
-| G | LP-facing 2-page investor summary | D (E preferred) | Small-medium | Standard |
+| G | LP-facing 2-page investor summary | D to build, **E4 to ship** | Small-medium | Standard |
 | E1 | Debt layer (`model/debt.py`) | B | Medium | **High-risk** |
 | E2 | Single-tier waterfall (`model/waterfall.py`) | E1 | Medium | **High-risk** |
 | E3 | Levered wiring (assumptions / results / memo / xlsx) | E2, D | Medium | High-risk |

@@ -1,5 +1,12 @@
 # PE-Readiness Scorecard — "Not Yet Institutional, But Could Be" Detection
 
+**Status: PROPOSAL — not approved, not scoped, not queued.** Authored outside
+the operator's selected backlog and preserved here on merit. It is NOT part of
+the A → B → D → E1-E4 → G sequence in [scoped-backlog.md](scoped-backlog.md)
+and competes with that queue for time. Do not begin building it without an
+explicit operator decision; if selected, it needs a scope contract in the
+backlog first, like every other item.
+
 ## Goal
 
 Add a second analysis axis alongside the 7 go/no-go gates: **how close is this deal to

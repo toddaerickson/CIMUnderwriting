@@ -64,9 +64,6 @@ avoid.
       projection loops; collapse to one and add both. Changes every published IRR.
 - [ ] **D.** Sources & Uses + capital stack — unlevered-safe now, debt-ready;
       must tie to DCF total basis (enforced by check 11)
-- [ ] **G.** LP-facing 2-page investor summary (.docx) — **ships last, after
-      E4**, so it can quote LP net IRR rather than unlevered property IRR; GC
-      gate before any external distribution
 
 ### Levered Returns / LP Waterfall
 
@@ -81,6 +78,10 @@ upfront, x% promote above a y% pref. No catch-up, no clawback, no tier builder.
 - [ ] **E3.** Levered wiring — assumptions / results / memo / xlsx; unlevered
       screen stays primary, levered is the second lens
 - [ ] **E4.** Solver targets LP net IRR (15%+) instead of unlevered IRR
+- [ ] **G.** LP-facing 2-page investor summary (.docx) — **ships last**, after
+      E4, so it can quote LP net IRR rather than unlevered property IRR. Its
+      build dependency is D; its *ordering* dependency is E4. GC gate before any
+      external distribution.
 
 ### UI Polish
 - [ ] Extraction confidence indicators per field (green/yellow/red)
