@@ -126,14 +126,26 @@ def cim_to_dict(cim_data) -> dict:
 
 
 def cim_from_dict(d: dict):
-    """Rehydrate a stored snapshot; unknown keys (schema drift) dropped."""
+    """Rehydrate a stored snapshot; unknown keys (schema drift) dropped —
+    at the top level AND inside the nested unit_mix/income_lines/
+    expense_lines rows. The nested splat used to be unfiltered, so a
+    single stray key in a hand-edited or legacy snapshot (schema drift a
+    field rename would produce) raised a bare TypeError from UnitType(**u)
+    et al.; expense_benchmark_rows() calls this same function a second
+    time OUTSIDE the deal_assumptions try/except, so that TypeError
+    reached Django as a real 500 even on the "guarded" first-paint path."""
     from extract.parser import CIMData, FinancialLine, UnitType
+
+    def _mk(cls, rows):
+        fields = {f.name for f in dataclasses.fields(cls)}
+        return [cls(**{k: v for k, v in r.items() if k in fields})
+                for r in (rows or []) if isinstance(r, dict)]
 
     known = {f.name for f in dataclasses.fields(CIMData)}
     data = {k: v for k, v in (d or {}).items() if k in known}
-    data["unit_mix"] = [UnitType(**u) for u in data.get("unit_mix") or []]
-    data["income_lines"] = [FinancialLine(**l) for l in data.get("income_lines") or []]
-    data["expense_lines"] = [FinancialLine(**l) for l in data.get("expense_lines") or []]
+    data["unit_mix"] = _mk(UnitType, data.get("unit_mix"))
+    data["income_lines"] = _mk(FinancialLine, data.get("income_lines"))
+    data["expense_lines"] = _mk(FinancialLine, data.get("expense_lines"))
     return CIMData(**data)
 
 
@@ -468,9 +480,42 @@ def build_preview_cim(deal, cleaned, post):
     return cim, ov
 
 
+def flag_class(flag: str | None) -> str:
+    """Single-source flag→colour rule for the Income & Expenses table AND
+    the preview partial's OOB spans (webapp/templates/webapp/
+    assumptions.html, webapp/templates/webapp/_model_preview.html) — the
+    two used to each inline their own copy of this, which is exactly how
+    the preview's flag span went class-less (and permanently uncoloured)
+    on the first htmx OOB swap: an hx-swap-oob="true" span replaces the
+    WHOLE element, so a class computed only in the table template never
+    reached the swapped-in span. One function, read by both templates
+    through the row dict, means there is nothing left to fall out of
+    sync."""
+    if flag and "BELOW" in flag:
+        return "text-amber-700"
+    if flag in ("IN RANGE", "FORMULA"):
+        return "text-emerald-700"
+    return "text-slate-500"
+
+
+def stale_benchmark_rows() -> list[dict]:
+    """Placeholder rows, same shape as expense_benchmark_rows(), for the
+    preview_error fallback in views.py — so a crash still blanks every
+    OOB-swapped cell (used/flag/cim/low/high) instead of leaving the
+    PREVIOUS successful compute's dollar figures on screen looking live."""
+    from registry import EXPENSE_CATEGORIES
+
+    return [{"key": c.key, "label": c.display_name, "cim_value": None,
+             "cim_per_sf": None, "low": 0, "high": 0, "used": None,
+             "flag": "stale", "flag_class": flag_class("stale")}
+            for c in EXPENSE_CATEGORIES]
+
+
 def model_strip_context(deal, cim, fin, form) -> dict:
     """Context for the dense-model-view preview partial: SF/capita,
-    the Revenue−Expenses=NOI chip, and the expense-line OOB targets.
+    the Revenue−Expenses=NOI chip, and the expense benchmark rows (the
+    SAME rows the Income & Expenses table renders — single source, see
+    expense_benchmark_rows()).
 
     The NOI chip is recomputed from the merged `cim` values (not from
     form.errors) — the preview must show a state even when the form's
@@ -488,6 +533,7 @@ def model_strip_context(deal, cim, fin, form) -> dict:
                      else f"off by ${abs(delta):,.0f}")
     else:
         noi_state = "—"
+    lines = (fin.get("expense_analysis") or {}).get("lines", [])
     return {
         "deal": deal,
         "population_3mi": cim.population_3mi,
@@ -495,45 +541,61 @@ def model_strip_context(deal, cim, fin, form) -> dict:
         "sf_per_capita": spc, "sf_per_capita_problem": spc_problem,
         "sf_per_capita_limit": cfg.GATES["max_sf_per_capita"],
         "noi_state": noi_state,
-        "expense_lines": (fin.get("expense_analysis") or {}).get("lines", []),
+        "benchmark_rows": expense_benchmark_rows(deal, lines, cim=cim),
     }
 
 
-def expense_benchmark_rows(deal, expense_lines=None) -> list[dict]:
+def expense_benchmark_rows(deal, expense_lines=None, cim=None) -> list[dict]:
     """Reference table: CIM $/SF vs state-adjusted benchmarks, per category
-    `{key, label, cim_value, cim_per_sf, low, high, used, flag}`.
+    `{key, label, cim_value, cim_per_sf, low, high, used, flag, flag_class}`.
 
     `expense_lines` — the `expense_analysis["lines"]` from the SAME
     analyze_financials() call driving the model-strip/preview — supplies
-    `used` (analyst-adjusted value) and `flag` per benchmark_key. Callers
-    without a `fin` handy (e.g. the read-only financials tab) get `used`/
-    `flag` as None; `key`/`label`/`cim_value`/`cim_per_sf`/`low`/`high`
-    are always populated from the deal's own snapshot.
+    `used` (analyst-adjusted value) and `flag` per benchmark_key, AND
+    (when a line matched) `low`/`high`: analyze_financials already
+    computed the benchmark_range each line was actually judged against
+    (state multiplier / property-tax formula included), so a matched
+    row is a PROJECTION of that line, not a second computation from the
+    raw config — two computations of the same band is how the Used/Flag
+    cells used to disagree with the printed Low/High (services.py finding
+    review: property tax, state-multiplied states and the TX formula
+    branch both printed a band the Flag was never compared against).
+    Categories with no matching line (no `fin` supplied, e.g. the
+    read-only financials tab) fall back to the raw config/comp-db bands.
+
+    `cim` — pass the SAME merged CIMData the caller's analyze_financials()
+    call used (build_preview_cim's result), so CIM $/SF's state/NRSF
+    basis can never drift from the Used/Flag basis mid-edit or after a
+    saved state/NRSF override. Defaults to re-hydrating the deal's raw
+    snapshot for callers with no live `cim` (e.g. the financials tab).
     """
     from analysis.financials import _map_expense_lines
     from config import EXPENSE_BENCHMARKS, get_regional_benchmarks
     from registry import EXPENSE_CATEGORIES
 
-    snapshot = deal.cim_json or {}
-    state = (snapshot.get("state") or deal.state or "").upper()
+    if cim is None:
+        cim = cim_from_dict(deal.cim_json or {})
+    state = (cim.state or deal.state or "").upper()
     benchmarks = get_regional_benchmarks(state) if state else EXPENSE_BENCHMARKS
-    cim = cim_from_dict(snapshot)
     nrsf = cim.nrsf or 0
     cim_map = _map_expense_lines(cim)
     used_by_key = {l.get("benchmark_key"): l for l in (expense_lines or [])}
 
     rows = []
     for cat in EXPENSE_CATEGORIES:
-        low, high = benchmarks.get(cat.key, (0, 0))
         cim_value = cim_map.get(cat.key)
         used_line = used_by_key.get(cat.key)
+        low, high = ((used_line.get("benchmark_range") or (0, 0)) if used_line
+                     else benchmarks.get(cat.key, (0, 0)))
+        flag = used_line.get("flag") if used_line else None
         rows.append({
             "key": cat.key, "label": cat.display_name,
             "cim_value": cim_value,
             "cim_per_sf": (cim_value / nrsf) if (cim_value and nrsf) else None,
             "low": low, "high": high,
             "used": used_line.get("adjusted_value") if used_line else None,
-            "flag": used_line.get("flag") if used_line else None,
+            "flag": flag,
+            "flag_class": flag_class(flag),
         })
     return rows
 

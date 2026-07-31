@@ -113,15 +113,37 @@
       </div>
     </details>
 
+    {# Same vertical Extracted|Value|Source shape as Drivers (model_rows) —
+       not a label/input grid — so the one provenance an analyst actually
+       needs here (CIM vs Census-filled) is on screen, and the section
+       can never hit the rigid-label-track legibility failure the other
+       sections had, since a table scrolls (overflow-x-auto) instead of
+       squeezing its inputs. #}
     <details open class="bg-white border border-slate-200 rounded-lg">
       <summary class="cursor-pointer select-none px-4 py-2 text-sm font-semibold">Demographics</summary>
-      <div class="px-4 pb-3 grid gap-x-4 gap-y-1.5 sm:grid-cols-2 xl:grid-cols-4">
-        {% for it in sec_demo %}
-        <label class="grid grid-cols-[9rem_1fr] items-center gap-x-2 text-xs text-slate-600">
-          <span>{% if it.flag %}<span class="required-flag text-red-600 font-bold" title="Required for IRR modeling">!</span> {% endif %}{{ it.label }}</span>
-          {{ it.bf }}
-        </label>
-        {% endfor %}
+      <div class="px-4 pb-3 overflow-x-auto">
+        <table class="w-full text-sm border-collapse">
+          <thead>
+            <tr class="text-left text-xs text-slate-600 border-b border-slate-200">
+              <th class="py-1 pr-3">Field</th>
+              <th class="py-1 pr-3">Extracted</th>
+              <th class="py-1 pr-3">Value</th>
+              <th class="py-1">Source</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in demo_rows %}
+            <tr class="border-b border-slate-100">
+              <td class="py-1 pr-3 whitespace-nowrap text-xs text-slate-600">
+                {% if row.bf.name in missing_required %}<span class="required-flag text-red-600 font-bold" title="Required for IRR modeling">!</span> {% endif %}{{ row.label }}
+              </td>
+              <td class="py-1 pr-3 text-xs text-slate-400">{{ row.extracted|default:"—" }}</td>
+              <td class="py-1 pr-3 w-40">{{ row.bf }}</td>
+              <td class="py-1 text-xs text-slate-400">{{ row.source }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
       </div>
     </details>
 
@@ -143,7 +165,7 @@
           {% endif %}
         </div>
         <div>
-          <div class="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1">Expense Benchmarks (state-adjusted, $/NRSF/yr) — analyst input beats CIM</div>
+          <div class="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1">Expense Benchmarks (state-adjusted; CIM/Low/High in $/NRSF/yr, Input in total $/yr) — analyst input beats CIM</div>
           <div class="overflow-x-auto">
             <table class="w-full text-sm border-collapse">
               <thead>
@@ -152,7 +174,7 @@
                   <th class="py-1 pr-2 text-right">CIM $/SF</th>
                   <th class="py-1 pr-2 text-right">Low</th>
                   <th class="py-1 pr-2 text-right">High</th>
-                  <th class="py-1 pr-2 whitespace-nowrap">Input ($)</th>
+                  <th class="py-1 pr-2 whitespace-nowrap">Input ($/yr total)</th>
                   <th class="py-1 pr-2 text-right">Used</th>
                   <th class="py-1 whitespace-nowrap">Flag</th>
                 </tr>
@@ -161,12 +183,12 @@
                 {% for r in benchmark_rows %}
                 <tr class="border-b border-slate-100">
                   <td class="py-1 pr-3 whitespace-nowrap text-xs text-slate-600">{{ r.label }}</td>
-                  <td class="py-1 pr-2 text-right">{% if r.cim_per_sf is not None %}${{ r.cim_per_sf|floatformat:2 }}{% else %}&mdash;{% endif %}</td>
-                  <td class="py-1 pr-2 text-right">${{ r.low|floatformat:2 }}</td>
-                  <td class="py-1 pr-2 text-right">${{ r.high|floatformat:2 }}</td>
+                  <td class="py-1 pr-2 text-right"><span id="exp-cim-{{ r.key }}">{% if r.cim_per_sf is not None %}${{ r.cim_per_sf|floatformat:2 }}{% else %}&mdash;{% endif %}</span></td>
+                  <td class="py-1 pr-2 text-right"><span id="exp-low-{{ r.key }}">${{ r.low|floatformat:2 }}</span></td>
+                  <td class="py-1 pr-2 text-right"><span id="exp-high-{{ r.key }}">${{ r.high|floatformat:2 }}</span></td>
                   <td class="py-1 pr-2 w-28">{{ r.bf }}</td>
                   <td class="py-1 pr-2 text-right"><span id="exp-used-{{ r.key }}">{% if r.used is not None %}${{ r.used|floatformat:0 }}{% else %}&mdash;{% endif %}</span></td>
-                  <td class="py-1 whitespace-nowrap"><span id="exp-flag-{{ r.key }}" class="{% if 'BELOW' in r.flag %}text-amber-700{% elif r.flag == 'IN RANGE' or r.flag == 'FORMULA' %}text-emerald-700{% else %}text-slate-500{% endif %}">{{ r.flag|default:"" }}</span></td>
+                  <td class="py-1 whitespace-nowrap"><span id="exp-flag-{{ r.key }}" class="{{ r.flag_class }}">{{ r.flag|default:"" }}</span></td>
                 </tr>
                 {% endfor %}
               </tbody>

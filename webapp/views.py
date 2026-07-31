@@ -206,16 +206,23 @@ def deal_assumptions(request, pk):
         strip_ctx = services.model_strip_context(deal, cim, fin, form)
     except Exception:
         logger.exception("assumptions initial strip failed for deal %s", deal.pk)
-        fin = {}
         strip_ctx = {
-            "population_3mi": None, "median_hhi_3mi": None,
+            "population_3mi": (deal.cim_json or {}).get("population_3mi"),
+            "median_hhi_3mi": (deal.cim_json or {}).get("median_hhi_3mi"),
             "sf_per_capita": None, "sf_per_capita_problem": "unavailable",
             "sf_per_capita_limit": cfg.GATES.get("max_sf_per_capita"),
-            "noi_state": "—", "expense_lines": [],
+            "noi_state": "—", "benchmark_rows": services.stale_benchmark_rows(),
+            "preview_error": True, "stale": False,
         }
 
-    expense_lines = (fin.get("expense_analysis") or {}).get("lines", [])
-    benchmark_rows = services.expense_benchmark_rows(deal, expense_lines)
+    # benchmark_rows is the SAME list model_strip_context returned (or the
+    # stale placeholder on the except branch) — no second call, so the
+    # visible table and the preview's OOB targets can never compute two
+    # different Low/High/CIM $/SF for the same category (services.py
+    # review finding). `bf` (the exp_<key> widget) is added here because
+    # only the page template needs an editable cell; the preview partial
+    # never renders {{ r.bf }}.
+    benchmark_rows = strip_ctx["benchmark_rows"]
     for row in benchmark_rows:
         row["bf"] = form[f"exp_{row['key']}"]
 
@@ -238,7 +245,8 @@ def deal_assumptions(request, pk):
         "sec_property": f.section_fields(form, f.SECTION_PROPERTY, missing_required),
         "sec_size": f.section_fields(form, f.SECTION_SIZE, missing_required),
         "sec_income": f.section_fields(form, f.SECTION_INCOME, missing_required),
-        "sec_demo": f.section_fields(form, f.SECTION_DEMOGRAPHICS, missing_required),
+        "demo_rows": f.model_rows(form, f.SECTION_DEMOGRAPHICS, deal.cim_json or {},
+                                  source_log),
         "scenario_rows": f.scenario_grid(form),
         "va_rows": f.va_grid(form),
         "rc_rows": f.rc_grid(form),
@@ -258,7 +266,7 @@ def assumptions_preview(request, pk):
     never writes (no Deal.save, no AnalysisRun row)."""
     deal = get_object_or_404(Deal, pk=pk)
     form = assumptions_forms.AssumptionsForm(request.POST)
-    form.is_valid()   # populate cleaned_data; preview shows, never blocks
+    ok = form.is_valid()   # populate cleaned_data; preview shows, never blocks
     cleaned = getattr(form, "cleaned_data", None) or {}
     from analysis.financials import analyze_financials
     # A broken/legacy snapshot (or a parse surprise from in-progress form
@@ -269,14 +277,23 @@ def assumptions_preview(request, pk):
         fin = analyze_financials(
             cim, expense_line_overrides=ov.get("expense_line_overrides"))
         strip_ctx = services.model_strip_context(deal, cim, fin, form)
+        # Distinct from preview_error below: the strip DID recompute, but
+        # against a form that failed Django cleaning on at least one field
+        # (e.g. a browser-valid-but-Integer-invalid decimal in a
+        # population field) — is_valid()'s return was previously discarded
+        # entirely, so nothing on screen could ever tell the analyst the
+        # numbers they're looking at didn't fully absorb their last edit.
+        strip_ctx["stale"] = not ok
     except Exception:
         logger.exception("preview financials failed for deal %s", deal.pk)
         strip_ctx = {
             "deal": deal,
-            "population_3mi": None, "median_hhi_3mi": None,
+            "population_3mi": (deal.cim_json or {}).get("population_3mi"),
+            "median_hhi_3mi": (deal.cim_json or {}).get("median_hhi_3mi"),
             "sf_per_capita": None, "sf_per_capita_problem": "unavailable",
             "sf_per_capita_limit": cfg.GATES.get("max_sf_per_capita"),
-            "noi_state": "—", "expense_lines": [],
+            "noi_state": "—", "benchmark_rows": services.stale_benchmark_rows(),
+            "preview_error": True, "stale": False,
         }
     return render(request, "webapp/_model_preview.html", strip_ctx)
 
