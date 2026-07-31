@@ -54,6 +54,9 @@ SS_Returns_Model_*.xlsx
 !.claude/hooks/
 .superpowers/
 
+# Other AI tooling scratch workspaces (plans worth keeping get moved into docs/)
+.kilo/
+
 # Django front end
 db.sqlite3
 staticfiles/
