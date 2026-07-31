@@ -19,6 +19,11 @@ def analyze_rents(cim_data, comp_db=None) -> dict:
     unit_mix = cim_data.unit_mix
     nrsf = cim_data.nrsf
 
+    in_place, in_place_src = _in_place_rent_psf(cim_data)
+    street = cim_data.market_rent_psf
+    gap = (round((street - in_place) / street, 4)
+           if in_place and street and street > 0 else None)
+
     if not unit_mix:
         return {
             "unit_mix_summary": [],
@@ -28,6 +33,9 @@ def analyze_rents(cim_data, comp_db=None) -> dict:
             "rent_gap_analysis": _placeholder_rent_gap(),
             "revenue_concentration": None,
             "narrative": "Unit mix not extracted from CIM — manual review required.",
+            "in_place_avg_rent_psf": in_place,
+            "in_place_rent_source": in_place_src,
+            "rent_gap_pct": gap,
         }
 
     # Analyze each unit type
@@ -78,13 +86,34 @@ def analyze_rents(cim_data, comp_db=None) -> dict:
         "total_monthly_revenue": total_monthly_rev,
         "weighted_avg_rent_per_sf_mo": wavg_rent_per_sf,
         "weighted_avg_rent_per_sf_yr": wavg_rent_per_sf * 12 if wavg_rent_per_sf else None,
-        "rent_gap_analysis": _analyze_rent_gap(cim_data, wavg_rent_per_sf, comp_db),
+        "rent_gap_analysis": _analyze_rent_gap(cim_data, in_place or wavg_rent_per_sf, comp_db),
         "revenue_concentration": {
             "largest_type": max_rev_type,
             "pct_of_revenue": max_rev / total_monthly_rev if total_monthly_rev else None,
         },
         "narrative": _rent_narrative(summary, wavg_rent_per_sf),
+        "in_place_avg_rent_psf": in_place,
+        "in_place_rent_source": in_place_src,
+        "rent_gap_pct": gap,
     }
+
+
+def _in_place_rent_psf(cim_data):
+    """Scheduled (count-weighted) in-place $/SF/mo from the unit mix;
+    analyst override wins. Not occupancy-weighted — unit_mix rates are
+    asking/scheduled rates for ALL units regardless of occupancy, so this
+    is systematically above true occupied in-place rent whenever
+    occupancy < 100%. Supply the true occupied rent via the analyst
+    override field if the comparison needs it."""
+    override = getattr(cim_data, "in_place_avg_rent_psf", None)
+    if override is not None:
+        return override, "override"
+    mix = cim_data.unit_mix or []
+    tot_sf = sum((u.sf or 0) * (u.count or 0) for u in mix)
+    tot_rent = sum((u.rate or 0) * (u.count or 0) for u in mix)
+    if tot_sf > 0 and tot_rent > 0:
+        return round(tot_rent / tot_sf, 2), "derived"
+    return None, None
 
 
 def _estimate_rent_per_sf(cim_data) -> dict:

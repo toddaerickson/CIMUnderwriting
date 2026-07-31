@@ -14,9 +14,16 @@ from config import (EXPENSE_BENCHMARKS, STATE_PROPERTY_TAX_MULTIPLIER,
 from registry import EXPENSE_CATEGORIES, EXPENSE_KEYWORD_MAP, EXPENSE_KEYS
 
 
-def analyze_financials(cim_data, comp_db=None) -> dict:
+def analyze_financials(cim_data, comp_db=None,
+                       expense_line_overrides=None) -> dict:
     """
     Produce financial analysis with benchmarked expenses and adjusted NOI.
+
+    Args:
+        expense_line_overrides: dict[benchmark_key, float] of analyst-
+            entered expense line values (dense model view). These beat
+            the CIM-extracted value for the same line; the benchmark
+            adjustment below still applies on top of the analyst figure.
 
     Returns:
         - income_summary: normalized revenue build-up
@@ -30,7 +37,8 @@ def analyze_financials(cim_data, comp_db=None) -> dict:
     cc_pct = cim_data.cc_pct
     income = _build_income_summary(cim_data)
     expenses = _analyze_expenses(cim_data, nrsf, income.get("egr", 0), state,
-                                 comp_db=comp_db, cc_pct=cc_pct)
+                                 comp_db=comp_db, cc_pct=cc_pct,
+                                 expense_line_overrides=expense_line_overrides)
     adjustments = expenses["adjustments"]
     adjusted_noi = _compute_adjusted_noi(income, expenses, cim_data)
 
@@ -73,7 +81,8 @@ def _build_income_summary(cim_data) -> dict:
 
 
 def _analyze_expenses(cim_data, nrsf: float, egr: float, state: str = "",
-                      comp_db=None, cc_pct: float = None) -> dict:
+                      comp_db=None, cc_pct: float = None,
+                      expense_line_overrides=None) -> dict:
     """
     Analyze each expense line against benchmarks.
 
@@ -101,6 +110,14 @@ def _analyze_expenses(cim_data, nrsf: float, egr: float, state: str = "",
 
     # Map CIM expense lines to benchmark categories
     expense_map = _map_expense_lines(cim_data)
+
+    # Analyst-entered line values beat CIM-extracted ones (model-view
+    # coalesce rule); the benchmark adjustment below applies on top.
+    analyst_keys = set()
+    if expense_line_overrides:
+        for k, v in expense_line_overrides.items():
+            expense_map[k] = v
+            analyst_keys.add(k)
 
     for cat in EXPENSE_CATEGORIES:
         category = cat.display_name
@@ -149,6 +166,8 @@ def _analyze_expenses(cim_data, nrsf: float, egr: float, state: str = "",
                 "formula_tax": formula_tax,
                 "adjusted_value": adjusted or formula_tax,
                 "flag": flag,
+                "source": ("analyst" if benchmark_key in analyst_keys
+                           else ("cim" if cim_value is not None else None)),
             })
             continue
 
@@ -193,6 +212,8 @@ def _analyze_expenses(cim_data, nrsf: float, egr: float, state: str = "",
             "benchmark_mid": bench_mid,
             "adjusted_value": adjusted or bench_low * nrsf,
             "flag": flag,
+            "source": ("analyst" if benchmark_key in analyst_keys
+                       else ("cim" if cim_value is not None else None)),
         })
 
     # Management fee (% of EGR)

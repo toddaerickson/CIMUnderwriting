@@ -339,3 +339,85 @@ def test_msa_edit_alone_does_not_restamp_verification_location():
     assert f3.is_valid(), f3.errors
     out3 = build_overrides(f3.cleaned_data, QueryDict(""), deal)
     assert out3["cim_overrides"]["market_verified_location"] == "Abilene, TX"
+
+
+@pytest.mark.django_db
+def test_new_driver_fields_roundtrip_and_old_snapshots():
+    """Rate/momentum drivers survive save/initial plumbing; snapshots
+    written before the fields existed resolve to None."""
+    from django.http import QueryDict
+    from webapp.forms import AssumptionsForm, build_initial, build_overrides
+    from webapp.models import Deal
+
+    deal = Deal.objects.create(deal_id="drv", property_name="D",
+                               cim_json={"property_name": "D"})
+    init = build_initial(deal)
+    assert init["in_place_avg_rent_psf"] is None
+    assert init["street_rate_trend"] is None
+    assert init["t3_annualized_revenue"] is None
+
+    form = AssumptionsForm(data={"in_place_avg_rent_psf": "1.15",
+                                 "street_rate_trend": "falling",
+                                 "t3_annualized_revenue": "540000"})
+    assert form.is_valid(), form.errors
+    out = build_overrides(form.cleaned_data, QueryDict(""), deal)
+    assert out["cim_overrides"]["in_place_avg_rent_psf"] == 1.15
+    assert out["cim_overrides"]["street_rate_trend"] == "falling"
+    assert out["cim_overrides"]["t3_annualized_revenue"] == 540000.0
+
+    assert not AssumptionsForm(data={"street_rate_trend": "sideways"}).is_valid()
+
+
+@pytest.mark.django_db
+def test_expense_line_overrides_roundtrip():
+    from django.http import QueryDict
+    from webapp.forms import AssumptionsForm, build_initial, build_overrides
+    from webapp.models import Deal
+
+    deal = Deal.objects.create(deal_id="exp", property_name="E",
+                               cim_json={"property_name": "E"})
+    form = AssumptionsForm(data={"exp_property_tax": "55405",
+                                 "exp_payroll": "12600"})
+    assert form.is_valid(), form.errors
+    out = build_overrides(form.cleaned_data, QueryDict(""), deal)
+    assert out["expense_line_overrides"] == {"property_tax": 55405.0,
+                                             "payroll": 12600.0}
+    # blanks mean no override; empty dict key entirely absent
+    f2 = AssumptionsForm(data={})
+    assert f2.is_valid()
+    assert "expense_line_overrides" not in build_overrides(
+        f2.cleaned_data, QueryDict(""), deal)
+    # negative rejected by field validation
+    assert not AssumptionsForm(data={"exp_insurance": "-5"}).is_valid()
+    # saved values round-trip into initial
+    deal.assumption_overrides = out
+    deal.save()
+    assert build_initial(deal)["exp_property_tax"] == 55405.0
+
+
+@pytest.mark.django_db
+def test_model_rows_extracted_and_source_columns():
+    """model_rows()/_display_value() had zero direct tests — they ARE the
+    auditability trace surface (CLAUDE.md: every value a user sees should
+    be traceable to its formula + source + raw inputs), rendered on both
+    the Drivers and Demographics sections of the assumptions page.
+    Verified against two mutants in a scratch copy, each 203/203 with
+    every other test green: (a) deleting the CIM_PCT_FIELDS decimal->
+    whole-number conversion before the snap/current comparison — makes
+    every untouched percent driver misreport 'source': 'you' on first
+    load; (b) reducing _display_value to `return v` — breaks the comma-
+    grouped Extracted column."""
+    from webapp.forms import (SECTION_DRIVERS, AssumptionsForm, build_initial,
+                              model_rows)
+    from webapp.models import Deal
+
+    deal = Deal.objects.create(
+        deal_id="mr", property_name="MR",
+        cim_json={"property_name": "MR", "physical_occupancy": 0.92,
+                  "asking_price": 3_500_000.0})
+    form = AssumptionsForm(initial=build_initial(deal))
+    rows = {r["label"]: r for r in
+            model_rows(form, SECTION_DRIVERS, deal.cim_json, {})}
+    assert rows["Physical Occupancy (%)"]["extracted"] == "92"
+    assert rows["Physical Occupancy (%)"]["source"] == "CIM"
+    assert rows["Asking Price ($)"]["extracted"] == "3,500,000"

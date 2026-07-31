@@ -7,6 +7,7 @@ Conversion happens ONLY in build_initial (×100) and build_overrides
 the raw submitted strings untouched.
 """
 import logging
+import math
 
 from django import forms
 from django.utils import timezone
@@ -46,7 +47,7 @@ VA_PARAMS = [p for p, _ in VA_PARAM_LABELS]
 VA_NON_PCT = {"months_to_stabilize"}
 
 CIM_CHAR_FIELDS = ["property_name", "address", "city", "state", "msa",
-                   "market_verification"]
+                   "market_verification", "street_rate_trend"]
 CIM_INT_FIELDS = ["year_built", "year_expanded", "total_units",
                   "population_1mi", "population_3mi", "population_5mi"]
 CIM_FLOAT_FIELDS = ["acreage", "nrsf", "ss_driveup_sf", "ss_enclosed_sf",
@@ -54,7 +55,8 @@ CIM_FLOAT_FIELDS = ["acreage", "nrsf", "ss_driveup_sf", "ss_enclosed_sf",
                     "asking_price", "capex_estimate", "ttm_gpr", "other_income",
                     "ttm_egr", "ttm_total_revenue", "ttm_total_expenses",
                     "cim_yr1_noi", "ttm_noi", "median_hhi_3mi", "market_rent_psf",
-                    "competitive_supply_sf_3mi", "pipeline_supply_sf_3mi"]
+                    "competitive_supply_sf_3mi", "pipeline_supply_sf_3mi",
+                    "in_place_avg_rent_psf", "t3_annualized_revenue"]
 
 # Gate-7 analyst resolution: the auto top-50 substring match can't see
 # "strong secondary market" (a criteria-sanctioned pass) — the analyst
@@ -64,6 +66,13 @@ MARKET_VERIFICATION_CHOICES = [
     ("top_50", "Top-50 MSA (verified)"),
     ("strong_secondary", "Strong secondary market"),
     ("neither", "Neither — fails gate"),
+]
+
+STREET_RATE_TREND_CHOICES = [
+    ("", "Unknown"),
+    ("rising", "Rising"),
+    ("flat", "Flat"),
+    ("falling", "Falling"),
 ]
 CIM_PCT_FIELDS = ["cc_pct", "physical_occupancy", "economic_occupancy", "mgmt_fee_pct"]
 CIM_SCALAR_FIELDS = CIM_CHAR_FIELDS + CIM_INT_FIELDS + CIM_FLOAT_FIELDS + CIM_PCT_FIELDS
@@ -78,17 +87,15 @@ SECTION_PROPERTY = [
     ("city", "City"), ("state", "State"), ("msa", "MSA"),
     ("year_built", "Year Built"), ("year_expanded", "Year Expanded"),
     ("acreage", "Acreage"),
+    ("market_verification", "Market Verification (Gate 7)"),
 ]
 SECTION_SIZE = [
     ("nrsf", "NRSF"), ("total_units", "Total Units"), ("cc_pct", "CC (%)"),
-    ("physical_occupancy", "Physical Occupancy (%)"),
-    ("economic_occupancy", "Economic Occupancy (%)"),
     ("ss_driveup_sf", "SS Drive-Up SF"), ("ss_enclosed_sf", "SS Enclosed SF"),
     ("brv_enclosed_sf", "BRV Enclosed SF"), ("brv_covered_sf", "BRV Covered SF"),
     ("brv_open_sf", "BRV Open Parking SF"),
 ]
 SECTION_INCOME = [
-    ("asking_price", "Asking Price ($)"), ("capex_estimate", "CapEx Estimate ($)"),
     ("ttm_gpr", "Gross Potential Rent ($)"), ("other_income", "Other Income ($)"),
     ("ttm_egr", "Effective Gross Revenue ($)"), ("ttm_total_revenue", "Total Revenue ($)"),
     ("ttm_total_expenses", "Total Expenses ($)"), ("cim_yr1_noi", "CIM Year 1 NOI ($)"),
@@ -97,10 +104,26 @@ SECTION_INCOME = [
 SECTION_DEMOGRAPHICS = [
     ("population_1mi", "Population 1-mi"), ("population_3mi", "Population 3-mi"),
     ("population_5mi", "Population 5-mi"), ("median_hhi_3mi", "Median HHI 3-mi ($)"),
-    ("market_rent_psf", "Market Rent ($/SF/mo)"),
-    ("competitive_supply_sf_3mi", "Competitive Supply SF (3-mi, excl. subject)"),
+]
+# Dense-model-view drivers: the fields that actually move the screen/IRR
+# outcome, surfaced as their own vertical block (model_rows()) right after
+# Property so the analyst sees them before anything else. Supersedes their
+# Task-1 temporary homes in SECTION_INCOME/SECTION_SIZE/SECTION_DEMOGRAPHICS
+# — each field lives in exactly one section now.
+SECTION_DRIVERS = [
+    ("asking_price", "Asking Price ($)"), ("capex_estimate", "CapEx Estimate ($)"),
+    ("physical_occupancy", "Physical Occupancy (%)"),
+    ("economic_occupancy", "Economic Occupancy (%)"),
+    ("market_rent_psf", "Street Rate ($/SF/mo)"),
+    ("in_place_avg_rent_psf", "In-Place Rent ($/SF/mo)"),
+    ("street_rate_trend", "Street-Rate Trend"),
+    ("t3_annualized_revenue", "T3 Annualized Revenue ($)"),
+    # Excludes the subject property — matches the SF/capita gate's own
+    # inputs (analysis.filters.sf_per_capita_inputs adds subject SF back
+    # in separately). Kept short here to fit the dense row; the full
+    # "excl. subject" caveat lives in this comment, not the label.
+    ("competitive_supply_sf_3mi", "Competitive Supply SF (3-mi)"),
     ("pipeline_supply_sf_3mi", "Pipeline SF (3-mi)"),
-    ("market_verification", "Market Verification (Gate 7)"),
 ]
 
 INPUT_CSS = "w-full border border-slate-300 rounded px-2 py-1 text-sm"
@@ -153,12 +176,19 @@ class AssumptionsForm(forms.Form):
             for bound in ("low", "high"):
                 self.fields[f"rc_{key}_{bound}"] = forms.FloatField(
                     required=False, min_value=0, widget=_num())
+        from registry import EXPENSE_KEYS
+        for key in EXPENSE_KEYS:
+            self.fields[f"exp_{key}"] = forms.FloatField(
+                required=False, min_value=0, widget=_num())
         self.fields["solver_target_irr"] = forms.FloatField(
             required=False, min_value=0, widget=_num())
         # Declared in CIM_CHAR_FIELDS for the save/initial plumbing, but
         # rendered as a constrained dropdown, not free text.
         self.fields["market_verification"] = forms.ChoiceField(
             required=False, choices=MARKET_VERIFICATION_CHOICES,
+            widget=forms.Select(attrs={"class": INPUT_CSS}))
+        self.fields["street_rate_trend"] = forms.ChoiceField(
+            required=False, choices=STREET_RATE_TREND_CHOICES,
             widget=forms.Select(attrs={"class": INPUT_CSS}))
         self.fields["accept_noi_discrepancy"] = forms.BooleanField(
             required=False,
@@ -252,6 +282,8 @@ def build_initial(deal, eff=None) -> dict:
         initial[f"rc_{key}_high"] = round(float(high), 4)
     initial["solver_target_irr"] = _pct_display(
         saved.get("solver_target_irr", eff["SOLVER_TARGET_IRR"]))
+    for key, val in (saved.get("expense_line_overrides") or {}).items():
+        initial[f"exp_{key}"] = val
     return initial
 
 
@@ -285,6 +317,50 @@ def unit_mix_rows(deal) -> list[dict]:
 def section_fields(form, pairs, missing_required):
     return [{"bf": form[name], "label": label,
              "flag": name in missing_required} for name, label in pairs]
+
+
+def _display_value(v):
+    """Comma-grouped, trailing-zero-trimmed string for a raw snapshot
+    value (model_rows' read-only 'extracted' column); non-numeric values
+    (e.g. street_rate_trend's "rising") pass through unchanged."""
+    if v is None or isinstance(v, bool) or not isinstance(v, (int, float)):
+        return v
+    return f"{v:,.2f}".rstrip("0").rstrip(".")
+
+
+def model_rows(form, pairs, snapshot, source_log=None):
+    """Vertical driver rows: label | extracted (read-only) | input.
+    source: 'you' when the bound/initial value differs from snapshot;
+    'Census' when the snapshot value was tier-2 enrichment (extract-time
+    enrichment runs BEFORE the snapshot is saved, so Census fills live
+    inside cim_json — the run payload's enrichment.source_log is the
+    only way to tell them from CIM-extracted values).
+
+    Percent fields (physical_occupancy etc.) are stored as decimals
+    (0.92) in the snapshot but displayed/submitted as whole numbers (92)
+    everywhere else on this page (build_initial/build_overrides) — snap
+    is converted the same way BEFORE comparing/displaying, or every
+    percent driver would show a decimal next to its whole-number input
+    and read as "you edited this" on every load.
+    """
+    source_log = source_log or {}
+    rows = []
+    for name, label in pairs:
+        snap = snapshot.get(name)
+        if name in CIM_PCT_FIELDS and snap is not None:
+            snap = _pct_display(snap)
+        bf = form[name]
+        cur = bf.value()
+        if cur not in (None, "", snap):
+            src = "you"
+        elif snap is not None:
+            src = ("Census" if source_log.get(name, {}).get("tier") == 2
+                   else "CIM")
+        else:
+            src = ""
+        rows.append({"label": label, "bf": bf,
+                     "extracted": _display_value(snap), "source": src})
+    return rows
 
 
 def scenario_grid(form):
@@ -325,7 +401,16 @@ def parse_unit_mix(post) -> list[dict] | None:
             count = int(float(count or 0))
             sf = float(sf or 0)
             rate = float(rate or 0)
-        except ValueError:
+            if not (math.isfinite(sf) and math.isfinite(rate)):
+                # "inf"/"nan"/"1e400"-style values float-parse cleanly (no
+                # ValueError) but would propagate inf/nan into NOI math
+                # downstream — treat them as invalid the same way a
+                # non-numeric string is.
+                raise ValueError("non-finite sf/rate")
+        except (ValueError, OverflowError):
+            # OverflowError: int(float("inf")) — a Count value that
+            # float-parses to infinity ("inf"/"Infinity"/"1e400") raises
+            # OverflowError, not ValueError, on the int() conversion.
             logger.warning(
                 "unit-mix row dropped on save (non-numeric values): "
                 "label=%r count=%r sf=%r rate=%r", label, count, sf, rate)
@@ -417,6 +502,12 @@ def build_overrides(cleaned, post, deal, eff=None) -> dict:
         delta = round(rev - exp - noi, 2)
         if abs(delta) > noi_recon_tolerance(rev):
             out["noi_reconciliation"] = {"accepted": True, "delta": delta}
+
+    from registry import EXPENSE_KEYS
+    exp_o = {k: cleaned[f"exp_{k}"] for k in EXPENSE_KEYS
+             if cleaned.get(f"exp_{k}") is not None}
+    if exp_o:
+        out["expense_line_overrides"] = exp_o
 
     scen = _submitted_sections(cleaned, "scen", SCENARIO_PARAMS, eff["SCENARIO_DEFAULTS"])
     if scen != _rounded_sections(eff["SCENARIO_DEFAULTS"], SCENARIO_PARAMS):

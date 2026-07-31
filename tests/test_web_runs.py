@@ -233,13 +233,15 @@ def fake_run(monkeypatch):
     calls = {}
 
     def _fake(result, progress=None, output_dir=None, custom_scenarios=None,
-              custom_va_scenarios=None, solver_target_irr=None, enrich=False):
+              custom_va_scenarios=None, solver_target_irr=None, enrich=False,
+              expense_line_overrides=None):
         calls["cim_data"] = result.cim_data
         calls["output_dir"] = output_dir
         calls["custom_scenarios"] = custom_scenarios
         calls["custom_va_scenarios"] = custom_va_scenarios
         calls["solver_target_irr"] = solver_target_irr
         calls["enrich"] = enrich
+        calls["expense_line_overrides"] = expense_line_overrides
         if progress:
             progress(9, 9, "Generating memo & model...")
         name = result.cim_data.property_name.replace(" ", "_")
@@ -317,6 +319,7 @@ def test_worker_success_updates_run_and_deal(deals_dir, fake_run):
         "va_scenario_overrides": {"base": {"target_occupancy": 0.9}},
         "replacement_cost_overrides": {"ss_driveup_per_sf": [100, 120]},
         "solver_target_irr": 0.12,
+        "expense_line_overrides": {"payroll": 12600.0},
     }
     deal.save()
     run = _start_run(deal)
@@ -338,6 +341,7 @@ def test_worker_success_updates_run_and_deal(deals_dir, fake_run):
     assert fake_run["output_dir"] == deal.deal_dir
     # The web path must re-run enrichment (post-assumptions Census pass)
     assert fake_run["enrich"] is True
+    assert fake_run["expense_line_overrides"] == {"payroll": 12600.0}
 
     deal.refresh_from_db()
     assert deal.recommendation == "PURSUE"

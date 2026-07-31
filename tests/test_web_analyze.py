@@ -2,6 +2,7 @@
 import datetime
 import json
 import os
+import re
 
 import pytest
 from django.core.files.uploadedfile import SimpleUploadedFile
@@ -62,6 +63,24 @@ def test_cim_from_dict_ignores_unknown_keys():
     d = cim_to_dict(_sample_cim())
     d["some_removed_field"] = 1
     assert cim_from_dict(d).property_name == "Expo Storage"
+
+
+def test_cim_from_dict_ignores_unknown_nested_keys():
+    """Schema drift INSIDE a nested unit_mix/income_lines/expense_lines
+    row (not just a top-level CIMData field) must not crash rehydration
+    either — the nested splat used to be unfiltered (UnitType(**u) with
+    every raw dict key), so a single stray key in a hand-edited or legacy
+    snapshot raised a bare TypeError. expense_benchmark_rows() calls
+    cim_from_dict a second time OUTSIDE the deal_assumptions try/except,
+    so this reached the analyst as a real HTTP 500, not the page's
+    documented 'a broken/legacy snapshot must not 500 the page' fallback.
+    """
+    from webapp.services import cim_from_dict, cim_to_dict
+    d = cim_to_dict(_sample_cim())
+    d["unit_mix"][0]["legacy_col"] = 1
+    restored = cim_from_dict(d)
+    assert restored.unit_mix[0].size_label == "10x10"
+    assert len(restored.unit_mix) == 2
 
 
 @pytest.fixture
@@ -459,6 +478,38 @@ def test_saved_values_render_on_next_get(client, operator, deals_dir, fake_extra
     assert b'value="85' in resp.content
 
 
+def test_in_place_rent_and_gap(mock_cim_data):
+    from analysis.rent_analysis import analyze_rents
+    from extract.parser import UnitType
+
+    mock_cim_data.unit_mix = [
+        UnitType(size_label="10x10", sf=100.0, count=100, rate=95.0),
+        UnitType(size_label="10x20", sf=200.0, count=50, rate=160.0),
+    ]
+    mock_cim_data.market_rent_psf = 1.20   # street rate
+    r = analyze_rents(mock_cim_data)
+    # (95*100 + 160*50) / (100*100 + 200*50) = 17,500 / 20,000 = 0.875
+    assert r["in_place_avg_rent_psf"] == 0.88
+    assert r["in_place_rent_source"] == "derived"
+    assert r["rent_gap_pct"] == round((1.20 - 0.88) / 1.20, 4)
+
+    mock_cim_data.in_place_avg_rent_psf = 1.00   # analyst override wins
+    r2 = analyze_rents(mock_cim_data)
+    assert r2["in_place_avg_rent_psf"] == 1.00
+    assert r2["in_place_rent_source"] == "override"
+
+
+def test_in_place_rent_none_when_no_unit_mix_or_override(mock_cim_data):
+    """Empty unit mix (early-return branch) must not KeyError or divide by zero."""
+    from analysis.rent_analysis import analyze_rents
+
+    mock_cim_data.unit_mix = []
+    r = analyze_rents(mock_cim_data)
+    assert r["in_place_avg_rent_psf"] is None
+    assert r["in_place_rent_source"] is None
+    assert r["rent_gap_pct"] is None
+
+
 def test_parse_unit_mix_logs_dropped_rows(caplog):
     """A non-numeric row is skipped, but never silently (audit check 3)."""
     from django.http import QueryDict
@@ -474,3 +525,292 @@ def test_parse_unit_mix_logs_dropped_rows(caplog):
         rows = parse_unit_mix(post)
     assert len(rows) == 1
     assert "unit-mix row dropped" in caplog.text
+
+
+# ── T6: live-preview endpoint (server-computed htmx partial) ───────────
+
+@pytest.mark.django_db
+def test_assumptions_preview_contract(client, django_user_model, settings, tmp_path):
+    from webapp.models import AnalysisRun, Deal
+    settings.CIM_DEALS_DIR = str(tmp_path)
+    user = django_user_model.objects.create_user(username="op", password="x")
+    client.force_login(user)
+    deal = Deal.objects.create(
+        deal_id="pv", property_name="PV",
+        cim_json={"property_name": "PV", "state": "TX", "nrsf": 50_000.0,
+                  "population_3mi": 75_000, "ttm_egr": 550_000.0})
+    runs_before = AnalysisRun.objects.count()
+
+    resp = client.post(f"/deals/{deal.pk}/assumptions/preview/", {
+        "competitive_supply_sf_3mi": "300000",
+        "population_3mi": "75000",
+        "ttm_total_revenue": "560000", "ttm_total_expenses": "220000",
+        "ttm_noi": "340000",
+    })
+    assert resp.status_code == 200
+    html = resp.content.decode()
+    # (300k competitive + 0 pipeline + 50k subject) / 75k pop = 4.6667,
+    # floatformat:1 renders "4.7" — NOT "7.0" (the sketch's number didn't
+    # match its own stated inputs; fixed here to the true arithmetic).
+    assert "4.7" in html
+    assert 'id="model-strip"' in html
+    assert 'id="noi-chip"' in html
+    # A balanced triple (560000 - 220000 = 340000) must chip "ok" — not
+    # just an id-only check, since a hardcoded noi_state="—" or noi_state
+    # ="ok" both leave every id-only assertion on this page green
+    # (verified: either mutant, full suite still 203/203).
+    assert re.search(r'id="noi-chip"[^>]*>([^<]*)<', html).group(1) == "ok"
+    # preview must never write
+    assert AnalysisRun.objects.count() == runs_before
+    deal.refresh_from_db()
+    # Deal.assumption_overrides defaults to {} (JSONField default=dict,
+    # not nullable) — confirming it's still the untouched default is the
+    # "never writes" check, not an `is None` comparison.
+    assert deal.assumption_overrides == {}
+
+    assert client.get(f"/deals/{deal.pk}/assumptions/preview/").status_code == 405
+
+
+@pytest.mark.django_db
+def test_preview_renders_computed_values_not_the_fallback(client, django_user_model,
+                                                           settings, tmp_path):
+    """id="model-strip"/id="noi-chip"/id="exp-used-*" containers render on
+    BOTH a real compute and the preview_error crash fallback — they were
+    the only assertions this page had, so a bug that blanks a value or
+    drops an input to a benchmark floor left every existing test green
+    (verified by mutation in a scratch copy: reverting the T9 unit-mix
+    guards, either NOI-chip branch, or the preview's
+    expense_line_overrides pass-through all left 203/203 passing). This
+    test checks the VALUE inside those ids, and — via accept_noi_
+    discrepancy — also proves the preview didn't degrade to the fallback
+    on the non-finite unit-mix row (T9)."""
+    settings.CIM_DEALS_DIR = str(tmp_path)
+    user = django_user_model.objects.create_user(username="op", password="x")
+    client.force_login(user)
+    from webapp.models import Deal
+    deal = Deal.objects.create(
+        deal_id="cmb", property_name="CMB", extract_status="done",
+        cim_json={"property_name": "CMB", "state": "TX", "nrsf": 50_000.0,
+                  "population_3mi": 75_000, "competitive_supply_sf_3mi": 250_000.0,
+                  "pipeline_supply_sf_3mi": 0.0})
+
+    resp = client.post(f"/deals/{deal.pk}/assumptions/preview/", {
+        "ttm_total_revenue": "560000", "ttm_total_expenses": "220000",
+        "ttm_noi": "300000", "accept_noi_discrepancy": "on",
+        "exp_property_tax": "150000",
+        "um_label": ["10x10"], "um_count": ["inf"], "um_sf": ["100"],
+        "um_rate": ["95"], "um_cc": ["0"],
+    })
+    assert resp.status_code == 200
+    html = resp.content.decode()
+    assert "Preview unavailable" not in html   # not the preview_error fallback
+    # (250k competitive + 0 pipeline + 50k subject) / 75k pop = 4.0 —
+    # strip recomputed, not the em-dash fallback.
+    assert "4.0" in html
+    # 560000 - 220000 - 300000 = -40000, off by $40,000 (accepted, so
+    # is_valid() still True — the mismatch is a real analyst-visible
+    # figure, not a validation block).
+    assert re.search(r'id="noi-chip"[^>]*>([^<]*)<', html).group(1) == "off by $40,000"
+    # analyst's $150,000 property-tax entry beats the CIM/benchmark
+    # figure (TX formula: ~$68.8k) — the preview's expense_line_overrides
+    # pass-through must actually reach analyze_financials.
+    assert re.search(r'id="exp-used-property_tax"[^>]*>([^<]*)<',
+                     html).group(1) == "$150000"
+
+
+@pytest.mark.django_db
+def test_assumptions_get_reflects_saved_expense_override(client, django_user_model,
+                                                          settings, tmp_path):
+    """GET first-paint twin of the preview test above — the only
+    assertion that kills the views.py first-paint expense_line_overrides
+    mutant (verified in a scratch copy: reverting the preview's pass-
+    through and reverting this GET path's are two INDEPENDENT mutations,
+    each 203/203 with no other test noticing)."""
+    settings.CIM_DEALS_DIR = str(tmp_path)
+    user = django_user_model.objects.create_user(username="op", password="x")
+    client.force_login(user)
+    from webapp.models import Deal
+    deal = Deal.objects.create(
+        deal_id="exp-ov", property_name="EXP-OV", extract_status="done",
+        cim_json={"property_name": "EXP-OV", "state": "TX", "nrsf": 50_000.0,
+                  "population_3mi": 75_000, "ttm_noi": 300_000.0},
+        assumption_overrides={"expense_line_overrides": {"property_tax": 150_000.0}})
+    resp = client.get(f"/deals/{deal.pk}/assumptions/")
+    assert resp.status_code == 200
+    html = resp.content.decode()
+    assert re.search(r'id="exp-used-property_tax"[^>]*>([^<]*)<',
+                     html).group(1) == "$150000"
+
+
+# ── T7: vertical model view (template rebuild) ──────────────────────────
+
+@pytest.mark.django_db
+def test_model_view_renders_all_regions(client, django_user_model, settings, tmp_path):
+    settings.CIM_DEALS_DIR = str(tmp_path)
+    user = django_user_model.objects.create_user(username="op", password="x")
+    client.force_login(user)
+    from webapp.models import Deal
+    deal = Deal.objects.create(
+        deal_id="mv", property_name="MV", extract_status="done",
+        cim_json={"property_name": "MV", "state": "TX", "nrsf": 50_000.0,
+                  "expense_lines": [], "population_3mi": 75_000})
+    resp = client.get(f"/deals/{deal.pk}/assumptions/")
+    html = resp.content.decode()
+    assert resp.status_code == 200
+    for marker in ('id="model-strip"', "Street Rate ($/SF/mo)",
+                   "In-Place Rent ($/SF/mo)", "T3 Annualized Revenue",
+                   'name="exp_property_tax"', 'id="exp-used-property_tax"',
+                   "hx-post", "Save &amp; Run Analysis"):
+        assert marker in html, marker
+
+
+@pytest.mark.django_db
+def test_model_view_get_reflects_saved_overrides(client, django_user_model,
+                                                  settings, tmp_path):
+    """First paint must show the SAVED-override state, not the raw CIM
+    snapshot — regression for build_preview_cim(deal, {}, ...) dropping
+    every saved cim_override because an empty `cleaned` short-circuits
+    build_overrides' delta loop (cleaned.get(name) is always None)."""
+    settings.CIM_DEALS_DIR = str(tmp_path)
+    user = django_user_model.objects.create_user(username="op", password="x")
+    client.force_login(user)
+    from webapp.models import Deal
+    deal = Deal.objects.create(
+        deal_id="mv-ov", property_name="MV-OV", extract_status="done",
+        cim_json={"property_name": "MV-OV", "state": "TX", "nrsf": 50_000.0,
+                  "expense_lines": [], "population_3mi": 75_000,
+                  "competitive_supply_sf_3mi": 300_000.0,
+                  "pipeline_supply_sf_3mi": 0.0},
+        # Analyst previously saved a much higher competitive-supply figure.
+        # Pre-override SF/capita: (300k + 0 + 50k) / 75k = 4.6667 -> "4.7".
+        # Post-override SF/capita: (700k + 0 + 50k) / 75k = 10.0 -> "10.0".
+        assumption_overrides={
+            "cim_overrides": {"competitive_supply_sf_3mi": 700_000.0}})
+    resp = client.get(f"/deals/{deal.pk}/assumptions/")
+    html = resp.content.decode()
+    assert resp.status_code == 200
+    assert "10.0" in html
+    assert "4.7" not in html
+
+
+# ── T9: non-finite unit-mix values must not 500 ────────────────────────
+#
+# A Count value that float-parses to infinity ("inf"/"Infinity"/"1e400")
+# raises OverflowError on int(float(count)) — the old `except ValueError`
+# didn't catch it, so it 500'd both Save and the live preview (which
+# fires on every keystroke). An SF/rate of "inf"/"nan" doesn't raise at
+# all; it float-parses cleanly and would propagate into NOI arithmetic
+# instead. Both must take the same drop-the-row fallback as a plain
+# non-numeric string.
+
+def test_parse_unit_mix_drops_non_finite_values(caplog):
+    from django.http import QueryDict
+
+    from webapp.forms import parse_unit_mix
+
+    post = QueryDict(mutable=True)
+    post.setlist("um_label", ["10x10", "10x20", "10x30"])
+    post.setlist("um_count", ["inf", "50", "40"])      # OverflowError on int()
+    post.setlist("um_sf", ["100", "inf", "150"])        # parses, never raises
+    post.setlist("um_rate", ["95", "165", "125"])
+    post.setlist("um_cc", ["0", "0", "0"])
+    with caplog.at_level("WARNING", logger="cim_analyst.web"):
+        rows = parse_unit_mix(post)
+    assert len(rows) == 1
+    assert rows[0]["size_label"] == "10x30"
+    assert caplog.text.count("unit-mix row dropped") == 2
+
+
+@pytest.mark.django_db
+def test_save_unit_mix_with_non_finite_values_does_not_500(client, operator,
+                                                           deals_dir, fake_extract):
+    deal = _extracted_deal(client, deals_dir, fake_extract)
+    resp = _post_assumptions(client, deal, {
+        "um_count": ["inf", "50"],   # row 0: infinite count
+        "um_sf": ["100", "inf"],     # row 1: infinite sf
+    })
+    assert resp.status_code == 302
+    deal.refresh_from_db()
+    assert deal.assumption_overrides["cim_overrides"]["unit_mix"] == []
+
+
+@pytest.mark.django_db
+def test_assumptions_preview_survives_non_finite_unit_mix(client, django_user_model,
+                                                           settings, tmp_path):
+    """The preview fires on every form change (400ms delay) — one bad
+    value must not freeze the model strip for the whole session.
+
+    'id="model-strip"' in the response is NOT proof of that: the
+    preview_error fallback strip carries the same id (default:"—" em-dash
+    everywhere) — this passed even with BOTH T9 guards reverted (203
+    tests, verified in a scratch copy of the repo). Asserting the actual
+    recomputed SF/capita figure is what distinguishes 'recovered and
+    recomputed' from 'silently degraded to the crash fallback'.
+    """
+    settings.CIM_DEALS_DIR = str(tmp_path)
+    user = django_user_model.objects.create_user(username="op", password="x")
+    client.force_login(user)
+    from webapp.models import Deal
+    deal = Deal.objects.create(
+        deal_id="pv-inf", property_name="PV-INF", extract_status="done",
+        cim_json={"property_name": "PV-INF", "state": "TX", "nrsf": 50_000.0,
+                  "population_3mi": 75_000, "competitive_supply_sf_3mi": 250_000.0,
+                  "pipeline_supply_sf_3mi": 0.0})
+
+    resp = client.post(f"/deals/{deal.pk}/assumptions/preview/", {
+        "um_label": ["10x10"], "um_count": ["inf"], "um_sf": ["100"],
+        "um_rate": ["95"], "um_cc": ["0"],
+    })
+    assert resp.status_code == 200
+    assert 'id="model-strip"' in resp.content.decode()
+    assert "4.0" in resp.content.decode()
+
+    resp2 = client.post(f"/deals/{deal.pk}/assumptions/preview/", {
+        "um_label": ["10x10"], "um_count": ["100"], "um_sf": ["inf"],
+        "um_rate": ["95"], "um_cc": ["0"],
+    })
+    assert resp2.status_code == 200
+    assert 'id="model-strip"' in resp2.content.decode()
+    assert "4.0" in resp2.content.decode()
+
+
+@pytest.mark.django_db
+def test_assumptions_preview_degrades_on_unexpected_error(client, django_user_model,
+                                                          settings, tmp_path,
+                                                          monkeypatch):
+    """Defense-in-depth: assumptions_preview must degrade to the fallback
+    model-strip context (never 500) on ANY unexpected build_preview_cim
+    failure — same resilience posture as deal_assumptions' first-paint
+    strip, for parse surprises beyond the unit-mix fix above."""
+    settings.CIM_DEALS_DIR = str(tmp_path)
+    user = django_user_model.objects.create_user(username="op", password="x")
+    client.force_login(user)
+    from webapp import services
+    from webapp.models import Deal
+    deal = Deal.objects.create(
+        deal_id="pv-boom", property_name="PV-BOOM", extract_status="done",
+        cim_json={"property_name": "PV-BOOM", "state": "TX", "nrsf": 50_000.0,
+                  "population_3mi": 75_000})
+
+    def _boom(*a, **k):
+        raise RuntimeError("simulated parse surprise")
+
+    monkeypatch.setattr(services, "build_preview_cim", _boom)
+    resp = client.post(f"/deals/{deal.pk}/assumptions/preview/", {})
+    assert resp.status_code == 200
+    html = resp.content.decode()
+    assert 'id="model-strip"' in html
+    assert 'id="noi-chip"' in html
+    # The crash fallback must carry a visible signal — a generic "—"
+    # strip is byte-identical to a legitimate empty-state deal otherwise
+    # (operator rule: a "No data" empty state must not hide a real
+    # failure). role="alert" is the analyst-visible marker.
+    assert 'role="alert"' in html
+    assert "Preview unavailable" in html
+    # NOI chip must not paint the crash's "—" in the pass (emerald) colour.
+    assert re.search(r'id="noi-chip" class="([^"]*)"', html).group(1) == \
+        "font-semibold text-slate-400"
+    # Every expense OOB cell blanks to the em-dash, not a stale number from
+    # a previous successful compute.
+    assert re.search(r'id="exp-used-property_tax"[^>]*>([^<]*)<',
+                     html).group(1) == "&mdash;"

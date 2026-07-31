@@ -1,0 +1,58 @@
+<div id="model-strip" class="grid grid-cols-2 sm:grid-cols-4 gap-2 text-sm">
+  <div>
+    <span class="text-xs uppercase tracking-wide text-slate-500 block">Population 3-mi</span>
+    <span class="font-semibold">{{ population_3mi|default:"—" }}</span>
+  </div>
+  <div>
+    <span class="text-xs uppercase tracking-wide text-slate-500 block">SF / capita (≤ {{ sf_per_capita_limit }})</span>
+    {% if sf_per_capita is not None %}
+      <span class="font-semibold {% if sf_per_capita > sf_per_capita_limit %}text-red-700{% else %}text-emerald-700{% endif %}">{{ sf_per_capita|floatformat:1 }}</span>
+    {% else %}
+      <span class="text-slate-400" title="{{ sf_per_capita_problem }}">—</span>
+    {% endif %}
+  </div>
+  <div>
+    <span class="text-xs uppercase tracking-wide text-slate-500 block">Median HHI 3-mi</span>
+    <span class="font-semibold">{{ median_hhi_3mi|default:"—" }}</span>
+  </div>
+  <div>
+    <span class="text-xs uppercase tracking-wide text-slate-500 block">Rev − Exp = NOI</span>
+    <span id="noi-chip" class="font-semibold {% if noi_state == 'ok' %}text-emerald-700{% elif noi_state == '—' %}text-slate-400{% else %}text-amber-700{% endif %}">{{ noi_state }}</span>
+  </div>
+  {% if preview_error %}
+  <div class="col-span-2 sm:col-span-4 text-xs font-semibold text-red-700" role="alert">Preview unavailable — these figures did not recompute.</div>
+  {% endif %}
+  {% if stale %}
+  <div class="col-span-full text-xs text-amber-700">Showing last valid values — one or more inputs could not be read.</div>
+  {% endif %}
+  {% comment %} These spans exist only as out-of-band swap targets for the
+     benchmark table's exp-cim-*/exp-low-*/exp-high-*/exp-used-*/exp-flag-*
+     cells (Income & Expenses section) — never meant to be seen here.
+     `benchmark_rows` (services.expense_benchmark_rows, via
+     model_strip_context) is the SAME list the table itself renders from —
+     looping the engine's raw expense_analysis lines here instead used to
+     desync the two (different row count/keys, class recomputed twice),
+     which is why the flag colour and the mgmt-fee line used to break on
+     swap; single source now. Nested (a `hidden` grid child is dropped
+     from grid layout, no visual effect) rather than a sibling after
+     #model-strip's closing tag so it rides inside the same
+     hx-swap="outerHTML" replacement every preview refresh: htmx strips
+     matched hx-swap-oob elements from the response fragment before the
+     main swap runs, so without nesting, each refresh would leave one more
+     empty leftover wrapper stranded after #model-strip forever. On a
+     plain (non-htmx) render — the initial page load, and every include of
+     this partial from assumptions.html — there's no ajax response for
+     htmx's OOB extraction to run on, so without `hidden` these would
+     render as bare, unstyled duplicate text under the model strip.
+     htmx's OOB matching (allowNestedOobSwaps, on by default) still finds
+     and swaps them correctly by id regardless of nesting depth. {% endcomment %}
+  <div class="hidden">
+    {% for r in benchmark_rows %}
+    <span id="exp-cim-{{ r.key }}" hx-swap-oob="true">{% if r.cim_per_sf is not None %}${{ r.cim_per_sf|floatformat:2 }}{% else %}&mdash;{% endif %}</span>
+    <span id="exp-low-{{ r.key }}" hx-swap-oob="true">${{ r.low|floatformat:2 }}</span>
+    <span id="exp-high-{{ r.key }}" hx-swap-oob="true">${{ r.high|floatformat:2 }}</span>
+    <span id="exp-used-{{ r.key }}" hx-swap-oob="true">{% if r.used is not None %}${{ r.used|floatformat:0 }}{% else %}&mdash;{% endif %}</span>
+    <span id="exp-flag-{{ r.key }}" class="{{ r.flag_class }}" hx-swap-oob="true">{{ r.flag|default:"" }}</span>
+    {% endfor %}
+  </div>
+</div>

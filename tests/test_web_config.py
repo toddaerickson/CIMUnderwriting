@@ -280,7 +280,8 @@ def test_worker_applies_global_overrides_and_stamps_run(deals_dir, monkeypatch):
     seen = {}
 
     def _fake(result, progress=None, output_dir=None, custom_scenarios=None,
-              custom_va_scenarios=None, solver_target_irr=None, enrich=False):
+              custom_va_scenarios=None, solver_target_irr=None, enrich=False,
+              expense_line_overrides=None):
         from analysis.filters import GATES
         seen["min_irr_during_run"] = GATES["min_irr_5yr"]
         seen["solver_target_irr"] = solver_target_irr
@@ -328,7 +329,8 @@ def test_worker_stamps_global_solver_without_per_deal_override(deals_dir,
     seen = {}
 
     def _fake(result, progress=None, output_dir=None, custom_scenarios=None,
-              custom_va_scenarios=None, solver_target_irr=None, enrich=False):
+              custom_va_scenarios=None, solver_target_irr=None, enrich=False,
+              expense_line_overrides=None):
         seen["solver_target_irr"] = solver_target_irr
         result.gate_results = []
         result.gate_summary = {"passed": 0, "failed": 0, "tbd": 0, "total": 0,
