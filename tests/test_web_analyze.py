@@ -2,6 +2,7 @@
 import datetime
 import json
 import os
+import re
 
 import pytest
 from django.core.files.uploadedfile import SimpleUploadedFile
@@ -62,6 +63,24 @@ def test_cim_from_dict_ignores_unknown_keys():
     d = cim_to_dict(_sample_cim())
     d["some_removed_field"] = 1
     assert cim_from_dict(d).property_name == "Expo Storage"
+
+
+def test_cim_from_dict_ignores_unknown_nested_keys():
+    """Schema drift INSIDE a nested unit_mix/income_lines/expense_lines
+    row (not just a top-level CIMData field) must not crash rehydration
+    either — the nested splat used to be unfiltered (UnitType(**u) with
+    every raw dict key), so a single stray key in a hand-edited or legacy
+    snapshot raised a bare TypeError. expense_benchmark_rows() calls
+    cim_from_dict a second time OUTSIDE the deal_assumptions try/except,
+    so this reached the analyst as a real HTTP 500, not the page's
+    documented 'a broken/legacy snapshot must not 500 the page' fallback.
+    """
+    from webapp.services import cim_from_dict, cim_to_dict
+    d = cim_to_dict(_sample_cim())
+    d["unit_mix"][0]["legacy_col"] = 1
+    restored = cim_from_dict(d)
+    assert restored.unit_mix[0].size_label == "10x10"
+    assert len(restored.unit_mix) == 2
 
 
 @pytest.fixture
@@ -536,6 +555,11 @@ def test_assumptions_preview_contract(client, django_user_model, settings, tmp_p
     assert "4.7" in html
     assert 'id="model-strip"' in html
     assert 'id="noi-chip"' in html
+    # A balanced triple (560000 - 220000 = 340000) must chip "ok" — not
+    # just an id-only check, since a hardcoded noi_state="—" or noi_state
+    # ="ok" both leave every id-only assertion on this page green
+    # (verified: either mutant, full suite still 203/203).
+    assert re.search(r'id="noi-chip"[^>]*>([^<]*)<', html).group(1) == "ok"
     # preview must never write
     assert AnalysisRun.objects.count() == runs_before
     deal.refresh_from_db()
@@ -545,6 +569,77 @@ def test_assumptions_preview_contract(client, django_user_model, settings, tmp_p
     assert deal.assumption_overrides == {}
 
     assert client.get(f"/deals/{deal.pk}/assumptions/preview/").status_code == 405
+
+
+@pytest.mark.django_db
+def test_preview_renders_computed_values_not_the_fallback(client, django_user_model,
+                                                           settings, tmp_path):
+    """id="model-strip"/id="noi-chip"/id="exp-used-*" containers render on
+    BOTH a real compute and the preview_error crash fallback — they were
+    the only assertions this page had, so a bug that blanks a value or
+    drops an input to a benchmark floor left every existing test green
+    (verified by mutation in a scratch copy: reverting the T9 unit-mix
+    guards, either NOI-chip branch, or the preview's
+    expense_line_overrides pass-through all left 203/203 passing). This
+    test checks the VALUE inside those ids, and — via accept_noi_
+    discrepancy — also proves the preview didn't degrade to the fallback
+    on the non-finite unit-mix row (T9)."""
+    settings.CIM_DEALS_DIR = str(tmp_path)
+    user = django_user_model.objects.create_user(username="op", password="x")
+    client.force_login(user)
+    from webapp.models import Deal
+    deal = Deal.objects.create(
+        deal_id="cmb", property_name="CMB", extract_status="done",
+        cim_json={"property_name": "CMB", "state": "TX", "nrsf": 50_000.0,
+                  "population_3mi": 75_000, "competitive_supply_sf_3mi": 250_000.0,
+                  "pipeline_supply_sf_3mi": 0.0})
+
+    resp = client.post(f"/deals/{deal.pk}/assumptions/preview/", {
+        "ttm_total_revenue": "560000", "ttm_total_expenses": "220000",
+        "ttm_noi": "300000", "accept_noi_discrepancy": "on",
+        "exp_property_tax": "150000",
+        "um_label": ["10x10"], "um_count": ["inf"], "um_sf": ["100"],
+        "um_rate": ["95"], "um_cc": ["0"],
+    })
+    assert resp.status_code == 200
+    html = resp.content.decode()
+    assert "Preview unavailable" not in html   # not the preview_error fallback
+    # (250k competitive + 0 pipeline + 50k subject) / 75k pop = 4.0 —
+    # strip recomputed, not the em-dash fallback.
+    assert "4.0" in html
+    # 560000 - 220000 - 300000 = -40000, off by $40,000 (accepted, so
+    # is_valid() still True — the mismatch is a real analyst-visible
+    # figure, not a validation block).
+    assert re.search(r'id="noi-chip"[^>]*>([^<]*)<', html).group(1) == "off by $40,000"
+    # analyst's $150,000 property-tax entry beats the CIM/benchmark
+    # figure (TX formula: ~$68.8k) — the preview's expense_line_overrides
+    # pass-through must actually reach analyze_financials.
+    assert re.search(r'id="exp-used-property_tax"[^>]*>([^<]*)<',
+                     html).group(1) == "$150000"
+
+
+@pytest.mark.django_db
+def test_assumptions_get_reflects_saved_expense_override(client, django_user_model,
+                                                          settings, tmp_path):
+    """GET first-paint twin of the preview test above — the only
+    assertion that kills the views.py first-paint expense_line_overrides
+    mutant (verified in a scratch copy: reverting the preview's pass-
+    through and reverting this GET path's are two INDEPENDENT mutations,
+    each 203/203 with no other test noticing)."""
+    settings.CIM_DEALS_DIR = str(tmp_path)
+    user = django_user_model.objects.create_user(username="op", password="x")
+    client.force_login(user)
+    from webapp.models import Deal
+    deal = Deal.objects.create(
+        deal_id="exp-ov", property_name="EXP-OV", extract_status="done",
+        cim_json={"property_name": "EXP-OV", "state": "TX", "nrsf": 50_000.0,
+                  "population_3mi": 75_000, "ttm_noi": 300_000.0},
+        assumption_overrides={"expense_line_overrides": {"property_tax": 150_000.0}})
+    resp = client.get(f"/deals/{deal.pk}/assumptions/")
+    assert resp.status_code == 200
+    html = resp.content.decode()
+    assert re.search(r'id="exp-used-property_tax"[^>]*>([^<]*)<',
+                     html).group(1) == "$150000"
 
 
 # ── T7: vertical model view (template rebuild) ──────────────────────────
@@ -643,7 +738,15 @@ def test_save_unit_mix_with_non_finite_values_does_not_500(client, operator,
 def test_assumptions_preview_survives_non_finite_unit_mix(client, django_user_model,
                                                            settings, tmp_path):
     """The preview fires on every form change (400ms delay) — one bad
-    value must not freeze the model strip for the whole session."""
+    value must not freeze the model strip for the whole session.
+
+    'id="model-strip"' in the response is NOT proof of that: the
+    preview_error fallback strip carries the same id (default:"—" em-dash
+    everywhere) — this passed even with BOTH T9 guards reverted (203
+    tests, verified in a scratch copy of the repo). Asserting the actual
+    recomputed SF/capita figure is what distinguishes 'recovered and
+    recomputed' from 'silently degraded to the crash fallback'.
+    """
     settings.CIM_DEALS_DIR = str(tmp_path)
     user = django_user_model.objects.create_user(username="op", password="x")
     client.force_login(user)
@@ -651,7 +754,8 @@ def test_assumptions_preview_survives_non_finite_unit_mix(client, django_user_mo
     deal = Deal.objects.create(
         deal_id="pv-inf", property_name="PV-INF", extract_status="done",
         cim_json={"property_name": "PV-INF", "state": "TX", "nrsf": 50_000.0,
-                  "population_3mi": 75_000})
+                  "population_3mi": 75_000, "competitive_supply_sf_3mi": 250_000.0,
+                  "pipeline_supply_sf_3mi": 0.0})
 
     resp = client.post(f"/deals/{deal.pk}/assumptions/preview/", {
         "um_label": ["10x10"], "um_count": ["inf"], "um_sf": ["100"],
@@ -659,6 +763,7 @@ def test_assumptions_preview_survives_non_finite_unit_mix(client, django_user_mo
     })
     assert resp.status_code == 200
     assert 'id="model-strip"' in resp.content.decode()
+    assert "4.0" in resp.content.decode()
 
     resp2 = client.post(f"/deals/{deal.pk}/assumptions/preview/", {
         "um_label": ["10x10"], "um_count": ["100"], "um_sf": ["inf"],
@@ -666,6 +771,7 @@ def test_assumptions_preview_survives_non_finite_unit_mix(client, django_user_mo
     })
     assert resp2.status_code == 200
     assert 'id="model-strip"' in resp2.content.decode()
+    assert "4.0" in resp2.content.decode()
 
 
 @pytest.mark.django_db
@@ -695,3 +801,16 @@ def test_assumptions_preview_degrades_on_unexpected_error(client, django_user_mo
     html = resp.content.decode()
     assert 'id="model-strip"' in html
     assert 'id="noi-chip"' in html
+    # The crash fallback must carry a visible signal — a generic "—"
+    # strip is byte-identical to a legitimate empty-state deal otherwise
+    # (operator rule: a "No data" empty state must not hide a real
+    # failure). role="alert" is the analyst-visible marker.
+    assert 'role="alert"' in html
+    assert "Preview unavailable" in html
+    # NOI chip must not paint the crash's "—" in the pass (emerald) colour.
+    assert re.search(r'id="noi-chip" class="([^"]*)"', html).group(1) == \
+        "font-semibold text-slate-400"
+    # Every expense OOB cell blanks to the em-dash, not a stale number from
+    # a previous successful compute.
+    assert re.search(r'id="exp-used-property_tax"[^>]*>([^<]*)<',
+                     html).group(1) == "&mdash;"

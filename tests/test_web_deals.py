@@ -393,3 +393,31 @@ def test_expense_line_overrides_roundtrip():
     deal.assumption_overrides = out
     deal.save()
     assert build_initial(deal)["exp_property_tax"] == 55405.0
+
+
+@pytest.mark.django_db
+def test_model_rows_extracted_and_source_columns():
+    """model_rows()/_display_value() had zero direct tests — they ARE the
+    auditability trace surface (CLAUDE.md: every value a user sees should
+    be traceable to its formula + source + raw inputs), rendered on both
+    the Drivers and Demographics sections of the assumptions page.
+    Verified against two mutants in a scratch copy, each 203/203 with
+    every other test green: (a) deleting the CIM_PCT_FIELDS decimal->
+    whole-number conversion before the snap/current comparison — makes
+    every untouched percent driver misreport 'source': 'you' on first
+    load; (b) reducing _display_value to `return v` — breaks the comma-
+    grouped Extracted column."""
+    from webapp.forms import (SECTION_DRIVERS, AssumptionsForm, build_initial,
+                              model_rows)
+    from webapp.models import Deal
+
+    deal = Deal.objects.create(
+        deal_id="mr", property_name="MR",
+        cim_json={"property_name": "MR", "physical_occupancy": 0.92,
+                  "asking_price": 3_500_000.0})
+    form = AssumptionsForm(initial=build_initial(deal))
+    rows = {r["label"]: r for r in
+            model_rows(form, SECTION_DRIVERS, deal.cim_json, {})}
+    assert rows["Physical Occupancy (%)"]["extracted"] == "92"
+    assert rows["Physical Occupancy (%)"]["source"] == "CIM"
+    assert rows["Asking Price ($)"]["extracted"] == "3,500,000"
