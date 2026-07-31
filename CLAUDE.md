@@ -16,6 +16,37 @@ The settings editor stores dated deltas (`ConfigOverride` rows) on top of
 `config.py` — it never mutates the file. The comps browser reads
 `data/cim_comps.db` read-only.
 
+## Simultaneous sessions (MANDATORY)
+Multiple Claude sessions can share this one clone, and the primary working
+tree is the collision zone: a concurrent session can switch its branch out
+from under you, its uncommitted edits show up as foreign dirty state, and a
+stray commit lands on the wrong branch. Rule set imported from
+fcs-call-reports; enforced by git-tracked hooks in `.claude/settings.json` —
+never remove, weaken, or bypass them:
+
+- **SessionStart** `.claude/hooks/session-start-parallel-check.sh` — reports
+  linked worktrees, foreign dirty state, and whether solo mode is on.
+- **PreToolUse** `.claude/hooks/guard-shared-worktree.py` — DENIES file edits
+  and git mutations targeting the primary working tree of this clone.
+
+Working rules:
+1. Before any file-mutating work, isolate:
+   `git worktree add .claude/worktrees/<slug> -b <branch> origin/main`
+   and do everything there. Commit early — branch refs are durable even if
+   the worktree dir is lost; uncommitted files are not.
+2. The session-start branch line is a point-in-time snapshot. Before every
+   commit, re-assert `git branch --show-current` and read `git diff` in that
+   exact directory; never commit foreign edits (per-path `git add`, never `-A`).
+3. Once your branch is pushed and the PR is open, every remaining ship step is
+   working-tree-independent: `gh pr merge --squash`, remote ref delete via gh,
+   local ref delete via `git branch -D`. Never `git checkout` in the primary
+   tree to "restore" it — that clobbers another session's WIP.
+4. Deliberate solo work on the primary clone: launch with `CIM_SOLO=1`, or
+   `touch "$(git rev-parse --git-dir)/cim-solo"` — the flag must be set in its
+   own Bash call (the guard evaluates pre-tool), and the marker must be
+   removed immediately after; leaving it disables the guard for every future
+   session.
+
 ## When the user provides a CIM PDF
 1. Run `python run.py` and provide the filename
 2. If extraction is incomplete (CIM formats vary), Claude Code should
