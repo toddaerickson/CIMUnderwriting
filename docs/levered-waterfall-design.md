@@ -1,11 +1,21 @@
 # Levered returns + preferred-return waterfall — research & design
 
 Research date: 2026-07-28 (web sources; fixture arithmetic verified in Python).
-Status: DESIGN INPUT — not yet built. Blocked on the LPA confirmations at the
-bottom before the waterfall can be considered accurate.
+Status: DESIGN INPUT — not yet built. Scoped for build as item E in
+[scoped-backlog.md](scoped-backlog.md) (E1 debt → E2 waterfall → E3 wiring →
+E4 solver). The LPA confirmations at the bottom no longer block the build: they
+ship as named parameters carrying documented defaults, and every LP net IRR is
+displayed with its resolved assumption set. The number is not decision-grade
+until the LPA is actually read.
 
 Fund terms assumed (from operator): 8% pref, 20/80 promote above pref, no
 catch-up, ~10% GP co-invest, 1% AM fee, 15% LP **net** IRR target.
+
+**Scope decision (operator, 2026-07-29): ONE TIER.** GP charges a management
+fee, co-invests capital upfront, and earns an x% promoted interest above a y%
+preferred return. That is the single-hurdle case §B proves is deterministic — a
+forward accrual loop, no solver. Pref rate and promote split are parameters; the
+tier *count* is not. No configurable multi-tier builder.
 
 ## A. Levered model structure
 
@@ -92,6 +102,12 @@ Unlevered screen stays primary; levered + waterfall is a second lens.
    unlevered 8.0154%.
 
 ## ⚑ LPA confirmations required (answers change the numbers)
+
+Status 2026-07-29: **6 and 7 are answered** — no clawback, and "15% LP net" means
+net of both the AM fee and the promote (operator fund terms). **1–5 remain open**
+and ship as stamped defaults per [scoped-backlog.md](scoped-backlog.md) item E:
+annually compounded · contributed/unreturned capital · ROC first · AM fee above
+the waterfall · promote on the LP-attributable residual only.
 
 1. 8% pref: simple or compounded? At what frequency? (moves GP promote ~19%)
 2. Accrual base: contributed/unreturned capital (assumed) or committed?
