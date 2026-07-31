@@ -29,8 +29,15 @@ projection that D, E and G all read from.
 | E3 | Levered wiring (assumptions / results / memo / xlsx) | E2, D | Medium | High-risk |
 | E4 | Solver retargeted to LP net IRR | E3 | Small | **High-risk** |
 
-Sequence: **A → B → D → G → E1 → E2 → E3 → E4**. A goes first because it is the
+Sequence: **A → B → D → E1 → E2 → E3 → E4 → G**. A goes first because it is the
 cheapest and because its checks guard B's arithmetic while B changes it.
+
+**G moved after E** (revised 2026-07-31; the table above still lists G's hard
+dependency as D, which remains true). The table's "(E preferred)" note
+understates it: an LP-facing summary produced before the LP-net-IRR engine
+exists can only quote a property-level unlevered IRR — the number that document
+specifically exists to replace. The fund mandate is a 15% LP *net* IRR, so G
+ships once E4 can compute it.
 
 ---
 

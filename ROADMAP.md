@@ -50,8 +50,11 @@
 
 Scoped in [docs/scoped-backlog.md](docs/scoped-backlog.md) — scope contract,
 acceptance criteria, and build order. Queued behind the dense-model-view build.
-Order is **A → B → D → G → E1 → E2 → E3 → E4**; B extracts the shared cash-flow
-projection the rest depend on.
+Order is **A → B → D → E1 → E2 → E3 → E4 → G**; B extracts the shared cash-flow
+projection the rest depend on, and **G ships last, after E** — a 2-page LP
+summary built before the LP-net-IRR engine exists would hand an LP a
+property-level unlevered IRR, which is the one number that document exists to
+avoid.
 
 - [ ] **A.** Model error-check register (`analysis/checks.py`) — generalize the
       lone Revenue−Expenses=NOI identity into 11 checks (unit-mix reconciliation,
@@ -61,8 +64,9 @@ projection the rest depend on.
       projection loops; collapse to one and add both. Changes every published IRR.
 - [ ] **D.** Sources & Uses + capital stack — unlevered-safe now, debt-ready;
       must tie to DCF total basis (enforced by check 11)
-- [ ] **G.** LP-facing 2-page investor summary (.docx) — GC gate before any
-      external distribution
+- [ ] **G.** LP-facing 2-page investor summary (.docx) — **ships last, after
+      E4**, so it can quote LP net IRR rather than unlevered property IRR; GC
+      gate before any external distribution
 
 ### Levered Returns / LP Waterfall
 
