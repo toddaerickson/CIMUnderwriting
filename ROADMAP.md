@@ -46,12 +46,42 @@
 - [ ] Post-cutover hardening (deferred from PR #2 review): `SECURE_HSTS_SECONDS`
       + `manage.py check --deploy` in CI; decide `/admin/` exposure (see DEPLOY.md)
 
+### Model Integrity & Capital Structure
+
+Scoped in [docs/scoped-backlog.md](docs/scoped-backlog.md) — scope contract,
+acceptance criteria, and build order. Queued behind the dense-model-view build.
+Order is **A → B → D → E1 → E2 → E3 → E4 → G**; B extracts the shared cash-flow
+projection the rest depend on, and **G ships last, after E** — a 2-page LP
+summary built before the LP-net-IRR engine exists would hand an LP a
+property-level unlevered IRR, which is the one number that document exists to
+avoid.
+
+- [ ] **A.** Model error-check register (`analysis/checks.py`) — generalize the
+      lone Revenue−Expenses=NOI identity into 11 checks (unit-mix reconciliation,
+      occupancy sanity, expense-line floors, exit-vs-entry cap coercion surfaced)
+- [ ] **B.** Transaction costs + variable hold period — closing/disposition costs
+      are absent from the DCF and the 5-year hold is hardcoded in three duplicated
+      projection loops; collapse to one and add both. Changes every published IRR.
+- [ ] **D.** Sources & Uses + capital stack — unlevered-safe now, debt-ready;
+      must tie to DCF total basis (enforced by check 11)
+
 ### Levered Returns / LP Waterfall
-- [ ] Add debt layer (senior/junior with term, IO, amort, rate)
-- [ ] GP/LP distribution waterfall (pref return + promote tiers)
-- [ ] Show both levered (8% pref) and unlevered (6% pref) analyses
-- [ ] LP net IRR as primary screening metric (target 15%+)
-- [ ] Solver targets LP net IRR instead of unlevered IRR
+
+Design + verified numeric oracles: [docs/levered-waterfall-design.md](docs/levered-waterfall-design.md).
+**Single tier only** (operator, 2026-07-29): GP management fee, GP co-invest
+upfront, x% promote above a y% pref. No catch-up, no clawback, no tier builder.
+
+- [ ] **E1.** Debt layer — `model/debt.py`, sizing as min(LTV, DSCR, debt-yield)
+      with the binding constraint reported; monthly amort roll-forward
+- [ ] **E2.** Single-hurdle waterfall — `model/waterfall.py`, deterministic
+      forward loop; 5 LPA questions remain open and ship as named, stamped defaults
+- [ ] **E3.** Levered wiring — assumptions / results / memo / xlsx; unlevered
+      screen stays primary, levered is the second lens
+- [ ] **E4.** Solver targets LP net IRR (15%+) instead of unlevered IRR
+- [ ] **G.** LP-facing 2-page investor summary (.docx) — **ships last**, after
+      E4, so it can quote LP net IRR rather than unlevered property IRR. Its
+      build dependency is D; its *ordering* dependency is E4. GC gate before any
+      external distribution.
 
 ### UI Polish
 - [ ] Extraction confidence indicators per field (green/yellow/red)
