@@ -113,6 +113,18 @@ the existing `create_sheet` pattern), [output/memo_writer.py](../output/memo_wri
 
 ## B. Transaction costs + variable hold period
 
+**⚑ SHIPPED 2026-07-31.** Plan and rationale:
+[docs/superpowers/plans/2026-07-31-item-b-transaction-costs.md](superpowers/plans/2026-07-31-item-b-transaction-costs.md).
+Three deviations from the contract below, all argued in that plan:
+(1) the cell this file names at `template_writer.py:396` is the GP
+disposition **fee** (`F254`, correctly 0); the real cost of sale is `K182`,
+hardcoded at 3.5%, and that is what got wired — along with `D182`, the sale
+month, which the contract missed; (2) `model/value_add_model.py` was added
+to scope, since leaving it out would have kept `va_max_offer` overstated
+beside a static max offer that no longer is; (3) the sensitivity grid also
+stopped ignoring per-deal scenario overrides — its centre cell disagreed
+with the headline base IRR whenever an analyst edited a scenario.
+
 **Why.** Two defects, one fix. (1) No acquisition closing costs and no
 disposition costs anywhere in the DCF — `total_basis = price + capex` and exit
 proceeds are the gross `yr5_noi / exit_cap`. Every IRR we publish is overstated

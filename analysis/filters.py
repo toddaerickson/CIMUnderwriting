@@ -155,7 +155,7 @@ def evaluate_gates(cim_data, scenario_results=None, va_results=None,
             "note": "Insufficient data to estimate replacement cost",
         })
 
-    # Gate 4: 5-Year unlevered IRR ≥ 10%
+    # Gate 4: unlevered IRR over the hold ≥ 10%
     # Use VA IRR if value-add model was run, otherwise static
     base_irr = None
     va_irr = None
@@ -174,9 +174,24 @@ def evaluate_gates(cim_data, scenario_results=None, va_results=None,
     if va_irr is not None and base_irr is not None:
         irr_display = f"{va_irr:.1%} VA ({base_irr:.1%} static)"
 
+    # The hold is variable now, so the gate must not claim "5-Yr" when it
+    # measured something else. The config KEY stays `min_irr_5yr`: stored
+    # ConfigOverride rows reference it by name and renaming it would
+    # orphan them (they would be logged as unknown and skipped).
+    hold = None
+    for source in (va_results, scenario_results):
+        if source and ScenarioType.BASE in source:
+            hold = (source[ScenarioType.BASE].get("hold_years")
+                    or len(source[ScenarioType.BASE].get("noi_projection")
+                           or source[ScenarioType.BASE].get("annual_noi") or [])
+                    or None)
+            if hold:
+                break
+
     gates.append({
         "gate": 4,
-        "name": "5-Yr Unlevered IRR ≥ 10%",
+        "name": (f"{hold}-Yr Unlevered IRR ≥ {GATES['min_irr_5yr']:.0%}"
+                 if hold else f"Unlevered IRR ≥ {GATES['min_irr_5yr']:.0%}"),
         "threshold": f"≥ {GATES['min_irr_5yr']:.0%}",
         "actual": irr_display,
         "result": _eval(gate_irr, GATES["min_irr_5yr"], ">=") if gate_irr else "TBD",

@@ -274,6 +274,26 @@ SOLVER_TARGET_IRR = 0.10
 SOLVER_TOLERANCE = 0.001
 SOLVER_MAX_ITERATIONS = 50
 
+# ── Transaction Costs & Hold Period ─────────────────────────────────
+# Round-trip friction. Omitting these overstates every unlevered IRR by
+# roughly 30-60 bps, and the IRR gate is evaluated on that figure.
+#
+# These are DEFAULTS, not constants: transfer-tax states (PA, DE, NY,
+# WA...) can push acquisition costs several times the national norm, and
+# broker fees move with deal size. Both are per-deal editable from the
+# assumptions form and from the settings editor.
+
+TRANSACTION_COSTS = {
+    "acquisition_closing_pct": 0.010,   # title, legal, diligence, transfer
+    "disposition_cost_pct":    0.015,   # broker plus closing
+}
+
+# Hold period, in years. Drives the projection length everywhere — the
+# static DCF, the sensitivity grid, the bisection solver, the value-add
+# monthly engine, and the sale month written into the XLSM template.
+DEFAULT_HOLD_YEARS = 5
+HOLD_YEARS_RANGE = (1, 10)
+
 # ── Regional Expense Adjustments ──────────────────────────────────
 # Multipliers applied to national EXPENSE_BENCHMARKS by region.
 # Derived from ISS Self-Storage Expense Guidebook and SSA Operating

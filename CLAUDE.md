@@ -71,11 +71,11 @@ analysis/
   physical.py              # Property description, replacement cost
   financials.py            # Historical financial review, expense benchmarks
   rent_analysis.py         # Unit mix & rent analysis
-  valuation.py             # Scenario NOI forecast, IRR/MOIC calc
+  valuation.py             # THE unlevered projection (project_cash_flows) + scenario NOI forecast, IRR/MOIC
   value_add.py             # Operational improvement identification
   risks.py                 # Risk identification
 model/
-  returns_model.py         # 5-year unlevered DCF: Bear/Base/Bull
+  returns_model.py         # Unlevered DCF wrapper + sensitivity grid: Bear/Base/Bull
   solver.py                # Bisection solver: max price for 10% IRR
 output/
   memo_writer.py           # Generates .docx from analysis outputs
@@ -92,7 +92,9 @@ output/
 - Watch: deals whose entire bridge is ECRI in a falling street-rate market —
   the in-place-to-market gap closes from above; verify street-rate trend.
 - Asking price ≤ replacement cost
-- Base case 5-year unlevered IRR ≥ 10%
+- Base case unlevered IRR ≥ 10% over the hold, NET of transaction costs
+  (default 5-year hold, editable 1–10; the config key stays `min_irr_5yr`
+  so stored ConfigOverride rows keep resolving)
 - Top-50 MSA or strong secondary market
 - CIM Year 1 NOI ≤ 115% of TTM actual (flag if exceeded)
 - Exit cap rate ≥ entry cap rate in base case
@@ -126,7 +128,11 @@ output/
    can and flags gaps. Claude Code fills in missing data from PDF context.
 2. **Analyst-adjusted NOI**: Never trust CIM expenses at face value. Uses
    max(CIM expense, benchmark midpoint) for lines that appear understated.
-3. **All returns unlevered**: IRR and MOIC ignore debt. Total equity = price + CapEx.
+3. **All returns unlevered**: IRR and MOIC ignore debt. Total basis =
+   price + CapEx + acquisition closing costs; exit is net of disposition
+   costs. `analysis.valuation.project_cash_flows` is the ONE projection —
+   the scenario engine, the sensitivity grid and both solvers call it, and
+   a second copy of that loop is how they drifted last time.
 4. **Exit cap ≥ entry cap** in base and bear cases.
 5. **Bisection solver**: Deterministic, 20 iterations to 0.1% precision.
 

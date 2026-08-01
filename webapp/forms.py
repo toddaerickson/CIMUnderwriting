@@ -80,6 +80,15 @@ STREET_RATE_TREND_CHOICES = [
 CIM_PCT_FIELDS = ["cc_pct", "physical_occupancy", "economic_occupancy", "mgmt_fee_pct"]
 CIM_SCALAR_FIELDS = CIM_CHAR_FIELDS + CIM_INT_FIELDS + CIM_FLOAT_FIELDS + CIM_PCT_FIELDS
 
+# Timing & transaction costs (item B). Both percentages are per-deal
+# because transfer-tax states can multiply the acquisition side, and
+# broker fees move with deal size — they are defaults, not constants.
+TXN_COST_LABELS = [
+    ("acquisition_closing_pct", "Acquisition (% price)"),
+    ("disposition_cost_pct", "Disposition (% sale)"),
+]
+TXN_COST_PARAMS = [p for p, _ in TXN_COST_LABELS]
+
 RC_PCT_KEYS = {"soft_cost_pct", "dev_profit_pct"}
 RC_KEYS = [k for hard, site, _ in cfg.FACILITY_TYPES for k in (hard, site)] \
     + ["soft_cost_pct", "dev_profit_pct"]
@@ -206,6 +215,14 @@ class AssumptionsForm(forms.Form):
                 required=False, min_value=0, widget=_num())
         self.fields["solver_target_irr"] = forms.FloatField(
             required=False, min_value=0, widget=_num())
+        # Timing & round-trip costs. Percent fields follow the module's
+        # whole-number convention; hold_years is a plain integer.
+        self.fields["hold_years"] = forms.IntegerField(
+            required=False, min_value=cfg.HOLD_YEARS_RANGE[0],
+            max_value=cfg.HOLD_YEARS_RANGE[1], widget=_num())
+        for name in TXN_COST_PARAMS:
+            self.fields[name] = forms.FloatField(
+                required=False, min_value=0, max_value=100, widget=_num())
         # Declared in CIM_CHAR_FIELDS for the save/initial plumbing, but
         # rendered as a constrained dropdown, not free text.
         self.fields["market_verification"] = forms.ChoiceField(
@@ -320,6 +337,11 @@ def build_initial(deal, eff=None) -> dict:
         initial[f"rc_{key}_high"] = round(float(high), 4)
     initial["solver_target_irr"] = _pct_display(
         saved.get("solver_target_irr", eff["SOLVER_TARGET_IRR"]))
+    initial["hold_years"] = saved.get("hold_years", cfg.DEFAULT_HOLD_YEARS)
+    txn_saved = saved.get("transaction_costs", {})
+    for name in TXN_COST_PARAMS:
+        initial[name] = _pct_display(
+            txn_saved.get(name, eff["TRANSACTION_COSTS"][name]))
     for key, val in (saved.get("expense_line_overrides") or {}).items():
         initial[f"exp_{key}"] = val
     return initial
@@ -590,6 +612,21 @@ def build_overrides(cleaned, post, deal, eff=None) -> dict:
         if not _same(tgt, eff["SOLVER_TARGET_IRR"]):
             out["solver_target_irr"] = tgt
 
+    hold = cleaned.get("hold_years")
+    if hold is not None and int(hold) != cfg.DEFAULT_HOLD_YEARS:
+        out["hold_years"] = int(hold)
+
+    txn = {}
+    for name in TXN_COST_PARAMS:
+        v = cleaned.get(name)
+        if v is None:
+            continue
+        v = round(v / 100.0, 6)
+        if not _same(v, eff["TRANSACTION_COSTS"][name]):
+            txn[name] = v
+    if txn:
+        out["transaction_costs"] = txn
+
     return out
 
 
@@ -655,9 +692,17 @@ def override_key_registry() -> dict:
         reg[f"VALUE_ADD_TRIGGERS.{k}"] = {
             "group": "Value-Add Triggers", "kind": "scalar",
             "pct": True, "int": False, "label": _label(k)}
+    for k in cfg.TRANSACTION_COSTS:
+        reg[f"TRANSACTION_COSTS.{k}"] = {
+            "group": "Transaction Costs", "kind": "scalar",
+            "pct": True, "int": False, "label": _label(k)}
     reg["SOLVER_TARGET_IRR"] = {
         "group": "Solver", "kind": "scalar", "pct": True, "int": False,
         "label": "Solver Target IRR"}
+    # DEFAULT_HOLD_YEARS is deliberately absent: it is bound by value at
+    # import in the model modules, so a _patched_config mutation could
+    # never reach them (the same reason SOLVER_TARGET_IRR is special-cased
+    # in build_config_patch). It is per-deal only, via the field above.
     return reg
 
 

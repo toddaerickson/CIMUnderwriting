@@ -5,6 +5,8 @@ preformatted strings out. Percent decimals become display strings HERE
 and nowhere else. Templates stay dumb; formatting stays testable.
 """
 
+import config as cfg
+
 
 def fmt_pct(v, digits=1):
     return f"{float(v) * 100:.{digits}f}%" if v is not None else "N/A"
@@ -117,6 +119,21 @@ def summary_context(r) -> dict:
     }
 
 
+def _hold_years(scenarios: dict, noi_key: str = "noi_projection") -> int:
+    """Hold length a stored run was computed on, read off the run itself.
+
+    Runs predating item B carry neither key; they were always five years,
+    which is what config.DEFAULT_HOLD_YEARS still is. Read, don't assume:
+    the fallback tracks the config value rather than repeating a literal.
+    """
+    for scen in (scenarios or {}).values():
+        if isinstance(scen, dict):
+            hold = scen.get("hold_years") or len(scen.get(noi_key) or [])
+            if hold:
+                return hold
+    return cfg.DEFAULT_HOLD_YEARS
+
+
 def returns_context(r) -> dict:
     scen = r.get("scenario_results") or {}
     va = r.get("va_results") or {}
@@ -127,17 +144,23 @@ def returns_context(r) -> dict:
         price = prices[i] if i < len(prices) else None
         sens_rows.append({"price": fmt_money(price),
                           "cells": [fmt_pct(v) for v in row]})
+    # The hold is variable, so these labels cannot say "5-Year". An
+    # analyst comparing two deals underwritten at different holds would
+    # otherwise misread the annualization basis straight off the primary
+    # results screen (review finding, item B).
+    hold = _hold_years(scen)
+    va_hold = _hold_years(va, noi_key="annual_noi")
     return {
         "scenario_rows": _metric_rows(scen, [
             ("Yr1 Yield on Cost", "yield_on_cost", fmt_pct),
-            ("5-Year MOIC", "moic", fmt_x),
-            ("5-Year IRR", "irr", fmt_pct),
+            (f"{hold}-Year MOIC", "moic", fmt_x),
+            (f"{hold}-Year IRR", "irr", fmt_pct),
         ]),
         "has_va": bool(va),
         "va_rows": _metric_rows(va, [
             ("Stabilized Yield on Cost", "yield_on_cost", fmt_pct),
-            ("5-Year MOIC", "moic", fmt_x),
-            ("5-Year IRR", "irr", fmt_pct),
+            (f"{va_hold}-Year MOIC", "moic", fmt_x),
+            (f"{va_hold}-Year IRR", "irr", fmt_pct),
             ("Development Spread", "development_spread",
              lambda v: f"{float(v) * 10000:,.0f} bps" if v is not None else "N/A"),
             ("Stabilized NOI", "stabilized_noi", fmt_money),

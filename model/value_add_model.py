@@ -14,6 +14,7 @@ stabilized NOI, development spread, and monthly detail.
 """
 
 import numpy_financial as npf
+from analysis.valuation import resolve_hold_years, resolve_transaction_costs
 from config import VALUE_ADD_SCENARIOS, VALUE_ADD_TRIGGERS
 from registry import ScenarioType
 
@@ -43,7 +44,9 @@ def detect_value_add(cim_data) -> bool:
 
 def run_value_add_scenarios(cim_data, financial_analysis: dict,
                             asking_price: float, capex: float = 0,
-                            custom_scenarios: dict = None) -> dict:
+                            custom_scenarios: dict = None,
+                            hold_years: int = None,
+                            transaction_costs: dict = None) -> dict:
     """
     Run Bear / Base / Bull value-add scenarios with monthly cash flows.
 
@@ -53,6 +56,8 @@ def run_value_add_scenarios(cim_data, financial_analysis: dict,
         asking_price: total acquisition price
         capex: estimated capital expenditure
         custom_scenarios: optional override of VALUE_ADD_SCENARIOS
+        hold_years: hold period in years (default config.DEFAULT_HOLD_YEARS)
+        transaction_costs: override of config.TRANSACTION_COSTS
 
     Returns:
         dict keyed by scenario name, each containing:
@@ -68,7 +73,6 @@ def run_value_add_scenarios(cim_data, financial_analysis: dict,
             - development_spread: stabilized yield minus exit cap
     """
     scenarios = custom_scenarios or VALUE_ADD_SCENARIOS
-    total_basis = asking_price + capex
 
     # Compute starting metrics from CIM data
     in_place_rent_psf = _compute_in_place_rent_psf(cim_data)
@@ -97,8 +101,9 @@ def run_value_add_scenarios(cim_data, financial_analysis: dict,
             current_occ=current_occ,
             monthly_expenses_start=monthly_expenses_start,
             asking_price=asking_price,
-            total_basis=total_basis,
             capex=capex,
+            hold_years=hold_years,
+            costs=transaction_costs,
         )
         results[name] = result
 
@@ -112,9 +117,23 @@ def _run_single_va_scenario(name: str, params: dict,
                              current_occ: float,
                              monthly_expenses_start: float,
                              asking_price: float,
-                             total_basis: float,
-                             capex: float) -> dict:
-    """Compute a single value-add scenario with monthly granularity."""
+                             capex: float,
+                             hold_years: int = None,
+                             costs: dict = None) -> dict:
+    """Compute a single value-add scenario with monthly granularity.
+
+    This is a genuinely different engine from `analysis.valuation.
+    project_cash_flows` — monthly, with a lease-up ramp — so it is not
+    folded into it. It does share the hold period and the transaction-cost
+    arithmetic, because publishing a VA IRR net of costs beside a static
+    IRR gross of them would just relocate the defect item B exists to fix.
+    """
+
+    hold_years = resolve_hold_years(hold_years)
+    costs = resolve_transaction_costs(costs)
+    hold_months = hold_years * 12
+    total_basis = (asking_price + capex
+                   + asking_price * costs["acquisition_closing_pct"])
 
     months_to_stab = int(params["months_to_stabilize"])
     target_occ = params["target_occupancy"]
@@ -130,12 +149,12 @@ def _run_single_va_scenario(name: str, params: dict,
     # Monthly expense growth rate
     monthly_exp_growth = (1 + expense_growth_annual) ** (1 / 12) - 1
 
-    # Build 60-month projection
+    # Build the monthly projection across the hold
     monthly_revenue = []
     monthly_expenses = []
     monthly_noi = []
 
-    for month in range(60):
+    for month in range(hold_months):
         # Rent ramp: linear from in-place to target over stabilization period
         if month < months_to_stab:
             frac = month / months_to_stab
@@ -159,7 +178,7 @@ def _run_single_va_scenario(name: str, params: dict,
     annual_revenue = []
     annual_expenses = []
     annual_noi = []
-    for yr in range(5):
+    for yr in range(hold_years):
         start = yr * 12
         end = start + 12
         annual_revenue.append(sum(monthly_revenue[start:end]))
@@ -167,15 +186,15 @@ def _run_single_va_scenario(name: str, params: dict,
         annual_noi.append(sum(monthly_noi[start:end]))
 
     # Stabilized NOI (first full year at stabilization)
-    stab_month = int(min(months_to_stab, 59))
+    stab_month = int(min(months_to_stab, hold_months - 1))
     # Use the 12 months centered around stabilization for stabilized NOI
     stab_start = max(0, stab_month)
-    stab_end = min(60, stab_start + 12)
+    stab_end = min(hold_months, stab_start + 12)
     stabilized_annual_noi = sum(monthly_noi[stab_start:stab_end])
     if stab_end - stab_start < 12:
         stabilized_annual_noi = stabilized_annual_noi * 12 / (stab_end - stab_start)
 
-    # Exit value = forward NOI (Year 5 annual) / exit cap
+    # Exit value = forward NOI (final full year) / exit cap
     yr5_noi = annual_noi[-1]
     exit_value = yr5_noi / exit_cap if exit_cap > 0 else 0
 
@@ -187,11 +206,17 @@ def _run_single_va_scenario(name: str, params: dict,
         exit_cap = entry_cap
         exit_value = yr5_noi / exit_cap if exit_cap > 0 else 0
 
-    # Cash flows: Year 0 = -total_basis, Years 1-4 = NOI, Year 5 = NOI + exit
+    # Disposition costs come out of gross exit value, same rule the static
+    # DCF applies (analysis.valuation.project_cash_flows).
+    disposition_cost = exit_value * costs["disposition_cost_pct"]
+    net_exit_proceeds = exit_value - disposition_cost
+
+    # Cash flows: Year 0 = -total_basis, interim years = NOI, final year =
+    # NOI + net sale proceeds.
     cash_flows = [-total_basis]
     for i, noi in enumerate(annual_noi):
         if i == len(annual_noi) - 1:
-            cash_flows.append(noi + exit_value)
+            cash_flows.append(noi + net_exit_proceeds)
         else:
             cash_flows.append(noi)
 
@@ -231,6 +256,11 @@ def _run_single_va_scenario(name: str, params: dict,
         "target_occupancy": target_occ,
         "cash_flows": cash_flows,
         "exit_value": exit_value,
+        "disposition_cost": disposition_cost,
+        "net_exit_proceeds": net_exit_proceeds,
+        "acquisition_cost": asking_price * costs["acquisition_closing_pct"],
+        "transaction_costs": costs,
+        "hold_years": hold_years,
         "entry_cap": entry_cap,
         "exit_cap": exit_cap,
         "irr": irr,
@@ -246,10 +276,13 @@ def _run_single_va_scenario(name: str, params: dict,
 
 def compute_va_irr_at_price(cim_data, financial_analysis: dict,
                              price: float, capex: float,
-                             params: dict) -> float | None:
+                             params: dict,
+                             hold_years: int = None,
+                             costs: dict = None) -> float | None:
     """
     Compute VA IRR at a given purchase price.
-    Used by the bisection solver.
+    Used by the bisection solver, so acquisition closing costs must be
+    derived from `price` inside this call rather than added afterwards.
     """
     in_place_rent_psf = _compute_in_place_rent_psf(cim_data)
     market_rent_psf = cim_data.market_rent_psf or in_place_rent_psf
@@ -271,8 +304,9 @@ def compute_va_irr_at_price(cim_data, financial_analysis: dict,
         current_occ=current_occ,
         monthly_expenses_start=monthly_expenses_start,
         asking_price=price,
-        total_basis=price + capex,
         capex=capex,
+        hold_years=hold_years,
+        costs=costs,
     )
     return result.get("irr")
 

@@ -22,6 +22,7 @@ from django.db import models, transaction
 from django.utils import timezone
 
 import config as cfg
+from analysis.valuation import resolve_hold_years, resolve_transaction_costs
 from engine import (AnalysisResult, _apply_overrides, extract_pdf_data,
                     run_analysis)
 from webapp.models import Deal
@@ -196,7 +197,7 @@ def json_safe(obj):
 # safe by construction.)
 _PATCHED_DICTS = ("GATES", "EXPENSE_BENCHMARKS", "REPLACEMENT_COST",
                   "SCENARIO_DEFAULTS", "VALUE_ADD_SCENARIOS",
-                  "VALUE_ADD_TRIGGERS")
+                  "VALUE_ADD_TRIGGERS", "TRANSACTION_COSTS")
 _ORIG_CONFIG = {n: copy.deepcopy(getattr(cfg, n)) for n in _PATCHED_DICTS}
 _ANALYSIS_LOCK = threading.Lock()
 
@@ -298,6 +299,26 @@ def build_config_patch(deltas: dict):
         else:
             patch.setdefault(parts[0], {})[parts[1]] = value
     return patch, solver_irr, skipped
+
+
+def resolve_run_transaction_costs(patch: dict, overrides: dict) -> dict:
+    """Costs for one run: config.py default ← global ConfigOverride delta
+    ← per-deal override.
+
+    Reads the pristine _ORIG_CONFIG snapshot, never the live config
+    module, for the same reason effective_config does. TRANSACTION_COSTS
+    is in _PATCHED_DICTS, so the live dict carries ANOTHER deal's values
+    for as long as that deal's run holds _ANALYSIS_LOCK. Resolving off
+    the live dict here — this runs before the lock is acquired — let one
+    deal's cost percentages leak into a second deal that never opted into
+    them, and the unconditional stamp below then reported the wrong
+    numbers as if they were correct (review finding, item B).
+    """
+    return resolve_transaction_costs(
+        {**(patch or {}).get("TRANSACTION_COSTS", {}),
+         **((overrides or {}).get("transaction_costs") or {})},
+        base=_ORIG_CONFIG["TRANSACTION_COSTS"],
+    )
 
 
 def effective_config(asset_type: str = "", on_date=None) -> dict:
@@ -687,10 +708,30 @@ def _analysis_worker(run_pk):
         # never used. The winner is already recorded under "assumptions".
         if overrides.get("solver_target_irr"):
             applied.pop("SOLVER_TARGET_IRR", None)
+        # Timing and round-trip costs are stamped with their RESOLVED
+        # values, not as deltas. Item B changed every published IRR, so a
+        # run recording nothing because it sat on the defaults would be
+        # indistinguishable from a pre-item-B run rather than
+        # self-describing. Deltas elsewhere; the truth here.
+        hold_years = resolve_hold_years(overrides.get("hold_years"))
+        # Resolved here, not inside the engine, so the stamp and the run
+        # cannot disagree: file default ← global ConfigOverride delta ←
+        # per-deal override, then passed down whole.
+        txn_costs = resolve_run_transaction_costs(patch, overrides)
+        stamped = {**overrides, "hold_years": hold_years,
+                   "transaction_costs": txn_costs}
+        # A per-deal cost supersedes the global row for THAT key, so the
+        # global value must not be stamped as applied — same rule as
+        # SOLVER_TARGET_IRR above, but key-level, because transaction
+        # costs merge per parameter instead of replacing wholesale like
+        # the scenario sections do. Without this, "config" claimed a
+        # percentage the engine never used (review finding, item B).
+        for key in (overrides.get("transaction_costs") or {}):
+            applied.pop(f"TRANSACTION_COSTS.{key}", None)
         AnalysisRun.objects.filter(pk=run_pk).update(
             applied_overrides=json_safe(
                 {"config": applied, "config_skipped": skipped,
-                 "assumptions": overrides}))
+                 "assumptions": stamped}))
 
         with _ANALYSIS_LOCK:
             with _patched_config(patch):
@@ -702,6 +743,8 @@ def _analysis_worker(run_pk):
                     enrich=True,
                     expense_line_overrides=overrides.get(
                         "expense_line_overrides"),
+                    hold_years=hold_years,
+                    transaction_costs=txn_costs,
                 )
 
         meta = build_deal_meta(cim, result, deal.deal_dir,

@@ -131,7 +131,9 @@ def run_analysis(result: AnalysisResult, progress: Callable = None,
                   custom_va_scenarios: dict = None,
                   solver_target_irr: float = None,
                   enrich: bool = False,
-                  expense_line_overrides: dict = None) -> AnalysisResult:
+                  expense_line_overrides: dict = None,
+                  hold_years: int = None,
+                  transaction_costs: dict = None) -> AnalysisResult:
     """
     Run full analysis pipeline on an already-extracted CIMData.
 
@@ -154,6 +156,13 @@ def run_analysis(result: AnalysisResult, progress: Callable = None,
             CIM-extracted value for the same line; the benchmark
             adjustment still applies on top. None everywhere the CLI
             path runs, so run.py behavior is unchanged.
+        hold_years: hold period in years; None keeps
+            config.DEFAULT_HOLD_YEARS. Drives the static DCF, the
+            sensitivity grid, both solvers and the value-add engine —
+            they must not be given different holds.
+        transaction_costs: per-analysis override of
+            config.TRANSACTION_COSTS. A partial dict is merged onto the
+            defaults; a missing key means "default", never zero.
 
     Returns:
         Updated AnalysisResult with all analysis fields populated
@@ -221,6 +230,8 @@ def run_analysis(result: AnalysisResult, progress: Callable = None,
             capex=capex,
             custom_scenarios=custom_scenarios,
             expense_ratio=result.expense_ratio,
+            hold_years=hold_years,
+            transaction_costs=transaction_costs,
         )
         result.scenario_results = model["scenarios"]
         result.sensitivity = model["sensitivity"]
@@ -235,13 +246,17 @@ def run_analysis(result: AnalysisResult, progress: Callable = None,
                 asking_price=asking,
                 capex=capex,
                 custom_scenarios=custom_va_scenarios,
+                hold_years=hold_years,
+                transaction_costs=transaction_costs,
             )
 
         # Step 7: Max price solver
         _progress(7, 9, "Solving for maximum offer price...")
         from model.solver import solve_max_price, solve_max_price_value_add
-        solver_kwargs = (
-            {"target_irr": solver_target_irr} if solver_target_irr else {})
+        solver_kwargs = {"hold_years": hold_years,
+                         "transaction_costs": transaction_costs}
+        if solver_target_irr:
+            solver_kwargs["target_irr"] = solver_target_irr
         result.max_offer = solve_max_price(
             adjusted_ttm_noi=result.adjusted_noi,
             capex=capex,
@@ -336,6 +351,8 @@ def run_analysis(result: AnalysisResult, progress: Callable = None,
             max_offer=result.max_offer,
             output_dir=output_dir,
             property_name=property_name,
+            hold_years=hold_years,
+            transaction_costs=transaction_costs,
         )
     except Exception as e:
         result.errors.append(f"Template generation failed: {e}")
