@@ -42,75 +42,23 @@ import os
 import re
 import sys
 import tempfile
-import unicodedata
 import zipfile
 from collections import Counter
 from pathlib import Path
 
-# ---------------------------------------------------------------- constants
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-BROKERS = [
-    "marcus & millichap", "marcus and millichap", "cbre", "colliers",
-    "cushman & wakefield", "cushman and wakefield", "jll", "jones lang",
-    "newmark", "svn", "berkadia", "sharplaunch", "ten-x", "crexi",
-    "the storage acquisition group", "argus self storage", "skyview advisors",
-    "bellomy & associates", "matthews real estate", "walker & dunlop",
-]
+# One definition of "where is this property", shared with extract/parser.py. A
+# second copy here is how the two drifted apart the first time.
+from extract.location import (  # noqa: E402
+    ADDR_RE_LOOSE, BROKERS, STATES, ST_CODES, find_locations, locate,
+    norm_text, tidy_city,
+)
+
+# ---------------------------------------------------------------- constants
 
 # Marcus & Millichap activity IDs, e.g. ZAH0320384 -- externally-recognised deal keys.
 ACTIVITY_RE = re.compile(r"\b(Z[A-Z]{2}\d{6,8})\b")
-
-STATES = {
-    "alabama": "AL", "alaska": "AK", "arizona": "AZ", "arkansas": "AR",
-    "california": "CA", "colorado": "CO", "connecticut": "CT", "delaware": "DE",
-    "florida": "FL", "georgia": "GA", "hawaii": "HI", "idaho": "ID",
-    "illinois": "IL", "indiana": "IN", "iowa": "IA", "kansas": "KS",
-    "kentucky": "KY", "louisiana": "LA", "maine": "ME", "maryland": "MD",
-    "massachusetts": "MA", "michigan": "MI", "minnesota": "MN",
-    "mississippi": "MS", "missouri": "MO", "montana": "MT", "nebraska": "NE",
-    "nevada": "NV", "new hampshire": "NH", "new jersey": "NJ",
-    "new mexico": "NM", "new york": "NY", "north carolina": "NC",
-    "north dakota": "ND", "ohio": "OH", "oklahoma": "OK", "oregon": "OR",
-    "pennsylvania": "PA", "rhode island": "RI", "south carolina": "SC",
-    "south dakota": "SD", "tennessee": "TN", "texas": "TX", "utah": "UT",
-    "vermont": "VT", "virginia": "VA", "washington": "WA",
-    "west virginia": "WV", "wisconsin": "WI", "wyoming": "WY",
-}
-ST_CODES = set(STATES.values())
-
-_ST_ALT = "|".join(STATES)
-# The zip separator is \s* rather than \s+ on purpose: real CIM covers set the address
-# with no space at all ("63CedarMillsRd,Gordonville,TX76245" in Texoma 377 OM.pdf).
-_ZIP = r"[\.,]?\s*(\d{5})(?:-\d{4})?"
-# "…, Springfield, MO 65801"  /  "… | YORK, SC 29745"  /  "Rogers, Arkansas 72756"
-# The leading boundary is load-bearing: without it the city group runs backwards into the
-# street line and you get "BeachRdLincolnville" instead of "Lincolnville".
-ADDR_RE = re.compile(
-    r"(?:^|[,|•·])\s*([A-Za-z][A-Za-z\.\-' ]{2,28}?),\s*"
-    r"([A-Z]{2}|" + _ST_ALT + r")" + _ZIP, re.IGNORECASE)
-# Fallback for covers with no comma before the city. The street-suffix filter does the
-# work instead.
-ADDR_RE_LOOSE = re.compile(
-    r"([A-Za-z][A-Za-z\.\-' ]{2,28}?),\s*([A-Z]{2}|" + _ST_ALT + r")" + _ZIP,
-    re.IGNORECASE)
-# "… Waterloo IA 50701" - no comma at all. Common in folder/file names.
-ADDR_RE_NOCOMMA = re.compile(
-    r"([A-Za-z][A-Za-z\.\-' ]{2,28}?)\s+([A-Z]{2})\s+(\d{5})\b")
-
-# Tokens that are never part of a city name; used to trim a city that has run
-# backwards into the street line ('Industry Drive Bastrop' -> 'Bastrop').
-NOISE_TOKENS = {
-    "zip", "address", "location", "city", "property", "site", "state",
-    "the", "at", "of", "and", "in", "on", "is", "to", "rsf", "psf", "nrsf",
-    "sf", "sqft", "acres", "acre", "units", "unit", "price", "cap", "rate",
-    "offering", "memorandum", "subject", "located", "situated",
-}
-
-STREET_SUFFIX = re.compile(
-    r"\b(road|rd|street|st|avenue|ave|boulevard|blvd|drive|dr|highway|hwy|hway|lane|ln|"
-    r"way|court|ct|circle|cir|parkway|pkwy|place|pl|trail|trl|route|rte|loop|pike|"
-    r"terrace|ter|suite|ste|floor|fl|unit|building|bldg|north|south|east|west|"
-    r"n|s|e|w|ne|nw|se|sw|us|sr|fm|county|co)$", re.IGNORECASE)
 
 # Asset-class keyword scoring. Order matters only for tie-breaks.
 CLASS_KEYWORDS = {
@@ -143,17 +91,6 @@ PREFIX_RE = re.compile(r"^\[[^\]]{1,60}\]\s")
 OVERRIDE_FIELDS = ("ac", "st", "city", "prop", "confidence", "reason")
 
 # ---------------------------------------------------------------- helpers
-
-
-def norm_text(s: str) -> str:
-    """NFKD-normalise, strip problem codepoints, collapse whitespace."""
-    s = unicodedata.normalize("NFKD", s)
-    for bad, good in (("\u2013", "-"), ("\u2014", "-"), ("\u2018", "'"),
-                      ("\u2019", "'"), ("\u201c", '"'), ("\u201d", '"'),
-                      ("\u00a0", " "), ("\u00ad", "")):
-        s = s.replace(bad, good)
-    s = "".join(c for c in s if ord(c) < 128 or c.isalnum())
-    return re.sub(r"\s+", " ", s).strip()
 
 
 def safe_component(s: str) -> str:
@@ -211,82 +148,6 @@ def pdf_text(path: Path, pages=8):
                 cover_lines = [ln for ln in (norm_text(x) for x in txt.splitlines()) if ln]
             per.append(norm_text(txt))
     return cover_lines, " ".join(per)
-
-
-def near_broker(text: str, pos: int, window: int = 110) -> bool:
-    """Is this address sitting inside a broker's own signature block?
-
-    The window is deliberately tight. A wide window applied to a whole-document blob
-    matches the disclaimer page's dozens of broker mentions and suppresses every real
-    address in the file -- that bug cost 12 files on the first run."""
-    seg = text[max(0, pos - window): pos + window].lower()
-    return any(b in seg for b in BROKERS)
-
-
-def _tidy_city(c: str) -> str:
-    """Trim a captured city back to just the city.
-
-    The regex often runs backwards into the street line, producing
-    'Industry Drive Bastrop' or 'ZIP Mesa'. Walk the tokens from the right and stop at
-    the first one that cannot be part of a city name: a street suffix, a noise word, or
-    anything containing a digit or a period."""
-    c = c.strip(" .,-|")
-    c = re.sub(r"([A-Za-z])\s+([A-Z])(?=\s|$)", r"\1\2", c)   # 'DECATU R' -> 'DECATUR'
-    keep = []
-    for t in reversed(c.split()):
-        tl = t.strip(".,").lower()
-        if (STREET_SUFFIX.match(tl) or tl in NOISE_TOKENS
-                or any(ch.isdigit() for ch in t) or "." in t):
-            break
-        keep.append(t)
-        if len(keep) == 3:            # no US city name needs more than three words here
-            break
-    c = " ".join(reversed(keep)) if keep else ""
-
-    # Normalise casing. 'YORK' -> 'York', but leave genuine CamelCase alone so
-    # 'McKinney' and 'LaGrange' survive intact.
-    def fix(w):
-        return w if re.fullmatch(r"(?:[A-Z][a-z]+){1,3}", w) else w.title()
-    return " ".join(fix(w) for w in c.split())
-
-
-def _harvest(rx, text: str):
-    out = []
-    for m in rx.finditer(text):
-        if near_broker(text, m.start()):
-            continue
-        city = _tidy_city(m.group(1))
-        st_raw = m.group(2)
-        st = st_raw.upper() if len(st_raw) == 2 else STATES[st_raw.lower()]
-        if st not in ST_CODES or len(city) < 3:
-            continue
-        # A 'city' ending in a street suffix is really the tail of the street line.
-        last = city.split()[-1] if city.split() else city
-        if STREET_SUFFIX.match(last) or re.match(r"^\d", city):
-            continue
-        out.append((city, st, m.group(3)))
-    return out
-
-
-def find_locations(text: str):
-    """All (city, ST, zip) hits not sitting next to a broker's own office address."""
-    for rx in (ADDR_RE, ADDR_RE_LOOSE, ADDR_RE_NOCOMMA):
-        out = _harvest(rx, text)
-        if out:
-            return out
-    return []
-
-
-def locate(cover_lines, body: str):
-    """Cover page first, body only as fallback.
-
-    The cover carries the subject property's address; the disclaimer pages carry the
-    broker's. Searching the cover first avoids the confusion entirely rather than
-    relying on the proximity heuristic to untangle it afterwards."""
-    cov = find_locations(" ".join(cover_lines)) if cover_lines else []
-    if cov:
-        return cov, "cover page"
-    return find_locations(body), "body text"
 
 
 def classify(text: str):
@@ -444,7 +305,12 @@ def analyse(path: Path, check_placeholders: bool = True) -> dict:
 
     r["activity"] = ";".join(sorted(set(ACTIVITY_RE.findall(body))))
 
-    locs, src = locate(cover, body)
+    # locate() wants per-page text, cover first; `cover` is that page split into
+    # lines for the title heuristic, so rejoin it.
+    # allow_zipless: a filing prefix is a proposal a human confirms from the CSV,
+    # so a plausible city is worth surfacing here. The analysis pipeline, which
+    # feeds city/state into the population gate, leaves it off.
+    locs, src = locate([" ".join(cover), body], allow_zipless=True)
     if not locs:                       # last resort: the user's own filename annotation
         locs, src = find_locations(norm_text(path.stem)), "filename"
     states = sorted({loc[1] for loc in locs})
@@ -483,6 +349,10 @@ def analyse(path: Path, check_placeholders: bool = True) -> dict:
     if ac == "ZZ":
         r["confidence"] = "REVIEW"
         r["reason"] = f"{src} address OK, asset class unresolved (scores {scores}) - likely image-only OM"
+    elif "no ZIP" in src:
+        # No ZIP means nothing anchored the match; the city is plausible, not proven.
+        r["confidence"] = "REVIEW"
+        r["reason"] = f"{src} - city named without a ZIP to confirm it; class scores {scores}"
     elif src == "filename":
         r["confidence"] = "REVIEW"
         r["reason"] = f"address only from filename, not document text; class scores {scores}"
@@ -536,26 +406,33 @@ def _pair_tokens(s: str) -> set:
 
 
 def apply_pairing(rows: list) -> None:
-    """Give an unresolved file the identity of a resolved one it clearly belongs to.
+    """Give an unresolved data-room ZIP the identity of the OM that belongs to it.
 
-    This is what links a data-room zip to its OM -- e.g. 'Everything Self Storage Deal
-    Room.zip' to the OM filed under its street address. Always REVIEW, never HIGH."""
-    resolved = [r for r in rows if r["st"] not in ("ZZ", "MULTI") and not r.get("skip")]
+    Restricted to ZIP-takes-from-PDF, which is the only case this was built for
+    ('Everything Self Storage Deal Room.zip' -> the OM filed under its street
+    address). Run across PDFs it does the opposite of its job: two unrelated OMs
+    share generic operator annotations ('open', 'storage') and it hands one the
+    other's city. That is not abstaining, it is guessing with a REVIEW label on
+    top, and it mislabelled a Belton deal as Creedmoor on the sample set.
+
+    A shared token must also be substantial -- short ones are almost all filler."""
+    donors = [r for r in rows
+              if r["ext"] == ".pdf" and r["st"] not in ("ZZ", "MULTI") and not r.get("skip")]
     for r in rows:
-        if r["st"] != "ZZ" or r.get("skip"):
+        if r["ext"] != ".zip" or r["st"] != "ZZ" or r.get("skip"):
             continue
         mine = _pair_tokens(r["old"]) | _pair_tokens(r.get("prop", ""))
-        best, score = None, 0
-        for q in resolved:
+        best, best_overlap = None, set()
+        for q in donors:
             overlap = mine & (_pair_tokens(q["old"]) | _pair_tokens(q.get("prop", "")))
-            if len(overlap) > score:
-                best, score = q, len(overlap)
-        if best and score >= 2:
+            if len(overlap) > len(best_overlap):
+                best, best_overlap = q, overlap
+        if best and len(best_overlap) >= 2 and any(len(t) >= 5 for t in best_overlap):
             if r["ac"] == "ZZ":
                 r["ac"] = best["ac"]
             r["st"], r["city"], r["confidence"] = best["st"], best["city"], "REVIEW"
-            r["reason"] = (f"paired to '{best['old'][:44]}' on {score} shared name tokens "
-                           "- verify this is the same property")
+            r["reason"] = (f"paired to '{best['old'][:44]}' on shared name tokens "
+                           f"{sorted(best_overlap)} - verify this is the same property")
 
 # ---------------------------------------------------------------- main
 
