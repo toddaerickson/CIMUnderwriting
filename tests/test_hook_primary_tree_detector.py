@@ -17,6 +17,7 @@ import json
 import os
 import subprocess
 import sys
+import time
 
 import pytest
 
@@ -276,3 +277,106 @@ def test_the_report_is_bounded(repo):
     ctx = context_of(run_hook(repo)[0])
     assert "and 20 more" in ctx
     assert ctx.count("f0") <= 25
+
+
+# ── 4. Review repairs (PR #25) ───────────────────────────────────────
+
+def test_a_second_write_to_an_ALREADY_dirty_path_is_reported(repo):
+    """The worst of the review findings. Foreign dirty state is the NORMAL
+    condition of a shared tree, so the path you then write to is routinely
+    already listed — and tracking paths alone reports nothing, in exactly the
+    situation the hook exists for."""
+    (repo / "config.py").write_text("another session's WIP\n")
+    arm(repo)
+    assert run_hook(repo)[0] is None            # quiet: nothing new yet
+
+    (repo / "config.py").write_text("MY stray write on top of it\n")
+    ctx = context_of(run_hook(repo)[0])
+    assert "config.py" in ctx
+    assert "written again" in ctx
+
+
+def test_a_rewrite_with_identical_content_and_size_still_moves_mtime(repo):
+    """Byte-identical rewrites are still writes; stat's nanosecond mtime is
+    what makes them visible."""
+    (repo / "config.py").write_text("same\n")
+    arm(repo)
+    time.sleep(0.01)
+    (repo / "config.py").write_text("same\n")
+
+    assert "config.py" in context_of(run_hook(repo)[0])
+
+
+def test_a_non_string_session_id_does_not_crash_the_hook(repo):
+    """The one absolute invariant: never fail a tool call. `cwd` was
+    type-checked and `session_id` was not."""
+    payload = json.dumps({"tool_name": "Bash", "cwd": str(repo),
+                          "session_id": 12345, "tool_input": {"command": "true"}})
+    p = subprocess.run([sys.executable, HOOK], input=payload,
+                       capture_output=True, text=True,
+                       env={**os.environ, "CLAUDE_PROJECT_DIR": str(repo)},
+                       timeout=30)
+    assert p.returncode == 0, p.stderr
+    assert p.stderr.strip() == ""
+
+
+def test_an_unreadable_tree_reports_degraded_once_not_silence(repo, tmp_path):
+    """Going quiet on failure is indistinguishable from reporting a clean
+    tree — the single thing a detector must never be."""
+    arm(repo)
+    # A git dir whose checkout root cannot be resolved.
+    broken = tmp_path / "broken.git"
+    broken.mkdir()
+
+    payload = json.dumps({"tool_name": "Bash", "cwd": str(tmp_path),
+                          "session_id": "s1", "tool_input": {"command": "true"}})
+    env = {**os.environ, "CLAUDE_PROJECT_DIR": str(repo)}
+    # Point the hook at a git dir with no resolvable work tree by making the
+    # repo's own .git unreadable as a work tree: simulate via a bare clone.
+    bare = tmp_path / "bare.git"
+    subprocess.run(["git", "clone", "-q", "--bare", str(repo), str(bare)],
+                   check=True)
+    env["CLAUDE_PROJECT_DIR"] = str(bare)
+    p = subprocess.run([sys.executable, HOOK], input=payload,
+                       capture_output=True, text=True, env=env, timeout=30)
+    assert p.returncode == 0
+    out = json.loads(p.stdout) if p.stdout.strip() else None
+    assert "MONITORING DEGRADED" in context_of(out)
+
+    # ... and only once.
+    p2 = subprocess.run([sys.executable, HOOK], input=payload,
+                        capture_output=True, text=True, env=env, timeout=30)
+    assert p2.stdout.strip() == ""
+
+
+def test_a_baseline_from_an_older_format_re_arms_rather_than_misreads(repo):
+    """A v1 baseline held a `paths` list; comparing it field-by-field against
+    the v2 shape would report nonsense."""
+    arm(repo)
+    baseline = next(p for p in (repo / ".git").iterdir()
+                    if p.name.startswith("cim-tree-baseline-"))
+    baseline.write_text(json.dumps({"paths": ["config.py"], "head": "abc",
+                                    "branch": "main"}))
+
+    assert run_hook(repo)[0] is None            # re-armed silently
+    (repo / "stray.py").write_text("x\n")
+    assert "stray.py" in context_of(run_hook(repo)[0])
+
+
+def test_gitignored_writes_are_invisible_and_the_docs_say_so(repo):
+    """A KNOWN, DELIBERATE limitation, pinned so it can't quietly become an
+    accidental one: `git status` is the eye, so .gitignore hides writes from
+    it. Reporting ignored paths would bury every real finding under .venv and
+    staticfiles churn. The claim in the docstring must match."""
+    (repo / ".gitignore").write_text("secret.env\n")
+    git(repo, "add", ".gitignore")
+    git(repo, "commit", "-q", "-m", "ignore")
+    arm(repo)
+
+    (repo / "secret.env").write_text("TOKEN=1\n")
+    assert run_hook(repo)[0] is None            # invisible, by design
+
+    source = open(HOOK).read()
+    assert "cannot see writes to GITIGNORED paths" in source
+    assert "catches every write vector" not in source, (
+        "the docstring must not claim total coverage it does not have")

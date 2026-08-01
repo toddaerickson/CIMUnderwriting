@@ -34,9 +34,16 @@ never remove, weaken, or bypass them:
   `cp`, an interpreter fed by a heredoc, and anything a script does all pass
   it untouched. Deciding that from a shell string is undecidable, so this
   hook does not predict — it snapshots the primary tree and compares after
-  each Bash call, which catches every write vector plus a concurrent
-  session's branch switch. It detects, it does not prevent: treat a report as
-  "undo this now", not as a safety net that made the write harmless.
+  each Bash call, which is blind to HOW a write happened and so covers
+  vectors nobody enumerated, plus a concurrent session's branch switch.
+  **Its limits, because a safety tool you over-trust is worse than none:** it
+  detects, it does not prevent (a report means "undo this now"); it cannot
+  see gitignored paths at all, since `git status` is its only eye; and with
+  concurrent sessions it cannot tell your write from theirs. If it cannot
+  read the tree it says MONITORING DEGRADED rather than going quiet.
+- Both hooks read `.claude/hooks/_shared_tree.py` for "which tree is primary"
+  and "is solo mode on" — one definition, so they can never protect different
+  trees. `tests/test_hook_shared_tree.py` is the CI gate on that.
 
 **The mistake this catches, because it is easy to make:** `cd` does NOT
 persist between Bash calls. A relative path in a later command therefore

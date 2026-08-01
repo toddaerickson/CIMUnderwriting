@@ -58,6 +58,9 @@ import re
 import subprocess
 import sys
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from _shared_tree import primary_git_dir, solo_mode   # noqa: E402
+
 FILE_TOOLS = ("Edit", "Write", "MultiEdit", "NotebookEdit")
 SEG_SPLIT = re.compile(r"&&|\|\||;|\||\n|\(|\)")
 HEREDOC = re.compile(r"<<-?\s*[\"']?([A-Za-z_][A-Za-z0-9_]*)[\"']?")
@@ -109,14 +112,12 @@ def _resolve_dir(tok, base):
     return p if os.path.isdir(p) else None
 
 
-def _clone_primary_gitdir(path):
-    """Abs git dir of the PRIMARY tree of `path`'s clone (a worktree's gitdir maps back
-    to the shared .git). '' if not a repo. Identifies 'this clone'."""
-    gd = git("-C", path or ".", "rev-parse", "--absolute-git-dir")
-    if not gd:
-        return ""
-    m = re.match(r"^(.*)/worktrees/[^/]+/?$", gd)
-    return os.path.abspath(m.group(1) if m else gd)
+# Primary-clone resolution and the solo-mode switches now live in
+# _shared_tree.py, imported above. They were hand-copied into the PostToolUse
+# detector, which is the divergence the single-source-of-truth rule exists to
+# prevent — and this logic in particular did not survive v1 or v2 of this
+# guard, so it is the wrong thing to keep two copies of. Behaviour here is
+# unchanged; tests/test_hook_shared_tree.py pins both callers to one answer.
 
 
 def _target_guarded(target, project_clone):
@@ -129,8 +130,8 @@ def _target_guarded(target, project_clone):
         return False                                   # a linked worktree
     if project_clone and os.path.abspath(gd) != project_clone:
         return False                                   # a different clone
-    if os.path.exists(os.path.join(gd, "cim-solo")):
-        return False                                   # per-clone solo opt-out
+    if solo_mode(os.path.abspath(gd)):
+        return False                                   # solo opt-out
     return True
 
 
@@ -339,7 +340,7 @@ def main():
     session_cwd = data.get("cwd")
     session_cwd = session_cwd if isinstance(session_cwd, str) else "."
     project_dir = os.environ.get("CLAUDE_PROJECT_DIR") or session_cwd
-    project_clone = _clone_primary_gitdir(project_dir)
+    project_clone = primary_git_dir(project_dir)
 
     if tool in FILE_TOOLS:
         fp = tin.get("file_path") or tin.get("notebook_path") or ""
