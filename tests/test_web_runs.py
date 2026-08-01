@@ -764,3 +764,31 @@ def test_the_assumptions_page_renders_the_unit_stamps(client, operator, deals_di
     assert 'name="reserve_unit_stamp" value="amount"' in content
     # And the CapEx basis selector rides in the CapEx driver row itself.
     assert 'aria-label="CapEx basis"' in content
+
+
+@pytest.mark.django_db
+def test_a_unit_change_is_refused_once_then_saves(client, operator, deals_dir):
+    """End-to-end through the real page: the refusal has to reach the
+    analyst, and the second attempt has to go through — a guard that
+    cannot be satisfied is worse than no guard."""
+    deal = _make_extracted_deal(deals_dir)
+    url = f"/deals/{deal.pk}/assumptions/"
+    post = {"asking_price": "3500000", "nrsf": "45000", "total_units": "350",
+            "ttm_noi": "250000", "ttm_egr": "420000", "state": "TX",
+            "physical_occupancy": "92", "economic_occupancy": "78",
+            "capex_estimate": "2", "capex_basis": "pct_price",
+            "capex_unit_stamp": "amount", "reserve_unit_stamp": "amount"}
+
+    first = client.post(url, post)
+    assert first.status_code == 422
+    assert "will now be read as % of price" in first.content.decode()
+    deal.refresh_from_db()
+    assert deal.assumption_overrides in (None, {})
+
+    # The page re-renders stamping the NEW selection, so resubmitting the
+    # figure the analyst just confirmed is accepted.
+    second = client.post(url, {**post, "capex_unit_stamp": "pct_price"})
+    assert second.status_code == 302
+    deal.refresh_from_db()
+    assert deal.assumption_overrides["capital_structure"]["capex_basis"] == "pct_price"
+    assert deal.assumption_overrides["cim_overrides"]["capex_estimate"] == 0.02
