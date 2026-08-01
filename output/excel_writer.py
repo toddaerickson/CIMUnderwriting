@@ -29,6 +29,10 @@ LABEL_FONT = Font(name="Calibri", size=11)
 VALUE_FONT = Font(name="Calibri", size=11)
 BOLD_FONT = Font(name="Calibri", bold=True, size=11)
 PCT_FORMAT = "0.0%"
+#: Cap rates carry three decimals. The obsolescence drift is 5–10 bp/yr, so
+#: PCT_FORMAT's single decimal would round the derived component away and
+#: make the printed build-up fail to add up.
+CAP_FORMAT = "0.000%"
 CURRENCY_FORMAT = '#,##0'
 CURRENCY_FULL = '$#,##0'
 MULTIPLE_FORMAT = '0.00"x"'
@@ -52,7 +56,8 @@ def generate_excel(property_name: str, cim_data, financial_analysis: dict,
     safe_name = _safe_filename(property_name or "Unknown_Property")
 
     # Tab 1: Inputs
-    _build_inputs_tab(wb.active, cim_data, financial_analysis)
+    _build_inputs_tab(wb.active, cim_data, financial_analysis,
+                      scenario_results)
     wb.active.title = "Inputs"
 
     # Tabs 2-4: Scenario cases (static)
@@ -94,7 +99,44 @@ def generate_excel(property_name: str, cim_data, financial_analysis: dict,
 
 # ── Tab Builders ────────────────────────────────────────────────────
 
-def _build_inputs_tab(ws, cim_data, fin):
+def _dotted(d: dict, key: str):
+    """Read `a.b` out of a nested result dict, missing levels → None.
+    Lets a comparison table name a component of `exit_cap_detail` without
+    the table's rows growing a second shape."""
+    cur = d
+    for part in str(key).split("."):
+        if not isinstance(cur, dict):
+            return None
+        cur = cur.get(part)
+    return cur
+
+
+def _exit_cap_rows(scen: dict) -> list:
+    """(label, value, format) rows that make ONE scenario's exit cap
+    retraceable — the anchor it started from, the two modifiers, and, when
+    the exit ≥ entry floor fired, the derived rate the applied one
+    replaced. Falls back to the bare applied rate for a stored run that
+    predates the derivation."""
+    d = scen.get("exit_cap_detail") or {}
+    if not d:
+        return [("Exit Cap Rate", scen.get("exit_cap"), PCT_FORMAT)]
+    rows = [
+        ("Market Cap Rate", d.get("market_cap"), CAP_FORMAT),
+        ("  Scenario Spread (bp)", d.get("scenario_spread_bps"), '#,##0.0'),
+        (f"  Obsolescence Drift ({d.get('drift_bps_per_year')} bp/yr × "
+         f"{d.get('hold_years')} yrs)", d.get("drift_total_bps"), '#,##0.0'),
+    ]
+    if scen.get("exit_cap_coerced"):
+        rows.append(("  Derived Exit Cap (before floor)",
+                     scen.get("requested_exit_cap"), CAP_FORMAT))
+        rows.append(("Exit Cap Rate (raised to entry cap)",
+                     scen.get("exit_cap"), CAP_FORMAT))
+    else:
+        rows.append(("Exit Cap Rate", scen.get("exit_cap"), CAP_FORMAT))
+    return rows
+
+
+def _build_inputs_tab(ws, cim_data, fin, scenario_results=None):
     """Build the Inputs tab with editable assumption cells."""
     ws.column_dimensions["A"].width = 30
     ws.column_dimensions["B"].width = 20
@@ -140,9 +182,14 @@ def _build_inputs_tab(ws, cim_data, fin):
     row += 1
     row = _write_section_header(ws, row, "Scenario Assumptions", cols=2)
 
-    from config import SCENARIO_DEFAULTS
+    # The params this run ACTUALLY used, read off the scenario results —
+    # not a second read of config.SCENARIO_DEFAULTS. A per-deal override
+    # or a ConfigOverride row makes those two different documents, and
+    # this is the tab a reader treats as the record of what was assumed.
+    # Config is the fallback only when no scenario ran at all.
     for scen_name in ScenarioType:
-        params = SCENARIO_DEFAULTS[scen_name]
+        scen = (scenario_results or {}).get(scen_name) or {}
+        params = scen.get("params") or cfg.SCENARIO_DEFAULTS[scen_name]
         ws.cell(row=row, column=1, value=f"── {scen_name.title()} Case ──").font = BOLD_FONT
         row += 1
         for key, val in params.items():
@@ -150,6 +197,65 @@ def _build_inputs_tab(ws, cim_data, fin):
             fmt = PCT_FORMAT if isinstance(val, float) and val < 1 else None
             row = _write_input_row(ws, row, f"  {label}", val, fmt, editable=True)
         row += 1
+
+    row = _write_exit_cap_derivation(ws, row, scenario_results)
+
+
+def _write_exit_cap_derivation(ws, row, scenario_results):
+    """The exit cap build-up: market anchor, then each scenario's parts.
+
+    The exit cap was a per-scenario constant an analyst could type; it is
+    now derived, so an applied rate printed on its own would be less
+    auditable than what it replaced. This prints the formula's terms.
+    Deliberately NOT editable-yellow: editing a derived cell in the
+    workbook detaches it from the anchor without recomputing anything.
+    """
+    detail = {}
+    for scen in (scenario_results or {}).values():
+        if isinstance(scen, dict) and scen.get("exit_cap_detail"):
+            detail = scen["exit_cap_detail"]
+            break
+    if not detail:
+        return row
+
+    row += 1
+    row = _write_section_header(ws, row, "Exit Cap Derivation", cols=2)
+    band = detail.get("age_band") or "—"
+    if detail.get("age_band_known") is False:
+        band = f"{band} (year built unknown — fallback)"
+    for label, val, fmt in (
+            ("Asset Class", detail.get("asset_class"), None),
+            ("Age Band", band, None),
+            ("Market Cap Rate", detail.get("market_cap"), PCT_FORMAT),
+            ("Market Cap Source", detail.get("source"), None),
+            ("Market Cap As Of", detail.get("as_of"), None)):
+        row = _write_input_row(ws, row, label, val, fmt)
+
+    row += 1
+    ws.cell(row=row, column=1,
+            value="Exit cap = market cap + scenario spread "
+                  "+ obsolescence drift × hold").font = LABEL_FONT
+    row += 1
+    for scen_name in ScenarioType:
+        scen = (scenario_results or {}).get(scen_name) or {}
+        d = scen.get("exit_cap_detail") or {}
+        if not d:
+            continue
+        row = _write_input_row(
+            ws, row, f"  {scen_name.title()} Spread (bp)",
+            d.get("scenario_spread_bps"), '#,##0.0')
+        row = _write_input_row(
+            ws, row, f"  {scen_name.title()} Drift ({d.get('drift_bps_per_year')} "
+                     f"bp/yr × {d.get('hold_years')} yrs)",
+            d.get("drift_total_bps"), '#,##0.0')
+        row = _write_input_row(
+            ws, row, f"  {scen_name.title()} Derived Exit Cap",
+            scen.get("requested_exit_cap"), "0.000%")
+        if scen.get("exit_cap_coerced"):
+            row = _write_input_row(
+                ws, row, f"  {scen_name.title()} Applied (raised to entry cap)",
+                scen.get("exit_cap"), "0.000%")
+    return row
 
 
 def _build_scenario_tab(ws, scen_name: str, scen: dict, cim_data):
@@ -232,7 +338,7 @@ def _build_scenario_tab(ws, scen_name: str, scen: dict, cim_data):
     row = _write_section_header(ws, row, "Exit & Returns", cols=2)
     exit_items = [
         (f"Year {years} NOI", noi_proj[-1] if noi_proj else None, CURRENCY_FULL),
-        ("Exit Cap Rate", scen.get("exit_cap"), PCT_FORMAT),
+        *_exit_cap_rows(scen),
         ("Exit Value (gross)", scen.get("exit_value"), CURRENCY_FULL),
         ("Disposition Costs", scen.get("disposition_cost"), CURRENCY_FULL),
         ("Net Sale Proceeds", scen.get("net_exit_proceeds"), CURRENCY_FULL),
@@ -449,7 +555,16 @@ def _build_value_add_tab(ws, va_results: dict, va_max_offer: dict, cim_data):
         ("Target Rent/SF/Mo", "target_rent_psf", '$#,##0.00'),
         ("Stabilized NOI", "stabilized_noi", CURRENCY_FULL),
         ("Entry Cap Rate", "entry_cap", PCT_FORMAT),
-        ("Exit Cap Rate", "exit_cap", PCT_FORMAT),
+        # The VA engine used to read its own exit cap off a second config
+        # triple 100 bp tighter than the static one. It now shares the
+        # resolver, so the anchor printed here is the same anchor the
+        # Inputs tab prints — showing it is what makes that checkable.
+        ("Market Cap Rate", "exit_cap_detail.market_cap", CAP_FORMAT),
+        ("  Scenario Spread (bp)",
+         "exit_cap_detail.scenario_spread_bps", '#,##0.0'),
+        ("  Obsolescence Drift (bp)",
+         "exit_cap_detail.drift_total_bps", '#,##0.0'),
+        ("Exit Cap Rate", "exit_cap", CAP_FORMAT),
         ("Exit Value (gross)", "exit_value", CURRENCY_FULL),
         ("Disposition Costs", "disposition_cost", CURRENCY_FULL),
         ("Net Sale Proceeds", "net_exit_proceeds", CURRENCY_FULL),
@@ -468,7 +583,7 @@ def _build_value_add_tab(ws, va_results: dict, va_max_offer: dict, cim_data):
         ws.cell(row=row, column=1, value=label).font = BOLD_FONT if is_return else LABEL_FONT
         for j, scen_name in enumerate(ScenarioType):
             scen = va_results.get(scen_name, {})
-            val = scen.get(key)
+            val = _dotted(scen, key)
             cell = ws.cell(row=row, column=j + 2, value=val)
             if fmt and val is not None:
                 cell.number_format = fmt

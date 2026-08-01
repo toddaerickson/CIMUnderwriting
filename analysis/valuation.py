@@ -22,11 +22,8 @@ from config import (DEFAULT_HOLD_YEARS, EXIT_CAP_DRIFT_BPS,
                     MARKET_CAP_AS_OF, MARKET_CAP_RATES,
                     MARKET_CAP_UNKNOWN_AGE_BAND, SCENARIO_DEFAULTS,
                     TRANSACTION_COSTS)
-from registry import ScenarioType, age_band, clamp_expense_ratio
-
-#: The class a CIM falls back to when detection found no evidence — the
-#: same string webapp.services.detect_asset_type returns by default.
-DEFAULT_ASSET_CLASS = "Self Storage"
+from registry import (DEFAULT_ASSET_TYPE, ScenarioType, age_band,
+                      clamp_expense_ratio)
 
 logger = logging.getLogger("cim_analyst")
 
@@ -91,7 +88,7 @@ def resolve_market_cap(asset_type: str = None, year_built=None, *,
     table = MARKET_CAP_RATES if base is None else base
     band = age_band(year_built, as_of)
     resolved_band = band or MARKET_CAP_UNKNOWN_AGE_BAND
-    asset_class = asset_type if asset_type in table else DEFAULT_ASSET_CLASS
+    asset_class = asset_type if asset_type in table else DEFAULT_ASSET_TYPE
     table_rate = table.get(asset_class, {}).get(resolved_band)
 
     if market_cap is not None:

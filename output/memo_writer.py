@@ -507,7 +507,13 @@ def _add_section_6(doc, scenario_results, max_offer, sources_uses=None):
 
         hold = s.get("hold_years") or len(noi_proj) or cfg.DEFAULT_HOLD_YEARS
         doc.add_paragraph(f"Entry Cap: {_fmt_pct(s.get('entry_cap'))}")
-        doc.add_paragraph(f"Exit Cap: {_fmt_pct(s.get('exit_cap'))}")
+        doc.add_paragraph(f"Exit Cap: {_fmt_cap(s.get('exit_cap'))}")
+        # The exit cap is derived, not typed. Printing only the result
+        # would make the memo less auditable than the constant it
+        # replaced, so the terms go in beside it.
+        derivation = _exit_cap_derivation(s)
+        if derivation:
+            doc.add_paragraph(f"  {derivation}")
         doc.add_paragraph(f"Exit Value (gross): {_fmt_currency(s.get('exit_value'))}")
         # Costs are stated, not folded silently into the return: an IRR
         # quoted net of costs the reader can't see is not auditable.
@@ -802,6 +808,40 @@ def _fmt_pct(val) -> str:
     if val is None:
         return "N/A"
     return f"{val:.1%}"
+
+
+def _fmt_cap(val) -> str:
+    """Cap rates to three places. The obsolescence drift is 5–10 bp/yr, so
+    at `_fmt_pct`'s single decimal the printed build-up would not add up."""
+    if val is None:
+        return "N/A"
+    return f"{val:.3%}"
+
+
+def _exit_cap_derivation(scen: dict) -> str:
+    """One sentence retracing a scenario's exit cap to its market anchor.
+
+    Empty string when the scenario carries no derivation — a stored run
+    from before the cap became derived must still render.
+    """
+    d = (scen or {}).get("exit_cap_detail") or {}
+    if not d or d.get("market_cap") is None:
+        return ""
+    band = d.get("age_band") or "—"
+    if d.get("age_band_known") is False:
+        band += ", year built unknown"
+    txt = (f"= {_fmt_cap(d['market_cap'])} market cap "
+           f"({d.get('asset_class') or 'asset'}, {band}"
+           + (f", {d['source']} source" if d.get("source") else "")
+           + (f", as of {d['as_of']}" if d.get("as_of") else "") + ")"
+           f" {d.get('scenario_spread_bps', 0):+g} bp scenario spread"
+           f" {d.get('drift_total_bps', 0):+g} bp obsolescence drift"
+           f" ({d.get('drift_bps_per_year')} bp/yr × "
+           f"{d.get('hold_years')} yrs)")
+    if scen.get("exit_cap_coerced"):
+        txt += (f" = {_fmt_cap(scen.get('requested_exit_cap'))}, then raised "
+                f"to the entry cap to hold exit ≥ entry")
+    return txt
 
 
 def _fmt_number(val, suffix="") -> str:
