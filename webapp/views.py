@@ -262,6 +262,14 @@ def deal_assumptions(request, pk):
         "reserve_field": form["operating_reserve"],
         "reserve_basis_field": form["operating_reserve_basis"],
         "gp_coinvest_field": form["gp_coinvest_pct"],
+        # The levered lens's inputs (item E3b). Labels live in forms.py
+        # beside the unit rules that convert them, so the template never
+        # has to know which of these is a percent and which is a ratio.
+        "debt_fields": [{"label": label, "field": form[f"debt_{name}"]}
+                        for name, label in f.DEBT_FORM_LABELS],
+        "waterfall_fields": [{"label": label, "field": form[f"wf_{name}"]}
+                             for name, label in f.WF_FORM_LABELS],
+        "am_fee_field": form["am_fee_pct"],
     }
     ctx.update(strip_ctx)
     return render(request, "webapp/assumptions.html", ctx, status=status)
@@ -444,6 +452,11 @@ def deal_detail(request, pk):
             ctx.update(results_ctx.capital_context(r))
         elif tab == "returns":
             ctx.update(results_ctx.returns_context(r))
+            # The levered second lens, below the unlevered tables on the
+            # same tab. Not its own tab: a lens you have to go looking for
+            # is not a second lens, and the unlevered screen stays first
+            # because it is still the primary gate.
+            ctx.update(results_ctx.levered_context(r))
         elif tab == "financials":
             ctx.update(results_ctx.financials_context(r))
             ctx["benchmark_rows"] = services.expense_benchmark_rows(deal)

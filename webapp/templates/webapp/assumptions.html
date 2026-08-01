@@ -337,6 +337,52 @@
       </div>
     </details>
 
+    {% comment %} Debt & waterfall (item E3b). Its own section rather than
+       another block inside Scenarios: these price a SECOND lens, not the
+       unlevered screen, and burying them under "Scenarios" would imply
+       they move the primary IRR gate. They do not — financing costs stay
+       out of the unlevered basis by design. Same 15rem auto-fit track and
+       10rem label column as Timing, Costs & Capital above; see the note
+       there for why neither number is free to change. {% endcomment %}
+    <details class="bg-white border border-slate-200 rounded-lg">
+      <summary class="cursor-pointer select-none px-4 py-2 text-sm font-semibold" title="The loan is sized once off the base case — the lesser of LTV, DSCR and debt yield — and carried through all three scenarios. The unlevered IRR gate is unaffected: financing costs sit outside the DCF basis.">Debt &amp; Waterfall <span class="font-normal text-slate-500">(Levered Lens)</span></summary>
+      <div class="px-4 pb-3">
+        <div class="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1">Senior Loan</div>
+        <div class="grid gap-x-4 gap-y-1.5 grid-cols-[repeat(auto-fit,minmax(min(15rem,100%),1fr))]">
+          {% for f in debt_fields %}
+          <label class="grid grid-cols-[10rem_1fr] items-center gap-x-2 text-xs text-slate-600"><span>{{ f.label }}</span>
+            {{ f.field }}
+          </label>
+          {% endfor %}
+        </div>
+        {% comment %} The divider stays: these are two different
+           instruments feeding two different modules, and an analyst
+           hunting for the pref rate should jump to a block rather than
+           read fourteen labels. Tightened to the gap-y-1.5 field rhythm
+           used everywhere else on the page. {% endcomment %}
+        <div class="mt-1.5 pt-1.5 border-t border-slate-100">
+          <div class="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1">LP Waterfall &amp; Fees</div>
+          <div class="grid gap-x-4 gap-y-1.5 grid-cols-[repeat(auto-fit,minmax(min(15rem,100%),1fr))]">
+            {% for f in waterfall_fields %}
+            <label class="grid grid-cols-[10rem_1fr] items-center gap-x-2 text-xs text-slate-600"><span>{{ f.label }}</span>
+              {{ f.field }}
+            </label>
+            {% endfor %}
+            <label class="grid grid-cols-[10rem_1fr] items-center gap-x-2 text-xs text-slate-600"><span title="Charged above the waterfall, on invested equity measured at the start of each period">AM Fee (% equity)</span>
+              {{ am_fee_field }}
+            </label>
+          </div>
+        </div>
+        {% comment %} One line, not three. How the loan is sized and why
+           the unlevered gate does not move are policy facts, so they ride
+           on the summary's title= (the same move this page already makes
+           at Market Cap and Replacement Cost). What stays visible is the
+           part that changes what these fields DO: two conventions have no
+           box here. {% endcomment %}
+        <p class="mt-1 text-xs text-slate-500">Fixed-rate terms only. Floating paper, and the pref/promote conventions with no box here, are recorded in each run&rsquo;s assumption stamp.</p>
+      </div>
+    </details>
+
     <details class="bg-white border border-slate-200 rounded-lg">
       <summary class="cursor-pointer select-none px-4 py-2 text-sm font-semibold">Replacement Cost Benchmarks ($/SF)</summary>
       <div class="px-4 pb-3">

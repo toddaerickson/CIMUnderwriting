@@ -7,6 +7,7 @@ and check_input_from_cleaned (÷100, read-only) — never in custom form
 fields, so bound redisplay round-trips the raw submitted strings
 untouched.
 """
+import dataclasses
 import logging
 import math
 
@@ -16,9 +17,12 @@ from django.utils import timezone
 import config as cfg
 from analysis import checks
 from analysis.checks import noi_recon_tolerance      # noqa: F401 (re-export)
+from model import waterfall as wf_mod
+from model.debt import resolve_debt_terms
 from model.returns_model import (BASIS_AMOUNT, BASIS_LABELS, BASIS_PCT_PRICE,
                                  BASIS_PER_SF, BASIS_PER_UNIT, CAPEX_BASES,
                                  RESERVE_BASES)
+from model.waterfall import resolve_waterfall_terms
 from webapp.services import ASSET_TYPES
 from registry import ScenarioType
 
@@ -129,6 +133,62 @@ BASIS_UNIT_STAMPS = {
                                 "the operating reserve"),
 }
 
+# Debt, waterfall and the AM fee (item E3b) — the inputs behind the
+# levered lens, which item E3a computes on every deal at config defaults.
+# Stored as `debt_terms` / `waterfall_terms` deltas and a top-level
+# `am_fee_pct`, the three override keys webapp.services already reads.
+#
+# NOT settings-page editable, and not `_PATCHED_DICTS` entries: same lane
+# and same reason as the capital block above — a patched dict is mutated
+# in place for one deal's run, so anything resolving it outside that lock
+# reads another deal's terms.
+#
+# Three debt keys are deliberately absent. `loan_type` has one execution.
+# `index_rate`/`spread` are a MODE, not two more boxes:
+# `resolve_debt_terms` only clears the seeded fixed rate when a floating
+# half arrives WITHOUT an explicit `rate`, and this form prefills `rate`
+# from the resolved terms — so a naive floating pair would post a fixed
+# rate beside them on every save, hit the "both named, fixed wins"
+# branch, and silently ignore what was typed. That needs a fixed/floating
+# selector and there is no JavaScript on this page. Config is bank
+# fixed-rate paper; floating stays override-only. Those keys are CARRIED
+# FORWARD on save (see build_overrides) so an unrelated edit here cannot
+# quietly convert a floating deal to the config fixed rate.
+DEBT_FORM_LABELS = [
+    ("rate", "Interest Rate (%)"),
+    ("amort_years", "Amortization (yrs)"),
+    ("io_months", "Interest-Only (mos)"),
+    ("term_years", "Loan Term (yrs)"),
+    ("max_ltv", "Max LTV (%)"),
+    ("min_dscr", "Min DSCR (x)"),
+    ("min_debt_yield", "Min Debt Yield (%)"),
+    ("orig_fee_pct", "Origination Fee (%)"),
+    ("exit_fee_pct", "Exit Fee (%)"),
+]
+DEBT_FORM_KEYS = [k for k, _ in DEBT_FORM_LABELS]
+#: Decimal fractions in the model, whole numbers on this page — the same
+#: convention as every other percentage here. `min_dscr` is absent on
+#: purpose: it is a coverage RATIO (1.25x), which is why `DebtTerms`
+#: exempts it from its own >1.0 guard.
+DEBT_PCT_KEYS = {"rate", "max_ltv", "min_debt_yield", "orig_fee_pct",
+                 "exit_fee_pct"}
+DEBT_INT_KEYS = {"amort_years", "io_months", "term_years"}
+
+# Waterfall. `accrual_base`, `am_fee_treatment` and `catch_up` are
+# deliberately absent: each has exactly ONE implemented value and
+# `WaterfallTerms.__post_init__` raises on the other, so a dropdown whose
+# second option crashes the run is a trap, not a setting. They stay in the
+# assumption stamp, which is where an open LPA question belongs. Carried
+# forward on save for the same reason the debt keys above are.
+WF_FORM_LABELS = [
+    ("pref_rate", "Preferred Return (%)"),
+    ("promote_split", "GP Promote (%)"),
+    ("pref_compounding", "Pref Compounding"),
+    ("ordering", "Distribution Order"),
+]
+WF_FORM_KEYS = [k for k, _ in WF_FORM_LABELS]
+WF_PCT_KEYS = {"pref_rate", "promote_split"}
+
 RC_PCT_KEYS = {"soft_cost_pct", "dev_profit_pct"}
 RC_KEYS = [k for hard, site, _ in cfg.FACILITY_TYPES for k in (hard, site)] \
     + ["soft_cost_pct", "dev_profit_pct"]
@@ -216,12 +276,56 @@ def check_input_from_cleaned(cleaned, unit_mix=None) -> checks.CheckInput:
     )
 
 
+def submitted_debt_terms(cleaned) -> dict:
+    """Debt fields → a partial `debt_terms` override in MODEL units.
+
+    The ONE place the whole-number-percent → decimal conversion happens
+    for the debt block, so `clean()` validates exactly the dict
+    `build_overrides` will store. Two copies of this conversion is how a
+    form validates 6.5 as 6.5% and then saves it as 650%.
+    """
+    out = {}
+    for key in DEBT_FORM_KEYS:
+        v = cleaned.get(f"debt_{key}")
+        if v in (None, ""):
+            continue
+        if key in DEBT_PCT_KEYS:
+            out[key] = round(float(v) / 100.0, 6)
+        elif key in DEBT_INT_KEYS:
+            out[key] = int(v)
+        else:
+            out[key] = round(float(v), 6)
+    return out
+
+
+def submitted_waterfall_terms(cleaned) -> dict:
+    """Waterfall fields → a partial `waterfall_terms` override. The two
+    selectors carry model tokens as their values, so they pass through."""
+    out = {}
+    for key in WF_FORM_KEYS:
+        v = cleaned.get(f"wf_{key}")
+        if v in (None, ""):
+            continue
+        out[key] = round(float(v) / 100.0, 6) if key in WF_PCT_KEYS else v
+    return out
+
+
+def submitted_am_fee_pct(cleaned):
+    v = cleaned.get("am_fee_pct")
+    return None if v in (None, "") else round(float(v) / 100.0, 6)
+
+
 def _text():
     return forms.TextInput(attrs={"class": INPUT_CSS})
 
 
-def _num():
-    return forms.NumberInput(attrs={"class": INPUT_CSS, "step": "any", "min": "0"})
+def _num(minimum="0"):
+    return forms.NumberInput(attrs={"class": INPUT_CSS, "step": "any",
+                                    "min": minimum})
+
+
+def _select():
+    return forms.Select(attrs={"class": INPUT_CSS})
 
 
 class AssumptionsForm(forms.Form):
@@ -291,6 +395,36 @@ class AssumptionsForm(forms.Form):
             required=False,
             choices=[(b, BASIS_LABELS[b]) for b in RESERVE_BASES],
             widget=forms.Select(attrs={"class": INPUT_CSS}))
+        # Debt, waterfall and the AM fee (item E3b). Bounds are chosen so
+        # that every `DebtTerms` / `WaterfallTerms` raise is unreachable
+        # FROM THIS FORM — `max_value=100` on the percent fields keeps a
+        # 6.5-means-6.5% typo out of a decimal field, and amortization and
+        # term cannot be zero, which would otherwise size a loan off a
+        # 1200%/yr constant. The dataclass guards stay as the backstop for
+        # the CLI and stored rows, which is what E1 built them for; this is
+        # the boundary, so the message arrives while a human is looking.
+        for key in DEBT_FORM_KEYS:
+            if key in DEBT_INT_KEYS:
+                self.fields[f"debt_{key}"] = forms.IntegerField(
+                    required=False, min_value=0 if key == "io_months" else 1,
+                    widget=_num("0" if key == "io_months" else "1"))
+            else:
+                self.fields[f"debt_{key}"] = forms.FloatField(
+                    required=False, min_value=0,
+                    max_value=100 if key in DEBT_PCT_KEYS else None,
+                    widget=_num())
+        for key in WF_FORM_KEYS:
+            if key in WF_PCT_KEYS:
+                self.fields[f"wf_{key}"] = forms.FloatField(
+                    required=False, min_value=0, max_value=100, widget=_num())
+        self.fields["wf_pref_compounding"] = forms.ChoiceField(
+            required=False, widget=_select(),
+            choices=[(k, v) for k, v in wf_mod.COMPOUNDING_LABELS.items()])
+        self.fields["wf_ordering"] = forms.ChoiceField(
+            required=False, widget=_select(),
+            choices=[(k, v) for k, v in wf_mod.ORDERING_LABELS.items()])
+        self.fields["am_fee_pct"] = forms.FloatField(
+            required=False, min_value=0, max_value=100, widget=_num())
         # Declared in CIM_CHAR_FIELDS for the save/initial plumbing, but
         # rendered as a constrained dropdown, not free text.
         self.fields["market_verification"] = forms.ChoiceField(
@@ -406,6 +540,30 @@ class AssumptionsForm(forms.Form):
                 f"check it is stated in that unit, then save again to "
                 f"confirm.")
 
+    def _validate_levered_terms(self, cleaned):
+        """Validate by calling the REAL resolvers, not by re-listing them.
+
+        Field bounds keep the individual typos out; they do not prove the
+        submitted set resolves. `DebtTerms` and `WaterfallTerms` own that
+        judgment and already state it in one place, so re-listing their
+        rules here is exactly the duplicated-constant divergence this repo
+        has a rule against — and it would go stale the first time a guard
+        is added. Running the resolver cannot drift from itself.
+
+        Non-field errors, for the reason `_basis_error` documents:
+        `add_error(field, ...)` detaches the field from `cleaned_data`,
+        which the live preview reads on an invalid form by design.
+        """
+        for label, resolve, submitted in (
+                ("Debt terms", resolve_debt_terms,
+                 submitted_debt_terms(cleaned)),
+                ("Waterfall terms", resolve_waterfall_terms,
+                 submitted_waterfall_terms(cleaned))):
+            try:
+                resolve(submitted)
+            except ValueError as exc:
+                self._basis_error(f"{label}: {exc}")
+
     def clean(self):
         """Run the model error-check register over the submitted values.
 
@@ -420,6 +578,7 @@ class AssumptionsForm(forms.Form):
         self._derive_income_triple(cleaned)
         self._validate_capital_bases(cleaned)
         self._confirm_changed_units(cleaned)
+        self._validate_levered_terms(cleaned)
         # parse_unit_mix needs getlist; self.data is a QueryDict for every
         # real POST but a plain dict when a form is constructed directly.
         # Without a mix the two unit-mix checks report `skipped`, which is
@@ -499,9 +658,53 @@ def build_initial(deal, eff=None) -> dict:
     # value and the basis it was entered under can never be read apart.
     if initial["capex_basis"] == BASIS_PCT_PRICE:
         initial["capex_estimate"] = _pct_display(initial.get("capex_estimate"))
+    _debt_waterfall_initial(initial, saved)
     for key, val in (saved.get("expense_line_overrides") or {}).items():
         initial[f"exp_{key}"] = val
     return initial
+
+
+def _debt_waterfall_initial(initial: dict, saved: dict) -> None:
+    """Prefill the levered block from the RESOLVED terms (item E3b).
+
+    Resolved, not `{**config, **saved}`: `resolve_debt_terms` clears the
+    seeded fixed rate for a floating-rate override, so a floating deal
+    shows a BLANK rate here. That is what lets the round trip work — a
+    blank rate posts no `rate`, `build_overrides` carries `index_rate` /
+    `spread` forward, and the deal stays floating. Merging config in
+    directly would prefill 6.25%, post it, and the resolver's "both named,
+    fixed wins" branch would convert the deal to fixed paper on the first
+    unrelated save.
+
+    An unresolvable stored override (only reachable by writing
+    `assumption_overrides` outside this form) falls back to the plain
+    merge so the page still renders. Nothing is swallowed: the RUN
+    resolves the same dict unguarded in `webapp.services`, so the failure
+    still surfaces, at the one place where it changes an answer.
+    """
+    debt_saved = saved.get("debt_terms") or {}
+    wf_saved = saved.get("waterfall_terms") or {}
+    try:
+        debt = dataclasses.asdict(resolve_debt_terms(debt_saved))
+    except ValueError:
+        logger.warning("stored debt_terms override does not resolve — "
+                       "prefilling the assumptions form from the raw merge")
+        debt = {**cfg.DEBT_TERMS, **debt_saved}
+    try:
+        wf = dataclasses.asdict(resolve_waterfall_terms(wf_saved))
+    except ValueError:
+        logger.warning("stored waterfall_terms override does not resolve — "
+                       "prefilling the assumptions form from the raw merge")
+        wf = {**cfg.WATERFALL_TERMS, **wf_saved}
+    for key in DEBT_FORM_KEYS:
+        v = debt.get(key)
+        initial[f"debt_{key}"] = _pct_display(v) if key in DEBT_PCT_KEYS else v
+    for key in WF_FORM_KEYS:
+        v = wf.get(key)
+        initial[f"wf_{key}"] = _pct_display(v) if key in WF_PCT_KEYS else v
+    am = saved.get("am_fee_pct")
+    initial["am_fee_pct"] = _pct_display(cfg.AM_FEE_PCT if am in (None, "")
+                                         else am)
 
 
 def _normalize_unit_mix(raw) -> list[dict]:
@@ -822,6 +1025,32 @@ def build_overrides(cleaned, post, deal, eff=None) -> dict:
             cap[key] = v
     if cap:
         out["capital_structure"] = cap
+
+    # Debt and waterfall (item E3b). Deltas against config like every
+    # other section, but MERGED ONTO the keys this form does not own —
+    # `loan_type`, `index_rate`, `spread`, `accrual_base`,
+    # `am_fee_treatment`, `catch_up`. Rebuilding the section purely from
+    # the form would silently delete a CLI-set floating rate on the first
+    # unrelated save here: the deal keeps running, at a different cost of
+    # debt, with nothing anywhere saying so. Every capital-block key had a
+    # field, so this could not arise before; six keys here have none.
+    prev = deal.assumption_overrides or {}
+    for out_key, form_keys, submitted, defaults in (
+            ("debt_terms", DEBT_FORM_KEYS, submitted_debt_terms(cleaned),
+             cfg.DEBT_TERMS),
+            ("waterfall_terms", WF_FORM_KEYS,
+             submitted_waterfall_terms(cleaned), cfg.WATERFALL_TERMS)):
+        section = {k: v for k, v in (prev.get(out_key) or {}).items()
+                   if k not in form_keys}
+        for key, value in submitted.items():
+            if not _same(value, defaults.get(key)):
+                section[key] = value
+        if section:
+            out[out_key] = section
+
+    am_fee = submitted_am_fee_pct(cleaned)
+    if am_fee is not None and not _same(am_fee, cfg.AM_FEE_PCT):
+        out["am_fee_pct"] = am_fee
 
     return out
 

@@ -8,6 +8,7 @@ and nowhere else. Templates stay dumb; formatting stays testable.
 from itertools import zip_longest
 
 import config as cfg
+from model.debt import binding_constraint_label, displayed_rate
 
 
 def fmt_pct(v, digits=1):
@@ -242,6 +243,114 @@ def returns_context(r) -> dict:
         "sens_caps": [fmt_pct(c, digits=2) for c in sens.get("cap_values") or []],
         "sens_rows": sens_rows,
     }
+
+
+def levered_context(r) -> dict:
+    """The levered second lens (item E3b) — a pure read of what the run
+    already persisted at `debt` and `levered`.
+
+    NOTHING is recomputed here. The LP net IRR belongs to the assumption
+    set stamped with the run; a figure re-derived today against whatever
+    config says now is a different number wearing the run's date.
+
+    Absent on a run that never priced a loan (no NOI or no asking price)
+    and on every run stored before item E3a, which is why the whole block
+    is gated on `has_levered` rather than degrading into a table of N/A.
+    """
+    debt = r.get("debt") or {}
+    levered = r.get("levered") or {}
+    base = levered.get("base") or {}
+    if not levered or not base:
+        return {"has_levered": False}
+
+    scen = r.get("scenario_results") or {}
+    terms = debt.get("terms") or {}
+    hold = _hold_years(scen)
+
+    def cell(sc, key, fmt):
+        return fmt((levered.get(sc) or {}).get(key))
+
+    # Leverage is allowed to be DILUTIVE, and on this repo's config
+    # defaults it frequently is — the ~7.4% loan constant sits above a
+    # typical yield on cost. A reader who assumes a levered number must
+    # beat its unlevered one reads that as a bug, so the page says it
+    # first. Compared per scenario against the unlevered IRR the same
+    # scenario published.
+    dilutive = []
+    for sc in SCENARIOS:
+        lp = (levered.get(sc) or {}).get("lp_net_irr")
+        unl = (scen.get(sc) or {}).get("irr")
+        if lp is not None and unl is not None and lp < unl:
+            dilutive.append(sc.title())
+
+    return {
+        "has_levered": True,
+        "levered_rows": [
+            {"label": f"{hold}-Year LP Net IRR",
+             "cells": [cell(sc, "lp_net_irr", fmt_pct) for sc in SCENARIOS]},
+            {"label": f"{hold}-Year LP MOIC",
+             "cells": [cell(sc, "lp_moic", fmt_x) for sc in SCENARIOS]},
+            {"label": "GP Promote",
+             "cells": [cell(sc, "gp_promote", fmt_money) for sc in SCENARIOS]},
+            {"label": "AM Fee (total)",
+             "cells": [cell(sc, "am_fee_total", fmt_money) for sc in SCENARIOS]},
+        ],
+        # One loan, sized once off the base case and carried through all
+        # three scenarios — so this strip is scenario-independent and says
+        # so rather than being repeated three times.
+        "loan_rows": [
+            ("Loan Amount", fmt_money(debt.get("loan"))),
+            ("Bound By", binding_constraint_label(debt)),
+            ("All-In Rate", fmt_pct(displayed_rate(terms), digits=2)),
+            ("Amortization", _years(terms.get("amort_years"))),
+            ("Interest-Only", _months(terms.get("io_months"))),
+            ("Loan Term", _years(terms.get("term_years"))),
+            ("LTV", fmt_pct(debt.get("ltv"))),
+            ("Year-1 DSCR", fmt_x(debt.get("dscr_year_1"))),
+            ("Debt Yield", fmt_pct(debt.get("debt_yield"))),
+            ("Origination Fee", fmt_money(debt.get("origination_fee"))),
+            ("Payoff at Exit", fmt_money(debt.get("payoff_balance"))),
+            ("Equity Required", fmt_money(base.get("total_equity"))),
+        ],
+        "levered_years": [
+            {"year": row.get("year"),
+             "noi": fmt_money(row.get("noi")),
+             "debt_service": fmt_money(row.get("debt_service")),
+             "am_fee": fmt_money(row.get("am_fee")),
+             "levered_cf": fmt_money(row.get("levered_cf")),
+             "distribution": fmt_money(row.get("distribution")),
+             "capital_call": fmt_money(row.get("capital_call")),
+             "dscr": fmt_x(row.get("dscr"))}
+            for row in base.get("years") or []],
+        # The scope contract's rule: no LP net IRR leaves the building
+        # without its stamp. Five of these are still open LPA questions
+        # and each one changes the number.
+        "levered_stamp": [{"question": row.get("question"),
+                           "label": row.get("label")}
+                          for row in base.get("assumption_stamp") or []],
+        "levered_called_capital": bool(base.get("called_capital_after_close")),
+        "levered_capital_calls": fmt_money(base.get("capital_calls_total")),
+        "levered_reserve_drawn": fmt_money(base.get("reserve_drawn_total")),
+        "levered_matures_early": bool(debt.get("matures_before_exit")),
+        "levered_dilutive": ", ".join(dilutive),
+        "levered_no_loan": not (debt.get("loan") or 0),
+        # Promote the GP keeps that a clawback would have recovered.
+        # Zero whenever the LP ends whole, which is the common case —
+        # shown only when it is not.
+        "levered_unrecovered_promote": fmt_money(
+            (base.get("waterfall") or {}).get("unrecovered_promote")),
+        "levered_has_unrecovered_promote": bool(
+            (base.get("waterfall") or {}).get("unrecovered_promote")),
+    }
+
+
+def _years(v) -> str:
+    return f"{int(v)} yrs" if v else "N/A"
+
+
+def _months(v) -> str:
+    """0 is a real answer here — 'no IO period' — not a missing one."""
+    return f"{int(v)} mos" if v is not None else "N/A"
 
 
 def financials_context(r) -> dict:

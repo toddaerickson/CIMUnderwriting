@@ -20,6 +20,7 @@ def generate_memo(property_name: str, cim_data, gate_results: list,
                   risk_analysis: dict, max_offer: dict,
                   va_results: dict = None, va_max_offer: dict = None,
                   checks: list = None, sources_uses: dict = None,
+                  levered: dict = None, debt: dict = None,
                   output_dir: str = ".") -> str:
     """
     Generate the SS Investment Memo .docx.
@@ -58,7 +59,8 @@ def generate_memo(property_name: str, cim_data, gate_results: list,
     _add_section_5(doc, rent_analysis)
 
     # ── Section 6: Valuation & Returns ──────────────────────────
-    _add_section_6(doc, scenario_results, max_offer, sources_uses)
+    _add_section_6(doc, scenario_results, max_offer, sources_uses,
+                   levered, debt)
 
     # ── Section 7: Value-Add Opportunities ──────────────────────
     _add_section_7(doc, value_add, va_results, va_max_offer)
@@ -484,7 +486,8 @@ def _add_section_5(doc, rent):
         doc.add_paragraph(gap["narrative"])
 
 
-def _add_section_6(doc, scenario_results, max_offer, sources_uses=None):
+def _add_section_6(doc, scenario_results, max_offer, sources_uses=None,
+                   levered=None, debt=None):
     doc.add_heading("6. Valuation & Returns", level=1)
 
     if not scenario_results:
@@ -528,6 +531,7 @@ def _add_section_6(doc, scenario_results, max_offer, sources_uses=None):
         doc.add_paragraph(f"Yield on Cost: {_fmt_pct(s.get('yield_on_cost'))}")
 
     _add_sources_uses(doc, sources_uses)
+    _add_levered_returns(doc, levered, debt, scenario_results)
 
     # Max offer
     if max_offer:
@@ -586,6 +590,108 @@ def _add_sources_uses(doc, sources_uses):
             f"WARNING: Sources and Uses are out of balance by "
             f"{_fmt_currency(abs(sources_uses.get('delta') or 0))}. The "
             f"returns above are computed on the Uses figure.")
+
+
+def _add_levered_returns(doc, levered, debt, scenario_results):
+    """The levered second lens under section 6 (item E3b).
+
+    A level-2 subsection, not a new numbered section: ten numbered
+    sections are referenced from the recommendation text and the CLI
+    summary, and renumbering them to insert a presentation block is churn
+    with a real chance of an off-by-one.
+
+    Every figure is read off the persisted `levered` / `debt` payload —
+    nothing is recomputed, so the memo cannot state a return the model did
+    not produce. Absent entirely on a deal that priced no loan, which is
+    why this returns early instead of printing a table of N/A.
+    """
+    levered = levered or {}
+    base = levered.get("base") or {}
+    if not base:
+        return
+    debt = debt or {}
+    terms = debt.get("terms") or {}
+    hold = _hold_years(scenario_results)
+
+    doc.add_heading("Levered Returns (LP Net)", level=2)
+
+    from model.debt import binding_constraint_label, displayed_rate
+
+    rate = displayed_rate(terms)
+    doc.add_paragraph(
+        f"Senior loan {_fmt_currency(debt.get('loan'))} at "
+        f"{_fmt_pct(rate)}, {_fmt_number(terms.get('amort_years'))}-year "
+        f"amortization, {_fmt_number(terms.get('io_months'))} months IO, "
+        f"{_fmt_number(terms.get('term_years'))}-year term. Sized off the "
+        f"base case at the lesser of LTV, DSCR and debt yield; bound by "
+        f"{binding_constraint_label(debt)} at "
+        f"{_fmt_pct(debt.get('ltv'))} LTV, "
+        f"{_fmt_x(debt.get('dscr_year_1'))} Year-1 DSCR and "
+        f"{_fmt_pct(debt.get('debt_yield'))} debt yield. The SAME loan is "
+        f"carried through all three scenarios — sizing per scenario would "
+        f"hand the bear case a smaller loan and flatten the downside it "
+        f"exists to show.")
+
+    rows = [("LP Net IRR", "lp_net_irr", _fmt_pct),
+            ("LP MOIC", "lp_moic", _fmt_x),
+            ("GP Promote", "gp_promote", _fmt_currency),
+            ("AM Fee (total)", "am_fee_total", _fmt_currency),
+            ("Equity Required", "total_equity", _fmt_currency)]
+    table = doc.add_table(rows=len(rows) + 1, cols=4)
+    table.style = "Light Grid Accent 1"
+    header = table.rows[0].cells
+    header[0].text = f"{hold}-Year Levered"
+    for i, scen in enumerate(("bear", "base", "bull"), start=1):
+        header[i].text = scen.title()
+    for r, (label, key, fmt) in enumerate(rows, start=1):
+        cells = table.rows[r].cells
+        cells[0].text = label
+        for i, scen in enumerate(("bear", "base", "bull"), start=1):
+            cells[i].text = fmt((levered.get(scen) or {}).get(key))
+    doc.add_paragraph()
+
+    # Leverage is allowed to be dilutive, and on config defaults it often
+    # is. Saying so in the memo stops a reader treating an LP net IRR
+    # below the unlevered screen as an arithmetic error.
+    dilutive = [scen.title() for scen in ("bear", "base", "bull")
+                if (levered.get(scen) or {}).get("lp_net_irr") is not None
+                and ((scenario_results or {}).get(scen) or {}).get("irr")
+                is not None
+                and (levered[scen]["lp_net_irr"]
+                     < scenario_results[scen]["irr"])]
+    if dilutive:
+        doc.add_paragraph(
+            f"Leverage is DILUTIVE in the {', '.join(dilutive)} case(s): LP "
+            f"net IRR is below the unlevered IRR because the loan constant "
+            f"sits above the deal's yield on cost. This is an outcome, not "
+            f"an error.")
+    if debt.get("matures_before_exit"):
+        doc.add_paragraph(
+            "WARNING: the loan matures before the hold ends. These figures "
+            "amortize straight past maturity — no refinancing, rate reset "
+            "or prepayment cost is modeled.")
+    if base.get("called_capital_after_close"):
+        doc.add_paragraph(
+            f"WARNING: this deal calls "
+            f"{_fmt_currency(base.get('capital_calls_total'))} of capital "
+            f"after close "
+            f"({_fmt_currency(base.get('reserve_drawn_total'))} covered by "
+            f"the operating reserve). Called capital accrues preferred "
+            f"return from the following period.")
+    unrecovered = (base.get("waterfall") or {}).get("unrecovered_promote")
+    if unrecovered:
+        doc.add_paragraph(
+            f"WARNING: {_fmt_currency(unrecovered)} of promote was paid "
+            f"before a later capital call and the deal ends short of "
+            f"capital plus preferred return. These fund terms carry no "
+            f"clawback, so the GP keeps it.")
+
+    # Not optional and not a footnote: five of these are open LPA
+    # questions and each one moves the LP net IRR printed above.
+    doc.add_heading("Levered Assumptions", level=3)
+    for row in base.get("assumption_stamp") or []:
+        doc.add_paragraph(f"{row.get('label')} — {row.get('question')}",
+                          style="List Bullet")
 
 
 def _add_section_7(doc, value_add, va_results=None, va_max_offer=None):
@@ -848,6 +954,15 @@ def _fmt_number(val, suffix="") -> str:
     if val is None:
         return "N/A"
     return f"{val:,.0f}{suffix}"
+
+
+def _fmt_x(val) -> str:
+    """Multiples and coverage ratios. NOT `_fmt_number(v, "x")`: that
+    rounds to whole numbers, which prints a 1.25x DSCR as "1x" and a
+    1.39x MOIC as "1x" — the two decimals are the entire content."""
+    if val is None:
+        return "N/A"
+    return f"{val:.2f}x"
 
 
 def _safe_filename(name: str) -> str:
