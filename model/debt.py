@@ -1,0 +1,401 @@
+"""
+Item E1 — the debt layer.
+
+Pure functions over a frozen `DebtTerms`. No Django import, no config
+mutation, nothing read at import time — the same contract
+`analysis/checks.py` and the Sources & Uses block in
+`model/returns_model.py` already keep, so this runs identically from the
+web app, the CLI and a test.
+
+Three jobs, in the order a lender does them:
+
+1. **Size the loan** — `size_loan` takes the MINIMUM of the LTV, DSCR and
+   debt-yield caps and reports which one bound. Never LTV alone; a loan
+   sized on value while its coverage tests fail is the first item on the
+   design doc's list of common errors.
+2. **Amortize it** — `amortization_schedule` rolls the balance forward
+   MONTHLY and aggregates to annual debt service, because an annual
+   approximation misprices the interest/principal split and the payoff
+   balance, and the payoff is what the exit year actually pays.
+3. **Charge for it** — origination at close, exit fee on the payoff.
+
+`build_debt_schedule` composes all three and returns the dict item E3
+will hand to `build_sources_uses` (`senior_debt`, `financing_costs`) and
+to the levered cash flows.
+
+**Nothing outside `tests/` imports this yet.** E1 ships the engine; E3
+wires it. `tests/test_debt.py` asserts that, which is the proof no
+published unlevered number moved.
+
+Numeric authority: `docs/levered-waterfall-design.md` oracles 4 and 5,
+reproduced to the cent in the test module.
+"""
+
+import logging
+from dataclasses import dataclass, fields
+
+import config as cfg
+
+logger = logging.getLogger("cim_analyst")
+
+MONTHS_PER_YEAR = 12
+
+#: Balances below this are zero — a payoff of $0.004 is float noise, not
+#: money, and `fully_amortized` has to be able to say so.
+BALANCE_TOLERANCE = 0.005
+
+CONSTRAINT_LTV = "ltv"
+CONSTRAINT_DSCR = "dscr"
+CONSTRAINT_DEBT_YIELD = "debt_yield"
+
+CONSTRAINT_LABELS = {
+    CONSTRAINT_LTV: "Max LTV",
+    CONSTRAINT_DSCR: "Min DSCR",
+    CONSTRAINT_DEBT_YIELD: "Min Debt Yield",
+}
+
+NOI_BASIS_YEAR_1 = "year_1"
+NOI_BASIS_STABILIZED = "stabilized"
+
+NOI_BASIS_LABELS = {
+    NOI_BASIS_YEAR_1: "Year 1",
+    NOI_BASIS_STABILIZED: "Stabilized",
+}
+
+_INT_FIELDS = ("amort_years", "io_months", "term_years")
+_FLOAT_FIELDS = ("rate", "index_rate", "spread", "max_ltv", "min_dscr",
+                 "min_debt_yield", "orig_fee_pct", "exit_fee_pct")
+
+
+@dataclass(frozen=True)
+class DebtTerms:
+    """One senior loan. Frozen: sizing reads it from several places and a
+    term that changed underneath a schedule would be unattributable.
+
+    Threshold semantics differ by direction, and the difference matters:
+
+    * `max_ltv` is a **cap**. Zero means no debt, and it always applies.
+    * `min_dscr` and `min_debt_yield` are **coverage floors**. Zero or
+      None means the lender does not impose that test, so it contributes
+      no cap — NOT that the loan is zero. Reading a missing covenant as a
+      zero ceiling would silently refuse debt on every deal that omits
+      one.
+    """
+
+    rate: float = None
+    index_rate: float = None
+    spread: float = None
+    amort_years: int = 30
+    io_months: int = 0
+    term_years: int = 10
+    max_ltv: float = 0.65
+    min_dscr: float = 1.25
+    min_debt_yield: float = 0.10
+    orig_fee_pct: float = 0.0
+    exit_fee_pct: float = 0.0
+    loan_type: str = "senior_fixed"
+
+    def __post_init__(self):
+        """Reject terms that have no meaning before they reach the math.
+
+        `amort_years=0` is the one that matters: it would otherwise fall
+        through `monthly_payment`'s degenerate branch and produce a
+        sizing constant of 1200%/yr, which silently sizes a loan two
+        orders of magnitude too small rather than failing. `term_years=0`
+        would silently switch off both the full-IO test and the maturity
+        warning. Neither is a loan; both are caught here rather than
+        producing a confident wrong number downstream.
+        """
+        if not self.amort_years or int(self.amort_years) <= 0:
+            raise ValueError(
+                f"amort_years must be positive, got {self.amort_years!r} — "
+                "a loan with no amortization term has no defined payment.")
+        if not self.term_years or int(self.term_years) <= 0:
+            raise ValueError(
+                f"term_years must be positive, got {self.term_years!r} — "
+                "a loan with no term has no maturity date to test against.")
+        if int(self.io_months) < 0:
+            raise ValueError(f"io_months cannot be negative, got "
+                             f"{self.io_months!r}")
+        for name in ("max_ltv", "min_dscr", "min_debt_yield",
+                     "orig_fee_pct", "exit_fee_pct"):
+            value = getattr(self, name)
+            if value is not None and float(value) < 0:
+                raise ValueError(f"{name} cannot be negative, got {value!r}")
+
+    def all_in_rate(self) -> float:
+        """The annual rate actually charged.
+
+        Raises rather than falling back to zero when nothing resolves: a
+        0% loan produces a spectacular levered IRR and no error anywhere,
+        which is the worst failure mode available here.
+        """
+        if self.rate is not None:
+            return float(self.rate)
+        if self.index_rate is None and self.spread is None:
+            raise ValueError(
+                "DebtTerms has no resolvable rate — set `rate`, or set both "
+                "`index_rate` and `spread`. Defaulting to 0% would price a "
+                "free loan and overstate every levered return silently."
+            )
+        return float(self.index_rate or 0.0) + float(self.spread or 0.0)
+
+    @property
+    def interest_only_for_term(self) -> bool:
+        """True when the loan never makes an amortizing payment."""
+        return self.io_months >= self.term_years * MONTHS_PER_YEAR
+
+
+def resolve_debt_terms(overrides: dict = None) -> DebtTerms:
+    """Partial override → fully resolved terms.
+
+    Same contract as `analysis.valuation.resolve_transaction_costs` and
+    `model.returns_model.resolve_capital_structure`: omitting a key means
+    "use the default", never "zero". Pass an explicit 0 to mean zero.
+
+    Config is read at CALL time, never bound at import, so a test or a
+    future settings path that rebinds `config.DEBT_TERMS` is seen.
+    """
+    resolved = dict(cfg.DEBT_TERMS)
+    known = {f.name for f in fields(DebtTerms)}
+
+    for key, value in (overrides or {}).items():
+        if key not in known:
+            # An override row written by a future version must not take
+            # down a run on an older one.
+            logger.warning("unknown debt term %r ignored", key)
+            continue
+        if value not in (None, ""):
+            resolved[key] = value
+
+    unknown = set(resolved) - known
+    if unknown:
+        logger.warning("config.DEBT_TERMS has unknown keys %s — ignored",
+                       sorted(unknown))
+        for key in unknown:
+            resolved.pop(key)
+
+    for key in _INT_FIELDS:
+        if resolved.get(key) is not None:
+            resolved[key] = int(resolved[key])
+    for key in _FLOAT_FIELDS:
+        if resolved.get(key) is not None:
+            resolved[key] = float(resolved[key])
+    return DebtTerms(**resolved)
+
+
+def monthly_payment(principal: float, annual_rate: float,
+                    amort_years: int) -> float:
+    """Level monthly payment fully amortizing `principal` over
+    `amort_years`.
+
+    A zero rate is straight-line principal, not a division by zero.
+    """
+    principal = float(principal or 0.0)
+    if principal <= 0:
+        return 0.0
+    periods = int(amort_years or 0) * MONTHS_PER_YEAR
+    if periods <= 0:
+        raise ValueError(
+            f"amort_years must be positive, got {amort_years!r} — returning "
+            "the whole principal as a monthly payment would size a loan two "
+            "orders of magnitude too small without saying so.")
+    rate = float(annual_rate) / MONTHS_PER_YEAR
+    if rate == 0:
+        return principal / periods
+    return principal * rate / (1 - (1 + rate) ** -periods)
+
+
+def sizing_constant(terms: DebtTerms) -> float:
+    """Annual debt service per $1 of loan, used for the DSCR test.
+
+    The payment the loan actually has to cover. A loan that is
+    interest-only for its whole term never makes an amortizing payment,
+    so testing one would understate what it supports. A loan with a
+    PARTIAL IO period does make that payment before maturity, so it is
+    tested on the amortizing constant — sizing partial IO on its IO
+    payment is the design doc's "max-leverage sizing with no covenant
+    headroom", and on the oracle-5 fixture it would lend $7.38M where
+    $6.33M is covered.
+    """
+    rate = terms.all_in_rate()
+    if terms.interest_only_for_term:
+        return rate
+    return monthly_payment(1.0, rate, terms.amort_years) * MONTHS_PER_YEAR
+
+
+def size_loan(price: float, y1_noi: float, terms: DebtTerms, *,
+              stabilized_noi: float = None) -> dict:
+    """Loan proceeds = min(LTV cap, DSCR cap, debt-yield cap).
+
+    Every NOI basis supplied is tested, and the minimum across ALL of
+    them wins. `stabilized_noi` defaults to `y1_noi`, which collapses to
+    the single-basis case. When they differ the loan sizes off the weaker
+    test — a value-add deal underwritten to a rich stabilized NOI still
+    only borrows what its in-place NOI covers, which is what a bank does
+    and is the "DSCR tested on the wrong NOI basis" error designed out.
+
+    Returns the loan, the binding constraint and the NOI basis that bound
+    it (`None` for LTV, which has no NOI basis), every cap that was
+    considered, and the actual LTV / DSCR / debt yield at the sized loan.
+    Caps floor at zero: negative NOI supports no debt, it does not
+    support negative debt.
+    """
+    price = float(price or 0.0)
+    y1_noi = float(y1_noi or 0.0)
+    constant = sizing_constant(terms)
+
+    constraints = [{
+        "key": CONSTRAINT_LTV,
+        "label": CONSTRAINT_LABELS[CONSTRAINT_LTV],
+        "basis": None,
+        "amount": max(0.0, price * float(terms.max_ltv or 0.0)),
+    }]
+
+    bases = [(NOI_BASIS_YEAR_1, y1_noi)]
+    if stabilized_noi is not None and float(stabilized_noi) != y1_noi:
+        bases.append((NOI_BASIS_STABILIZED, float(stabilized_noi)))
+
+    for basis, noi in bases:
+        # A zero/None floor is "no covenant", so it contributes no cap.
+        if terms.min_dscr and constant > 0:
+            constraints.append({
+                "key": CONSTRAINT_DSCR,
+                "label": CONSTRAINT_LABELS[CONSTRAINT_DSCR],
+                "basis": basis,
+                "amount": max(0.0, (noi / float(terms.min_dscr)) / constant),
+            })
+        if terms.min_debt_yield:
+            constraints.append({
+                "key": CONSTRAINT_DEBT_YIELD,
+                "label": CONSTRAINT_LABELS[CONSTRAINT_DEBT_YIELD],
+                "basis": basis,
+                "amount": max(0.0, noi / float(terms.min_debt_yield)),
+            })
+
+    binding = min(constraints, key=lambda c: c["amount"])
+    loan = binding["amount"]
+
+    annual_ds = loan * constant
+    return {
+        "loan": loan,
+        "binding_constraint": binding["key"],
+        "binding_basis": binding["basis"],
+        "constraints": constraints,
+        "sizing_constant": constant,
+        "ltv": (loan / price) if price > 0 else None,
+        "dscr": (y1_noi / annual_ds) if annual_ds > 0 else None,
+        "debt_yield": (y1_noi / loan) if loan > 0 else None,
+    }
+
+
+def amortization_schedule(loan: float, terms: DebtTerms, *,
+                          hold_years: int) -> dict:
+    """Monthly roll-forward aggregated to annual debt service + payoff.
+
+    Monthly and not annual on purpose: an annual approximation gets both
+    the interest/principal split and the payoff balance wrong, and the
+    payoff is what the exit year pays. The amortizing payment is computed
+    on the full `amort_years` and is NOT re-amortized over the months
+    remaining after an IO period — that is the market convention (the
+    amortization schedule is a term-sheet number independent of IO) and
+    it is what reproduces oracle 4's payoff. The loan therefore balloons.
+
+    Two conditions are reported rather than swallowed:
+
+    * `matures_before_exit` — the hold runs past `term_years`, so the
+      balloon comes due before the sale. That is a refinancing, which E1
+      does not model; the schedule keeps amortizing past the maturity
+      date and says so instead of pretending the date is not there.
+    * `fully_amortized` — the balance reached zero inside the hold, after
+      which there is nothing left to pay.
+    """
+    loan = max(0.0, float(loan or 0.0))
+    hold_years = int(hold_years)
+    if hold_years < 1:
+        # Otherwise every series comes back empty and `payoff_balance`
+        # silently equals the loan — a schedule that says the debt was
+        # never serviced and is repaid in full.
+        raise ValueError(f"hold_years must be at least 1, got {hold_years!r}")
+    rate = terms.all_in_rate()
+    monthly_rate = rate / MONTHS_PER_YEAR
+
+    payment = monthly_payment(loan, rate, terms.amort_years)
+    io_payment = loan * monthly_rate
+
+    balance = loan
+    annual_debt_service, annual_interest = [], []
+    annual_principal, ending_balances = [], []
+    ds_ytd = interest_ytd = principal_ytd = 0.0
+
+    for month in range(1, hold_years * MONTHS_PER_YEAR + 1):
+        interest = balance * monthly_rate
+        if month <= terms.io_months:
+            principal = 0.0
+        else:
+            # Capped at the balance so the final payment cannot overshoot
+            # into a negative balance, and floored at zero so a payment
+            # short of the interest cannot silently negatively amortize.
+            principal = min(payment - interest, balance)
+            principal = max(0.0, principal)
+        balance -= principal
+
+        ds_ytd += interest + principal
+        interest_ytd += interest
+        principal_ytd += principal
+
+        if month % MONTHS_PER_YEAR == 0:
+            annual_debt_service.append(ds_ytd)
+            annual_interest.append(interest_ytd)
+            annual_principal.append(principal_ytd)
+            ending_balances.append(balance)
+            ds_ytd = interest_ytd = principal_ytd = 0.0
+
+    matures_before_exit = hold_years > terms.term_years
+    if matures_before_exit:
+        logger.warning(
+            "loan matures in year %s but the hold runs %s years — the balloon "
+            "is due before the sale. E1 does not model the refinancing; the "
+            "schedule shown amortizes past maturity.",
+            terms.term_years, hold_years)
+
+    return {
+        "loan": loan,
+        "hold_years": hold_years,
+        "rate": rate,
+        "monthly_payment": payment,
+        "io_monthly_payment": io_payment,
+        "annual_debt_service": annual_debt_service,
+        "annual_interest": annual_interest,
+        "annual_principal": annual_principal,
+        "ending_balances": ending_balances,
+        "payoff_balance": balance,
+        "matures_before_exit": matures_before_exit,
+        "fully_amortized": loan > 0 and balance <= BALANCE_TOLERANCE,
+    }
+
+
+def build_debt_schedule(price: float, y1_noi: float, terms: DebtTerms, *,
+                        hold_years: int, stabilized_noi: float = None) -> dict:
+    """Size, amortize and price the fees in one call.
+
+    `financing_costs` is the close-dated total that item E3 hands to
+    `build_sources_uses` — origination only. The exit fee is paid at sale
+    out of proceeds, so it is NOT a use of funds; putting it there would
+    inflate the basis and understate the return at both ends.
+    """
+    sized = size_loan(price, y1_noi, terms, stabilized_noi=stabilized_noi)
+    schedule = amortization_schedule(sized["loan"], terms,
+                                     hold_years=hold_years)
+
+    origination_fee = sized["loan"] * float(terms.orig_fee_pct or 0.0)
+    exit_fee = schedule["payoff_balance"] * float(terms.exit_fee_pct or 0.0)
+
+    return {
+        **sized,
+        **schedule,
+        "terms": terms,
+        "origination_fee": origination_fee,
+        "exit_fee": exit_fee,
+        "financing_costs": origination_fee,
+    }
