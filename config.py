@@ -325,7 +325,16 @@ DEFAULT_CAPEX_BASIS = "amount"
 # Defaults for model.debt.DebtTerms — a senior fixed-rate acquisition
 # loan on a stabilized storage asset. Market terms as of 2025-26, from
 # docs/levered-waterfall-design.md: banks 65-75% LTV, 1.25x DSCR, 20-25yr
-# amortization, ~5.5-6.5% fixed, debt-yield floor 8-10%.
+# amortization, ~5.5-6.5% fixed, step-down prepay, debt-yield floor 8-10%.
+#
+# Every value below is BANK paper, deliberately. The design doc describes
+# three executions and they do not mix: CMBS is the one that amortizes
+# over 30 years, and it pays for that with defeasance / yield-maintenance
+# prepay rather than the step-down assumed at `exit_fee_pct` below. An
+# earlier draft of this block took the 30-year CMBS amortization while
+# quoting the bank line above it and assuming step-down prepay — a blend
+# no lender offers, and a more favorable payment than either product
+# actually gives. Change these as a SET, to one real execution.
 #
 # Out of _PATCHED_DICTS for the reason recorded above the capital block:
 # a patched dict is mutated in place for one deal's run, so anything
@@ -346,7 +355,7 @@ DEBT_TERMS = {
     "rate": 0.0625,
     "index_rate": None,
     "spread": None,
-    "amort_years": 30,
+    "amort_years": 25,        # bank paper; CMBS would be 30
     "io_months": 0,
     "term_years": 10,
     "max_ltv": 0.65,

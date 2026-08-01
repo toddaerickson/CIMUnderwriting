@@ -32,9 +32,12 @@ CENT = 0.005          # "to the cent" — half a cent of slack for float noise
 #: Oracle 4's loan: $6.5M, 6.50%, 30yr amortization, 24 months IO.
 ORACLE_4 = DebtTerms(rate=0.065, amort_years=30, io_months=24, term_years=10)
 
-#: Oracle 5's loan: same rate and amortization, no IO.
+#: Oracle 5's loan: same rate and amortization, no IO. Fees are stated
+#: explicitly at zero because oracle 5 charges none — the DebtTerms
+#: default mirrors config's 1 point, which would otherwise leak in.
 ORACLE_5 = DebtTerms(rate=0.065, amort_years=30, io_months=0, term_years=10,
-                     max_ltv=0.65, min_dscr=1.25, min_debt_yield=0.10)
+                     max_ltv=0.65, min_dscr=1.25, min_debt_yield=0.10,
+                     orig_fee_pct=0.0, exit_fee_pct=0.0)
 
 
 # ── Payment arithmetic ──────────────────────────────────────────────
@@ -372,11 +375,25 @@ def test_financing_costs_are_the_close_dated_fees_only():
     assert built["exit_fee"] > 0
 
 
-def test_zero_fees_by_default():
+def test_explicitly_zeroed_fees_cost_nothing():
+    """ORACLE_5 states both fees at zero, matching the design doc's
+    oracle. Not a statement about the default — see below."""
     built = build_debt_schedule(10_000_000, 600_000, ORACLE_5, hold_years=5)
     assert built["origination_fee"] == 0.0
     assert built["exit_fee"] == 0.0
     assert built["financing_costs"] == 0.0
+
+
+def test_the_resolved_default_does_charge_an_origination_fee():
+    """The config default is 1 point at close, so a deal that never
+    touches the fee fields still pays it. Asserted because the opposite —
+    a silent 0% origination — was the drift this PR's review caught."""
+    terms = resolve_debt_terms()
+    built = build_debt_schedule(10_000_000, 600_000, terms, hold_years=5)
+    assert terms.orig_fee_pct == pytest.approx(cfg.DEBT_TERMS["orig_fee_pct"])
+    assert built["origination_fee"] > 0
+    assert built["financing_costs"] == pytest.approx(
+        built["loan"] * cfg.DEBT_TERMS["orig_fee_pct"], abs=CENT)
 
 
 def test_build_debt_schedule_carries_sizing_and_schedule_together():
@@ -404,6 +421,80 @@ def test_an_unresolvable_rate_raises_rather_than_defaulting_to_zero():
     """A silent 0% loan produces a spectacular IRR and no error."""
     with pytest.raises(ValueError, match="rate"):
         DebtTerms(amort_years=30, term_years=10).all_in_rate()
+
+
+def test_half_a_floating_pair_raises_rather_than_pricing_the_other_half_at_zero():
+    """A spread with no index is a 2.25% loan nobody offered."""
+    with pytest.raises(ValueError, match="index_rate"):
+        DebtTerms(spread=0.0225, amort_years=30, term_years=10).all_in_rate()
+    with pytest.raises(ValueError, match="spread"):
+        DebtTerms(index_rate=0.0425, amort_years=30,
+                  term_years=10).all_in_rate()
+
+
+def test_resolve_debt_terms_can_actually_reach_a_floating_rate():
+    """The regression that motivated the fix.
+
+    config seeds a fixed `rate`, and the ordinary merge rule only
+    overwrites keys the caller named — so an index/spread override used to
+    leave the seeded fixed rate standing, `all_in_rate` short-circuited on
+    it, and the floating terms were discarded in silence. This is the
+    documented way to underwrite a bridge loan, so it has to work.
+    """
+    terms = resolve_debt_terms({"index_rate": 0.05, "spread": 0.02})
+    assert terms.rate is None
+    assert terms.all_in_rate() == pytest.approx(0.07)
+    assert terms.all_in_rate() != pytest.approx(cfg.DEBT_TERMS["rate"])
+
+
+def test_a_floating_override_of_one_half_still_clears_the_seeded_fixed_rate():
+    """Half a pair must raise, not silently fall back to config's fixed
+    rate — falling back would be the same silent substitution."""
+    terms = resolve_debt_terms({"spread": 0.02})
+    assert terms.rate is None
+    with pytest.raises(ValueError, match="index_rate"):
+        terms.all_in_rate()
+
+
+def test_naming_a_fixed_rate_and_a_floating_pair_keeps_the_fixed_rate():
+    terms = resolve_debt_terms({"rate": 0.08, "index_rate": 0.05,
+                                "spread": 0.02})
+    assert terms.all_in_rate() == pytest.approx(0.08)
+
+
+def test_dataclass_defaults_do_not_drift_from_config():
+    """`DebtTerms`'s field defaults mirror config.DEBT_TERMS, and a
+    duplicated value drifts — `orig_fee_pct` already had (0.0 against
+    config's 0.01) before this test existed. CLAUDE.md allows a static
+    fallback only when the no-drift invariant is CI-guarded; this is that
+    guard.
+
+    `rate` is the deliberate exception: it stays None on the dataclass so
+    a bare `DebtTerms` raises rather than quietly pricing a loan.
+    """
+    import dataclasses
+
+    defaults = {f.name: f.default for f in dataclasses.fields(DebtTerms)}
+    drifted = {
+        key: (defaults[key], value)
+        for key, value in cfg.DEBT_TERMS.items()
+        if key != "rate" and key in defaults and defaults[key] != value
+    }
+    assert drifted == {}, (
+        "DebtTerms defaults drifted from config.DEBT_TERMS "
+        f"(field default, config value): {drifted}")
+
+
+def test_the_config_block_describes_one_real_loan_product():
+    """Bank paper amortizes over 20-25 years and prepays step-down; CMBS
+    amortizes over 30 and pays defeasance/yield-maintenance. An earlier
+    draft took CMBS amortization with a bank exit-fee assumption — a
+    blend no lender offers, and a cheaper payment than either product.
+    """
+    assert cfg.DEBT_TERMS["amort_years"] <= 25, (
+        "30-year amortization is the design doc's CMBS term; pairing it "
+        "with the step-down prepay assumed by exit_fee_pct=0 prices a "
+        "loan that does not exist")
 
 
 def test_resolve_debt_terms_uses_config_defaults():

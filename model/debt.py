@@ -82,16 +82,23 @@ class DebtTerms:
       one.
     """
 
+    # These defaults MIRROR config.DEBT_TERMS and are a fallback for
+    # direct construction only — `resolve_debt_terms` is the blessed path
+    # and reads config. Duplicated values drift, so
+    # `test_dataclass_defaults_do_not_drift_from_config` pins every one of
+    # them to config in CI. `rate` is the deliberate exception: it stays
+    # None here so a bare DebtTerms RAISES instead of quietly pricing a
+    # loan at whatever config happened to say.
     rate: float = None
     index_rate: float = None
     spread: float = None
-    amort_years: int = 30
+    amort_years: int = 25
     io_months: int = 0
     term_years: int = 10
     max_ltv: float = 0.65
     min_dscr: float = 1.25
     min_debt_yield: float = 0.10
-    orig_fee_pct: float = 0.0
+    orig_fee_pct: float = 0.01
     exit_fee_pct: float = 0.0
     loan_type: str = "senior_fixed"
 
@@ -126,19 +133,26 @@ class DebtTerms:
     def all_in_rate(self) -> float:
         """The annual rate actually charged.
 
-        Raises rather than falling back to zero when nothing resolves: a
-        0% loan produces a spectacular levered IRR and no error anywhere,
+        Two ways to say it: an all-in `rate`, or `index_rate` + `spread`
+        for floating paper. An explicit `rate` wins.
+
+        Anything unresolvable raises. Both halves of the floating pair are
+        REQUIRED — treating a missing index as zero would price a
+        spread-only loan at 2.25% and a missing spread at the bare index,
+        and either is a confident wrong number rather than an error. A 0%
+        loan produces a spectacular levered IRR and no complaint anywhere,
         which is the worst failure mode available here.
         """
         if self.rate is not None:
             return float(self.rate)
-        if self.index_rate is None and self.spread is None:
+        if self.index_rate is None or self.spread is None:
             raise ValueError(
-                "DebtTerms has no resolvable rate — set `rate`, or set both "
-                "`index_rate` and `spread`. Defaulting to 0% would price a "
-                "free loan and overstate every levered return silently."
+                "DebtTerms has no resolvable rate — set `rate`, or set BOTH "
+                f"`index_rate` and `spread` (got index_rate="
+                f"{self.index_rate!r}, spread={self.spread!r}). Treating "
+                "either half as zero would price a loan that nobody offered."
             )
-        return float(self.index_rate or 0.0) + float(self.spread or 0.0)
+        return float(self.index_rate) + float(self.spread)
 
     @property
     def interest_only_for_term(self) -> bool:
@@ -153,13 +167,24 @@ def resolve_debt_terms(overrides: dict = None) -> DebtTerms:
     `model.returns_model.resolve_capital_structure`: omitting a key means
     "use the default", never "zero". Pass an explicit 0 to mean zero.
 
+    **Switching to floating rate is a MODE change, not one more key.**
+    Config seeds a fixed `rate`, and that seed is not something an
+    `index_rate`/`spread` override can displace by the ordinary merge
+    rule — the merge only overwrites keys the caller named, so the fixed
+    rate would survive and `all_in_rate` would short-circuit on it,
+    silently returning the default and discarding the floating terms the
+    caller asked for. So supplying either half of the floating pair
+    WITHOUT an explicit `rate` clears the seeded one. Naming `rate` and a
+    floating pair together is contradictory; `rate` wins and we say so.
+
     Config is read at CALL time, never bound at import, so a test or a
     future settings path that rebinds `config.DEBT_TERMS` is seen.
     """
     resolved = dict(cfg.DEBT_TERMS)
     known = {f.name for f in fields(DebtTerms)}
+    overrides = overrides or {}
 
-    for key, value in (overrides or {}).items():
+    for key, value in overrides.items():
         if key not in known:
             # An override row written by a future version must not take
             # down a run on an older one.
@@ -167,6 +192,18 @@ def resolve_debt_terms(overrides: dict = None) -> DebtTerms:
             continue
         if value not in (None, ""):
             resolved[key] = value
+
+    asked_floating = any(overrides.get(k) not in (None, "")
+                         for k in ("index_rate", "spread"))
+    named_fixed = overrides.get("rate") not in (None, "")
+    if asked_floating and not named_fixed:
+        resolved["rate"] = None
+    elif asked_floating and named_fixed:
+        logger.warning(
+            "debt terms name both a fixed rate (%s) and floating terms "
+            "(index_rate=%s, spread=%s) — using the fixed rate",
+            resolved["rate"], resolved.get("index_rate"),
+            resolved.get("spread"))
 
     unknown = set(resolved) - known
     if unknown:
