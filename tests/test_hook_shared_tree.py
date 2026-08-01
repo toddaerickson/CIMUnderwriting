@@ -258,6 +258,42 @@ def test_guard_still_allows_plain_fetch(repo):
     assert run_guard(f"git -C {repo} fetch origin --prune", repo, repo) is None
 
 
+def test_guard_denies_the_exotic_tree_writers(repo):
+    """Second sweep. `sparse-checkout set` deletes directories from disk and
+    `checkout-index -a -f` discards uncommitted content — both were allowed by
+    the first pass, which proves the audit, not just the old list, was the bug.
+    """
+    for cmd in ("checkout-index -a -f", "read-tree -u HEAD",
+                "merge-file a.txt b.txt c.txt", "filter-branch --all",
+                "sparse-checkout init --cone", "sparse-checkout set keep",
+                "submodule update --init", "submodule deinit --all"):
+        assert run_guard(f"git -C {repo} {cmd}", repo, repo) == "deny", cmd
+
+
+def test_guard_allows_reading_sparse_checkout_and_submodule_state(repo):
+    for cmd in ("sparse-checkout list", "submodule status", "submodule summary",
+                "checkout-index --help", "read-tree --help", "submodule --help"):
+        assert run_guard(f"git -C {repo} {cmd}", repo, repo) is None, cmd
+
+
+def test_guard_allows_bundled_short_dry_run_flags(repo):
+    # `git rm -rn` and `git mv -fn` are real no-ops; denying them denies nothing
+    assert run_guard(f"git -C {repo} rm -rn config.py", repo, repo) is None
+    assert run_guard(f"git -C {repo} mv -fn config.py other.py", repo, repo) is None
+
+
+def test_a_long_flag_that_merely_contains_n_is_not_a_dry_run(repo):
+    # `--ignore-unmatch` carries an 'n'; a naive substring test would read it as
+    # a dry run and wave a real deletion through.
+    assert run_guard(f"git -C {repo} rm --ignore-unmatch config.py",
+                     repo, repo) == "deny"
+
+
+def test_guard_allows_read_only_bisect_queries(repo):
+    for cmd in ("bisect", "bisect terms", "bisect visualize", "bisect log"):
+        assert run_guard(f"git -C {repo} {cmd}", repo, repo) is None, cmd
+
+
 def test_pull_deny_reason_points_at_solo_mode_not_just_a_worktree(repo):
     payload = json.dumps({"tool_name": "Bash", "cwd": str(repo),
                           "tool_input": {"command": f"git -C {repo} pull"}})

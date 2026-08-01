@@ -37,6 +37,12 @@ version):
     unguarded because only its halves (`merge`, `rebase`) were listed while the
     compound name was not — it rewrites the tree just the same. `rm`/`mv`/`bisect`
     were the same oversight: each writes the tree without naming a listed subcommand.
+    A second, adversarial sweep then caught what the first still missed —
+    `sparse-checkout set` DELETES directories from disk, `checkout-index -a -f`
+    DISCARDS uncommitted content, and `submodule update`/`read-tree -u`/
+    `merge-file`/`filter-branch` all write tracked files. The lesson worth keeping
+    is that the audit, not the list, is the fragile part: enumerate by asking
+    "does this touch the tree", never by recognising the name.
     `fetch` stays ALLOWED — it moves remote-tracking refs only, never the working
     tree, and it is how a session syncs without touching the shared checkout.
   * Scoped to THIS clone via $CLAUDE_PROJECT_DIR — other repos are never guarded.
@@ -204,10 +210,21 @@ def _branch_mut(args):
                for a in args)                          # delete/rename/force (not list/create)
 
 
+def _dry_run(args):
+    """`--dry-run`, `-n`, and git's bundled short forms (`rm -rn`, `mv -fn`).
+
+    Bundles are scanned across SHORT flags only. The substring shortcut `clean`
+    gets away with would read the `n` in `rm --ignore-unmatch` as a dry run and
+    wave a real deletion through.
+    """
+    return "--dry-run" in args or any(
+        a.startswith("-") and not a.startswith("--") and "n" in a for a in args)
+
+
 def _mv_mut(args):
     if "--help" in args or "-h" in args:
         return False
-    return not ("--dry-run" in args or "-n" in args)
+    return not _dry_run(args)
 
 
 def _rm_mut(args):
@@ -218,7 +235,16 @@ def _rm_mut(args):
 def _bisect_mut(args):
     if "--help" in args or "-h" in args:
         return False
-    return not (args and args[0] in ("log", "view", "help"))  # start/good/bad check commits out
+    if not args:
+        return False                                   # bare `git bisect` prints status
+    return args[0] not in ("log", "view", "visualize", "terms", "help")
+
+
+def _second_word_mut(args, readonly):
+    """Deny a two-level subcommand unless its verb is in `readonly`."""
+    if "--help" in args or "-h" in args:
+        return False
+    return not (args and args[0] in readonly)
 
 
 def _is_mutation(sub, args):
@@ -247,6 +273,16 @@ def _is_mutation(sub, args):
         return _rm_mut(args)
     if sub == "bisect":
         return _bisect_mut(args)
+    if sub == "sparse-checkout":
+        return _second_word_mut(args, ("list",))
+    if sub == "submodule":
+        return _second_word_mut(args, ("status", "summary"))
+    # Plumbing that writes tracked files. None of it is run casually, so these
+    # are denied outright rather than parsed for a working-tree flag: the
+    # index-only carve-out exists for `reset`/`restore --staged`/`rm --cached`,
+    # which people use daily, not for commands reached only on purpose.
+    if sub in ("checkout-index", "read-tree", "merge-file", "filter-branch"):
+        return not ("--help" in args or "-h" in args)
     return False
 
 
