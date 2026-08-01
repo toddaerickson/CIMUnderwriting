@@ -241,6 +241,14 @@ class WaterfallTerms:
                 f"am_fee_treatment must be one of "
                 f"{sorted(AM_FEE_LABELS)}, got {self.am_fee_treatment!r}")
 
+        # Coerced HERE and not in `resolve_waterfall_terms`, so both
+        # construction paths agree. They did not: resolve coerced, direct
+        # construction did not, and `WaterfallTerms(catch_up="False")`
+        # raised "a GP catch-up tier is not supported" at a caller asking
+        # for exactly the opposite — the failure `_coerce_bool`'s own
+        # docstring names. Direct construction is the path the CLI and
+        # E3's tests take.
+        object.__setattr__(self, "catch_up", _coerce_bool(self.catch_up))
         if self.catch_up:
             raise NotImplementedError(
                 "a GP catch-up tier is not supported — the operator scoped "
@@ -330,8 +338,8 @@ def resolve_waterfall_terms(overrides: dict = None,
     for key in _STR_FIELDS:
         if resolved.get(key) is not None:
             resolved[key] = str(resolved[key])
-    if "catch_up" in resolved:
-        resolved["catch_up"] = _coerce_bool(resolved["catch_up"])
+    # `catch_up` is deliberately NOT coerced here — `WaterfallTerms`
+    # does it, so the direct-construction path gets the same treatment.
     return WaterfallTerms(**resolved)
 
 

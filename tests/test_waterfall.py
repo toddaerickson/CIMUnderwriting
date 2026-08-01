@@ -814,15 +814,27 @@ def test_nan_terms_are_rejected():
         WaterfallTerms(gp_coinvest_pct=None)
 
 
-def test_a_stringified_false_does_not_switch_on_the_catch_up():
+@pytest.mark.parametrize("build", [
+    lambda value: WaterfallTerms(catch_up=value),
+    lambda value: resolve_waterfall_terms({"catch_up": value}),
+], ids=["direct", "resolved"])
+def test_a_stringified_false_does_not_switch_on_the_catch_up(build):
     """`bool("False")` is True, which would fail the run with "a GP
-    catch-up tier is not supported" on terms that asked for none."""
-    assert resolve_waterfall_terms({"catch_up": "False"}).catch_up is False
-    assert resolve_waterfall_terms({"catch_up": "0"}).catch_up is False
+    catch-up tier is not supported" on terms that asked for none.
+
+    Both construction paths, because they disagreed: `resolve_waterfall_
+    terms` coerced and direct construction did not, so
+    `WaterfallTerms(catch_up="False")` raised at a caller asking for
+    exactly the opposite. Direct construction is the path the CLI and
+    E3's tests take, and only the resolved path had a test.
+    """
+    assert build("False").catch_up is False
+    assert build("0").catch_up is False
+    assert build(0).catch_up is False
     with pytest.raises(NotImplementedError, match="catch-up"):
-        resolve_waterfall_terms({"catch_up": "true"})
+        build("true")
     with pytest.raises(ValueError, match="must be a boolean"):
-        resolve_waterfall_terms({"catch_up": "maybe"})
+        build("maybe")
 
 
 # ── Resolution from config ──────────────────────────────────────────
