@@ -333,6 +333,62 @@ def test_an_alias_cannot_launder_a_mutation(repo):
     assert run_guard(f"git -C {repo} st", repo, repo) is None
 
 
+def test_an_alias_still_fails_closed_when_the_target_is_unresolvable(repo):
+    """The round-3 fix resolved aliases only once the target was known to be
+    guarded — and an unresolvable target is exactly when it is not known. So
+    `cd $UNSET && git co main` walked through the fail-closed path.
+    """
+    git(repo, "config", "alias.co", "checkout")
+    assert run_guard("cd $NOPE && git co main", repo, repo) == "deny"
+
+
+def test_an_alias_expansion_carrying_a_global_option_is_still_classified(repo):
+    # Expansion begins `-c user.name=…`, so naive parsing reads the subcommand
+    # as `-c`, which matches no rule. Globals must be skipped as in a real command.
+    git(repo, "config", "alias.setcfg",
+        "-c user.name=X commit --allow-empty -m y")
+    assert run_guard(f"git -C {repo} setcfg", repo, repo) == "deny"
+
+
+def test_a_long_alias_chain_does_not_run_out_of_depth_and_fail_open(repo):
+    # Real git follows an arbitrarily long chain; a fixed cap that gives up and
+    # allows turns "too deep to follow" into "safe".
+    for name, points_at in (("loopa", "loopb"), ("loopb", "loopc"),
+                            ("loopc", "loopd")):
+        git(repo, "config", f"alias.{name}", points_at)
+    git(repo, "config", "alias.loopd", "reset --hard")
+    assert run_guard(f"git -C {repo} loopa", repo, repo) == "deny"
+
+
+def test_guard_denies_rewrites_of_the_shared_clones_own_config(repo):
+    """These touch no tracked file but reconfigure the clone for every later
+    session — and `init --template` plants hooks that fire on `worktree add`,
+    the very command every deny message tells the operator to run.
+    """
+    for cmd in ("remote set-url origin https://elsewhere.example/r.git",
+                "remote add other https://elsewhere.example/r.git",
+                "remote rename origin upstream",
+                "branch --set-upstream-to=origin/main",
+                "worktree repair",
+                "init --template=/tmp/sometemplate"):
+        assert run_guard(f"git -C {repo} {cmd}", repo, repo) == "deny", cmd
+
+
+def test_guard_allows_reading_remotes(repo):
+    for cmd in ("remote", "remote -v", "remote show origin",
+                "remote get-url origin"):
+        assert run_guard(f"git -C {repo} {cmd}", repo, repo) is None, cmd
+
+
+def test_help_is_never_a_mutation(repo):
+    # `git commit --help` opens a man page. Denying it teaches the operator the
+    # guard cries wolf, which is how a real deny gets waved through later.
+    for cmd in ("commit --help", "rebase --help", "merge --help",
+                "apply --help", "gc --help", "revert --help",
+                "cherry-pick --help", "am --help"):
+        assert run_guard(f"git -C {repo} {cmd}", repo, repo) is None, cmd
+
+
 def test_pull_deny_reason_points_at_solo_mode_not_just_a_worktree(repo):
     payload = json.dumps({"tool_name": "Bash", "cwd": str(repo),
                           "tool_input": {"command": f"git -C {repo} pull"}})

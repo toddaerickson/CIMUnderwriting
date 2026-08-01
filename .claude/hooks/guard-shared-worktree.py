@@ -59,6 +59,14 @@ version):
   * A git mutation whose target can't be resolved (unexpanded $VAR / missing dir)
     FAILS CLOSED (deny).
 
+Scope, stated plainly because four adversarial rounds each found something the
+previous one called finished: this classifies the GIT COMMAND WORD and its
+arguments. It cannot see a shell redirect (`git archive HEAD > tracked.py`
+writes through the shell, not through git), and it never sees a non-git writer
+at all. Those are `detect-primary-tree-writes.py`'s job — it snapshots and
+compares, so it covers vectors nobody enumerated. Treat this hook as the half
+that PREVENTS what it recognises, not as a perimeter.
+
 Not defended against (ADVERSARIAL, not the accidental collisions this targets):
 `bash -c '…'`, `eval`, command substitution `$(cd … && git …)`, brace/subshell groups
 that hide a `cd`, line-continuation splits, writing then running a script,
@@ -216,8 +224,12 @@ def _restore_mut(args):
 
 
 def _branch_mut(args):
-    return any(a in ("-d", "-D", "--delete", "-m", "-M", "--move", "-f", "--force")
-               for a in args)                          # delete/rename/force (not list/create)
+    # delete/rename/force (not list/create), plus the upstream rewrites — those
+    # touch no file but persist in .git/config for every later session.
+    return any(a in ("-d", "-D", "--delete", "-m", "-M", "--move", "-f", "--force",
+                     "-u", "--unset-upstream", "--edit-description")
+               or a.startswith("--set-upstream-to")
+               for a in args)
 
 
 def _dry_run(args):
@@ -292,37 +304,49 @@ def _bisect_mut(args):
 
 
 def _second_word_mut(args, readonly):
-    """Deny a two-level subcommand unless its verb is in `readonly`."""
-    if "--help" in args or "-h" in args:
+    """Deny a two-level subcommand unless its verb is in `readonly`.
+
+    Bare (`git remote`, `git submodule`) lists or prints usage, so it is a read.
+    """
+    if "--help" in args or "-h" in args or not args:
         return False
-    return not (args and args[0] in readonly)
+    return args[0] not in readonly
 
 
 ALIAS_SHELL = "\x00ALIAS_SHELL"
 
 
-def _resolve_alias(sub, args, target, depth=3):
+def _resolve_alias(sub, args, probe, depth=10):
     """Follow `alias.<sub>` before classifying, so a rename cannot launder a
     mutation.
 
     `co = checkout` is an ordinary convenience alias, not an attack — and it
     disabled every rule in this file, because classification stopped at the
-    literal token and never asked whether the token was a rename. Bounded
-    depth, and a `!shell` alias can run anything so it fails closed.
+    literal token and never asked whether the token was a rename.
+
+    Every exit that cannot see through the alias FAILS CLOSED, because the
+    alternative is "too clever to classify" reading as "safe": a `!shell`
+    expansion runs anything, an expansion of only global options
+    (`-c user.name=x commit …`) leaves no subcommand to judge, and a chain
+    deeper than we follow is one real git resolves anyway. A cycle is the one
+    case that need not: git itself refuses it, so it never runs.
     """
     seen = set()
-    while target and sub and sub not in seen and depth > 0:
+    while probe and sub and sub not in seen and depth > 0:
         seen.add(sub)
-        expansion = git("-C", target, "config", "--get", f"alias.{sub}")
+        expansion = git("-C", probe, "config", "--get", f"alias.{sub}")
         if not expansion:
-            break
+            return sub, args
         if expansion.startswith("!"):
             return ALIAS_SHELL, args
-        parts = expansion.split()
-        if not parts:
-            break
-        sub, args = parts[0], parts[1:] + args
+        # Skip the expansion's own globals exactly as a real command's are.
+        nxt, rest = _split_git(expansion.split())
+        if not nxt:
+            return ALIAS_SHELL, args
+        sub, args = nxt, rest + args
         depth -= 1
+    if depth <= 0:
+        return ALIAS_SHELL, args
     return sub, args
 
 
@@ -330,8 +354,11 @@ def _is_mutation(sub, args):
     if sub == ALIAS_SHELL:
         return True                                    # `!cmd` alias runs anything
     if sub in ("commit", "merge", "rebase", "cherry-pick", "am", "revert", "apply",
-               "update-ref", "update-index", "gc"):
-        return True
+               "update-ref", "update-index", "gc", "init"):
+        # `init --template=<dir>` re-inits in place and COPIES HOOKS into
+        # .git/hooks — which then fire on `worktree add`, the command every
+        # deny message here tells the operator to run.
+        return not ("--help" in args or "-h" in args)
     if sub in ("checkout", "switch", "pull"):
         return not ("--help" in args or "-h" in args)  # tree/ref ops; pull = fetch + merge/rebase
     if sub == "restore":
@@ -347,7 +374,10 @@ def _is_mutation(sub, args):
     if sub == "reflog":
         return bool(args) and args[0] in ("delete", "expire")
     if sub == "worktree":
-        return bool(args) and args[0] in ("remove", "prune", "move")
+        return bool(args) and args[0] in ("remove", "prune", "move", "repair")
+    if sub == "remote":
+        # set-url/add/rename rewrite .git/config — where every session pushes.
+        return _second_word_mut(args, ("show", "get-url", "-v", "--verbose"))
     if sub == "mv":
         return _mv_mut(args)
     if sub == "rm":
@@ -483,8 +513,13 @@ def _eval_bash(cmd, session_cwd, project_clone):
         # subcommand, and reading `alias.<sub>` needs a repo to read it from.
         # Only the guarded tree pays for the lookup.
         guarded = _target_guarded(target, project_clone)
-        if guarded:
-            sub, subargs = _resolve_alias(sub, subargs, target)
+        if not _is_mutation(sub, subargs) and (guarded or target is None):
+            # Pay for the alias lookup only where a verdict could still change:
+            # the guarded tree, or an UNRESOLVED target. Probing `session_cwd`
+            # when the target did not resolve is what keeps `cd $UNSET && git co`
+            # from walking through the fail-closed path — reading an alias needs
+            # SOME repo, and the one we are running in reads global config too.
+            sub, subargs = _resolve_alias(sub, subargs, target or session_cwd)
         if not _is_mutation(sub, subargs):
             continue
         if target is None:
