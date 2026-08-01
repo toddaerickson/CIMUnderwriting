@@ -32,6 +32,7 @@ reproduced to the cent in the test module.
 """
 
 import logging
+import math
 from dataclasses import dataclass, fields
 
 import config as cfg
@@ -112,7 +113,24 @@ class DebtTerms:
         would silently switch off both the full-IO test and the maturity
         warning. Neither is a loan; both are caught here rather than
         producing a confident wrong number downstream.
+
+        NaN is rejected explicitly. Every comparison against NaN is False,
+        so it slips past a `< 0` guard untouched and then poisons the
+        arithmetic downstream WITHOUT raising: a NaN `min_dscr` produced a
+        DSCR cap of NaN, `max(0.0, nan)` returned 0.0, and `size_loan`
+        answered "this deal supports no debt, bound by DSCR" — a confident
+        sentence about a number nobody supplied.
         """
+        for name in ("rate", "index_rate", "spread", "max_ltv", "min_dscr",
+                     "min_debt_yield", "orig_fee_pct", "exit_fee_pct",
+                     "amort_years", "io_months", "term_years"):
+            value = getattr(self, name)
+            if value is not None and not math.isfinite(float(value)):
+                raise ValueError(
+                    f"{name} must be a finite number, got {value!r} — NaN "
+                    "passes every ordinary guard and then produces a "
+                    "confident wrong answer instead of an error.")
+
         if not self.amort_years or int(self.amort_years) <= 0:
             raise ValueError(
                 f"amort_years must be positive, got {self.amort_years!r} — "
@@ -124,8 +142,11 @@ class DebtTerms:
         if int(self.io_months) < 0:
             raise ValueError(f"io_months cannot be negative, got "
                              f"{self.io_months!r}")
-        for name in ("max_ltv", "min_dscr", "min_debt_yield",
-                     "orig_fee_pct", "exit_fee_pct"):
+        # The rate trio is sign-checked with the rest: a negative rate was
+        # accepted while every sibling field rejected one, and it produced
+        # a plausible-looking payment on a loan that pays you to hold it.
+        for name in ("rate", "index_rate", "spread", "max_ltv", "min_dscr",
+                     "min_debt_yield", "orig_fee_pct", "exit_fee_pct"):
             value = getattr(self, name)
             if value is not None and float(value) < 0:
                 raise ValueError(f"{name} cannot be negative, got {value!r}")
@@ -213,8 +234,16 @@ def resolve_debt_terms(overrides: dict = None) -> DebtTerms:
             resolved.pop(key)
 
     for key in _INT_FIELDS:
-        if resolved.get(key) is not None:
-            resolved[key] = int(resolved[key])
+        value = resolved.get(key)
+        if value is not None:
+            # Reject rather than truncate, for the same reason
+            # `amortization_schedule` rejects a fractional hold: int(25.9)
+            # silently re-prices the loan on a shorter schedule.
+            if float(value) != int(value):
+                raise ValueError(
+                    f"{key} must be a whole number, got {value!r} — "
+                    "truncating it would quietly re-price the loan.")
+            resolved[key] = int(value)
     for key in _FLOAT_FIELDS:
         if resolved.get(key) is not None:
             resolved[key] = float(resolved[key])
@@ -274,12 +303,28 @@ def size_loan(price: float, y1_noi: float, terms: DebtTerms, *,
 
     Returns the loan, the binding constraint and the NOI basis that bound
     it (`None` for LTV, which has no NOI basis), every cap that was
-    considered, and the actual LTV / DSCR / debt yield at the sized loan.
-    Caps floor at zero: negative NOI supports no debt, it does not
+    considered, and the resulting LTV / debt yield / DSCR at the sized
+    loan. Caps floor at zero: negative NOI supports no debt, it does not
     support negative debt.
+
+    The DSCR here is `sizing_dscr` — measured against the SIZING constant,
+    which is the covenant the lender tests. On a partial-IO loan that is
+    deliberately NOT the ratio you get by dividing Year 1 NOI by Year 1
+    debt service, because Year 1 pays interest only. Both numbers are
+    real and they are different; naming this one `dscr` invited a reader
+    to check it against the debt service in the same dict and conclude one
+    of them was wrong. `build_debt_schedule` reports the actual Year 1
+    coverage separately as `dscr_year_1`.
     """
     price = float(price or 0.0)
     y1_noi = float(y1_noi or 0.0)
+    for label, value in (("price", price), ("y1_noi", y1_noi),
+                         ("stabilized_noi", stabilized_noi)):
+        if value is not None and not math.isfinite(float(value)):
+            raise ValueError(
+                f"{label} must be a finite number, got {value!r} — a NaN "
+                "here sizes a loan of 0 and reports a binding covenant, "
+                "which reads as an answer rather than a bad input.")
     constant = sizing_constant(terms)
 
     constraints = [{
@@ -321,7 +366,7 @@ def size_loan(price: float, y1_noi: float, terms: DebtTerms, *,
         "constraints": constraints,
         "sizing_constant": constant,
         "ltv": (loan / price) if price > 0 else None,
-        "dscr": (y1_noi / annual_ds) if annual_ds > 0 else None,
+        "sizing_dscr": (y1_noi / annual_ds) if annual_ds > 0 else None,
         "debt_yield": (y1_noi / loan) if loan > 0 else None,
     }
 
@@ -348,6 +393,13 @@ def amortization_schedule(loan: float, terms: DebtTerms, *,
       which there is nothing left to pay.
     """
     loan = max(0.0, float(loan or 0.0))
+    if hold_years != int(hold_years):
+        # int() would truncate 5.9 to 5 and quietly drop eleven months of
+        # debt service — and, if the loan matured in year 6, suppress the
+        # maturity warning too.
+        raise ValueError(
+            f"hold_years must be a whole number of years, got "
+            f"{hold_years!r}; the schedule is annual.")
     hold_years = int(hold_years)
     if hold_years < 1:
         # Otherwise every series comes back empty and `payoff_balance`
@@ -420,6 +472,29 @@ def build_debt_schedule(price: float, y1_noi: float, terms: DebtTerms, *,
     `build_sources_uses` — origination only. The exit fee is paid at sale
     out of proceeds, so it is NOT a use of funds; putting it there would
     inflate the basis and understate the return at both ends.
+
+    **E3 CANNOT just hand this to `build_sources_uses` and stop.** Doing
+    only that fails `analysis.checks.sources_uses_ties`, the BLOCKING
+    check, by exactly `financing_costs`: the fee lands in Total Uses while
+    `analysis.valuation.project_cash_flows` computes
+    `total_basis = price + capex + acquisition_cost + reserve`, which has
+    no financing term. Uses and Sources still agree with each other; it is
+    the tie to the DCF basis that breaks. So E3 must ALSO extend the
+    projection to carry financing costs into the basis — the same
+    additive, zero-defaulted move item D made for `reserve`, and it has to
+    reach the scenario engine, both solvers and the value-add model, which
+    is why it is E3's change and not this module's. That is the check
+    behaving exactly as item A designed it; the failure is loud on
+    purpose. `test_financing_costs_break_the_basis_tie_until_e3_extends_it`
+    pins the arithmetic so E3 starts from a measured quantity.
+
+    Two coverage ratios come back and they are allowed to disagree:
+    `sizing_dscr` is the covenant the loan was sized against (the
+    amortizing constant), while `dscr_year_1` is Year 1 NOI over the debt
+    service actually scheduled for Year 1. On a partial-IO loan Year 1
+    pays interest only, so the actual ratio is the more generous of the
+    two. Reporting only the first next to a schedule showing the second
+    is what makes a reader think the model contradicts itself.
     """
     sized = size_loan(price, y1_noi, terms, stabilized_noi=stabilized_noi)
     schedule = amortization_schedule(sized["loan"], terms,
@@ -428,6 +503,9 @@ def build_debt_schedule(price: float, y1_noi: float, terms: DebtTerms, *,
     origination_fee = sized["loan"] * float(terms.orig_fee_pct or 0.0)
     exit_fee = schedule["payoff_balance"] * float(terms.exit_fee_pct or 0.0)
 
+    first_year_ds = (schedule["annual_debt_service"][0]
+                     if schedule["annual_debt_service"] else 0.0)
+
     return {
         **sized,
         **schedule,
@@ -435,4 +513,6 @@ def build_debt_schedule(price: float, y1_noi: float, terms: DebtTerms, *,
         "origination_fee": origination_fee,
         "exit_fee": exit_fee,
         "financing_costs": origination_fee,
+        "dscr_year_1": (float(y1_noi) / first_year_ds
+                        if first_year_ds > 0 else None),
     }

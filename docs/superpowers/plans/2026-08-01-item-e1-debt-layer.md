@@ -107,6 +107,31 @@ patched dict is mutated in place for one deal's run, so anything resolving
 it outside that run's lock reads another deal's values. Debt terms travel
 as parameters.
 
+## Handoff to E3: financing costs do not tie yet
+
+Found by an adversarial review of the integration seam, and worth stating
+plainly because E1's own docstring used to invite the mistake.
+
+`build_debt_schedule` returns `financing_costs`, and E3 will hand it to
+`build_sources_uses`. **Doing only that fails the blocking
+`analysis.checks.sources_uses_ties` check by exactly the origination
+fee.** The fee lands in Total Uses, but `project_cash_flows` computes
+`total_basis = price + capex + acquisition_cost + reserve` and has no
+financing term. Uses and Sources still agree with each other; it is the
+tie to the DCF basis that parts — $59,241.08 on the plan's fixture.
+
+That is the check behaving exactly as item A designed it: loud, blocking,
+and refusing to let the capital stack and the returns model quietly
+disagree. So E3's job is to extend the projection to carry financing
+costs into the basis — the same additive, zero-defaulted move item D made
+for `reserve`, reaching the scenario engine, both solvers and the
+value-add model. That surface is why it is E3's change and not E1's.
+
+`test_financing_costs_break_the_basis_tie_until_e3_extends_it` pins the
+arithmetic and asserts the gap EQUALS `financing_costs` — proving the
+shortfall is exactly the fee and nothing else, so E3 adds one term rather
+than going hunting. Delete that test in E3.
+
 ## Files
 
 New: `model/debt.py`, `tests/test_debt.py`, this plan.

@@ -153,7 +153,11 @@ def test_oracle_5_levered_irr():
     pipeline defaults to item B's 1.5%. The "1% closing" in the design
     doc's parenthetical is the acquisition cost inside the equity figure.
     """
-    npf = pytest.importorskip("numpy_financial")
+    # A hard import, not importorskip: numpy_financial is a pinned
+    # requirement, and this is the ONLY end-to-end levered-IRR oracle in
+    # the suite. Skipping it on a missing dependency would turn the one
+    # test that proves the debt math composes into a silent pass.
+    import numpy_financial as npf
 
     price, y1_noi, growth, exit_cap = 10_000_000, 600_000, 0.03, 0.0625
     sized = size_loan(price, y1_noi, ORACLE_5)
@@ -206,10 +210,20 @@ def test_sizing_never_uses_ltv_alone():
 # ── Sizing across both NOI bases ────────────────────────────────────
 
 def test_stabilized_noi_defaults_to_year_one():
-    """Omitting stabilized NOI collapses to the single-basis case."""
+    """Omitting stabilized NOI collapses to the single-basis case.
+
+    Comparing the two loans alone would be tautological — an equal
+    stabilized NOI takes the identical code path — so this pins the
+    observable consequence instead: no stabilized row is added, and the
+    constraint list stays exactly the single-basis one.
+    """
     one = size_loan(10_000_000, 600_000, ORACLE_5)
     both = size_loan(10_000_000, 600_000, ORACLE_5, stabilized_noi=600_000)
     assert one["loan"] == pytest.approx(both["loan"], abs=CENT)
+    for sized in (one, both):
+        assert all(c["basis"] != NOI_BASIS_STABILIZED
+                   for c in sized["constraints"])
+        assert len(sized["constraints"]) == 3      # LTV + DSCR + debt yield
 
 
 def test_a_richer_stabilized_noi_does_not_raise_the_loan():
@@ -281,6 +295,10 @@ def test_a_zero_loan_produces_a_zero_schedule():
     assert sched["payoff_balance"] == 0.0
     assert sched["annual_debt_service"] == [0.0] * 5
     assert sched["ending_balances"] == [0.0] * 5
+    # There was no loan, so nothing was amortized. Without this the
+    # `loan > 0` half of the guard is unpinned and a zero loan could
+    # report itself as fully repaid.
+    assert sched["fully_amortized"] is False
 
 
 def test_clearing_both_coverage_floors_lends_the_full_ltv():
@@ -299,11 +317,51 @@ def test_clearing_both_coverage_floors_lends_the_full_ltv():
     assert [c["key"] for c in sized["constraints"]] == [CONSTRAINT_LTV]
 
 
+def test_max_ltv_zero_means_no_debt_not_no_covenant():
+    """The asymmetry that makes the zero-floor rule safe. `max_ltv` is a
+    CAP, so zero lends nothing; if it were read like the coverage floors
+    ("no such test") an all-cash mandate would silently become a fully
+    levered one. Nothing else pinned this direction.
+    """
+    terms = DebtTerms(rate=0.065, amort_years=25, term_years=10, max_ltv=0,
+                      min_dscr=1.25, min_debt_yield=0.10)
+    sized = size_loan(10_000_000, 600_000, terms)
+    assert sized["loan"] == 0.0
+    assert sized["binding_constraint"] == CONSTRAINT_LTV
+
+
 def test_actual_metrics_are_reported_at_the_sized_loan():
     sized = size_loan(10_000_000, 600_000, ORACLE_5)
     assert sized["ltv"] == pytest.approx(0.60)
     assert sized["debt_yield"] == pytest.approx(0.10)
-    assert sized["dscr"] == pytest.approx(600_000 / 455_088.98, abs=1e-6)
+    assert sized["sizing_dscr"] == pytest.approx(600_000 / 455_088.98,
+                                                 abs=1e-6)
+
+
+def test_sizing_dscr_and_actual_year_one_dscr_are_reported_separately():
+    """They legitimately differ on a partial-IO loan, and shipping only
+    the covenant next to a schedule showing the other reads as a
+    contradiction: 1.25 beside a debt service that implies 1.56.
+    """
+    partial_io = DebtTerms(rate=0.065, amort_years=25, io_months=24,
+                           term_years=10, max_ltv=0.95, min_dscr=1.25,
+                           min_debt_yield=0.05)
+    built = build_debt_schedule(10_000_000, 600_000, partial_io, hold_years=5)
+
+    # Sized against the amortizing constant — the covenant binds exactly.
+    assert built["sizing_dscr"] == pytest.approx(1.25, abs=1e-6)
+    # Year 1 pays interest only, so actual coverage is more generous.
+    assert built["dscr_year_1"] == pytest.approx(
+        600_000 / built["annual_debt_service"][0], abs=1e-9)
+    assert built["dscr_year_1"] > built["sizing_dscr"]
+
+
+def test_year_one_dscr_equals_the_covenant_when_there_is_no_io():
+    """With no IO the two ratios must agree — otherwise one of them is
+    measuring something nobody asked for."""
+    built = build_debt_schedule(10_000_000, 600_000, ORACLE_5, hold_years=5)
+    assert built["dscr_year_1"] == pytest.approx(built["sizing_dscr"],
+                                                 abs=1e-9)
 
 
 # ── Schedule edge cases ─────────────────────────────────────────────
@@ -340,6 +398,18 @@ def test_a_hold_inside_the_term_does_not_flag_maturity():
     sched = amortization_schedule(6_000_000, ORACLE_5, hold_years=5)
     assert sched["matures_before_exit"] is False
     assert sched["fully_amortized"] is False
+
+
+def test_selling_in_the_maturity_year_is_not_a_balloon():
+    """The boundary the other two fixtures straddle without touching.
+    hold == term means the loan is repaid at sale, exactly on time — off
+    by one here would warn on every deal held to maturity.
+    """
+    terms = DebtTerms(rate=0.065, amort_years=25, term_years=5)
+    assert amortization_schedule(6_000_000, terms,
+                                 hold_years=5)["matures_before_exit"] is False
+    assert amortization_schedule(6_000_000, terms,
+                                 hold_years=6)["matures_before_exit"] is True
 
 
 def test_schedule_length_follows_the_hold_period():
@@ -402,6 +472,59 @@ def test_build_debt_schedule_carries_sizing_and_schedule_together():
     assert built["payoff_balance"] == pytest.approx(5_616_658.65, abs=CENT)
     assert built["annual_debt_service"][0] == pytest.approx(455_088.98,
                                                             abs=CENT)
+
+
+# ── The seam item E3 has to widen ───────────────────────────────────
+
+def test_financing_costs_break_the_basis_tie_until_e3_extends_it():
+    """Executable notice for item E3, not a bug in E1.
+
+    `build_debt_schedule`'s docstring says E3 hands `financing_costs` to
+    `build_sources_uses`. Doing ONLY that fails the blocking
+    `sources_uses_ties` check by exactly the origination fee: the fee is a
+    use of funds, but `project_cash_flows` computes
+    `total_basis = price + capex + acquisition_cost + reserve` and has no
+    financing term. Uses still equal Sources — it is the tie to the DCF
+    basis that parts.
+
+    Asserting the delta EQUALS financing_costs (rather than merely
+    "differs") is the point: it proves the gap is exactly the fee and
+    nothing else, so E3's fix is to add one term to the basis, not to go
+    hunting. Delete this test in E3 once the projection carries it.
+    """
+    from analysis.valuation import project_cash_flows
+    from model.returns_model import build_sources_uses
+
+    params = {"yr1_noi_bump": 0.0, "stabilized_occ": 0.88,
+              "rev_cagr_yr1_3": 0.03, "rev_cagr_yr4_5": 0.03,
+              "exp_growth": 0.03, "exit_cap": 0.0625}
+    price, capex, ttm_noi = 10_000_000.0, 0.0, 600_000.0
+
+    terms = DebtTerms(rate=0.065, amort_years=25, term_years=10,
+                      max_ltv=0.65, min_dscr=1.25, min_debt_yield=0.10,
+                      orig_fee_pct=0.01)
+    debt = build_debt_schedule(price, ttm_noi, terms, hold_years=5)
+    proj = project_cash_flows(ttm_noi, price, capex, params, hold_years=5)
+    su = build_sources_uses(price, capex,
+                            acquisition_cost=proj["acquisition_cost"],
+                            reserve=proj["reserve"],
+                            financing_costs=debt["financing_costs"],
+                            senior_debt=debt["loan"])
+
+    assert debt["financing_costs"] > 0
+    # The stack still balances against itself.
+    assert su["total_uses"] == pytest.approx(su["total_sources"], abs=CENT)
+    # But not against the DCF basis — and the gap is exactly the fee.
+    assert su["total_uses"] - proj["total_basis"] == pytest.approx(
+        debt["financing_costs"], abs=CENT)
+
+    # With no financing costs the tie holds, which is why item D shipped.
+    free = build_sources_uses(price, capex,
+                              acquisition_cost=proj["acquisition_cost"],
+                              reserve=proj["reserve"],
+                              financing_costs=0.0,
+                              senior_debt=debt["loan"])
+    assert free["total_uses"] == pytest.approx(proj["total_basis"], abs=CENT)
 
 
 # ── Terms resolution ────────────────────────────────────────────────
@@ -517,6 +640,27 @@ def test_explicit_zero_is_honoured():
     assert terms.min_debt_yield == 0.0
 
 
+def test_an_unknown_override_key_is_ignored_not_fatal():
+    """The documented forward-compatibility promise: an override row
+    written by a future version must not take down a run on an older one.
+    It was documented in a comment and never tested."""
+    terms = resolve_debt_terms({"max_ltv": 0.70,
+                                "mezzanine_rate": 0.12,   # not a field
+                                "prepay_lockout_months": 24})
+    assert terms.max_ltv == pytest.approx(0.70)
+    assert terms.all_in_rate() == pytest.approx(cfg.DEBT_TERMS["rate"])
+    assert not hasattr(terms, "mezzanine_rate")
+
+
+def test_fractional_year_overrides_are_rejected_not_truncated():
+    """int(25.9) would silently re-price the loan on a 25-year schedule."""
+    for key in ("amort_years", "term_years", "io_months"):
+        with pytest.raises(ValueError, match="whole number"):
+            resolve_debt_terms({key: 25.9})
+    # A whole number expressed as a float stays fine.
+    assert resolve_debt_terms({"amort_years": 20.0}).amort_years == 20
+
+
 # ── Terms that are not loans are rejected at the boundary ───────────
 
 def test_a_zero_amortization_term_is_rejected():
@@ -554,13 +698,65 @@ def test_a_zero_length_hold_is_rejected():
         amortization_schedule(6_000_000, ORACLE_5, hold_years=0)
 
 
+def test_a_fractional_hold_is_rejected_not_truncated():
+    """int(5.9) silently drops eleven months of debt service, and would
+    suppress a maturity warning falling in the dropped months."""
+    with pytest.raises(ValueError, match="whole number"):
+        amortization_schedule(6_000_000, ORACLE_5, hold_years=5.9)
+    # A whole number expressed as a float is fine.
+    sched = amortization_schedule(6_000_000, ORACLE_5, hold_years=5.0)
+    assert len(sched["annual_debt_service"]) == 5
+
+
+def test_nan_terms_are_rejected():
+    """Every comparison against NaN is False, so it walks past a `< 0`
+    guard and then produces a confident answer: a NaN min_dscr used to
+    size a $0 loan and report DSCR as the binding covenant."""
+    nan = float("nan")
+    with pytest.raises(ValueError, match="finite"):
+        DebtTerms(rate=0.065, amort_years=25, term_years=10, min_dscr=nan)
+    with pytest.raises(ValueError, match="finite"):
+        DebtTerms(rate=nan, amort_years=25, term_years=10)
+    with pytest.raises(ValueError, match="finite"):
+        DebtTerms(rate=0.065, amort_years=25, term_years=10,
+                  max_ltv=float("inf"))
+
+
+def test_nan_sizing_inputs_are_rejected():
+    nan = float("nan")
+    terms = DebtTerms(rate=0.065, amort_years=25, term_years=10)
+    with pytest.raises(ValueError, match="finite"):
+        size_loan(nan, 600_000, terms)
+    with pytest.raises(ValueError, match="finite"):
+        size_loan(10_000_000, nan, terms)
+    with pytest.raises(ValueError, match="finite"):
+        size_loan(10_000_000, 600_000, terms, stabilized_noi=nan)
+
+
+def test_a_negative_rate_is_rejected_like_every_other_negative_term():
+    """The rate trio was the one group not sign-checked, so a negative
+    rate produced a plausible payment on a loan that pays you to hold it."""
+    with pytest.raises(ValueError, match="rate"):
+        DebtTerms(rate=-0.05, amort_years=25, term_years=10)
+    with pytest.raises(ValueError, match="spread"):
+        DebtTerms(index_rate=0.04, spread=-0.01, amort_years=25,
+                  term_years=10)
+
+
 def test_config_defaults_sit_inside_the_researched_market_bands():
-    """Guards against a default drifting outside the terms the design doc
-    recorded (65-75% LTV, 1.25x DSCR, 8-10% debt yield, 20-30yr amort)."""
+    """Guards against a default drifting outside the BANK terms the design
+    doc recorded (65-75% LTV, 1.25x DSCR, 8-10% debt yield, 20-25yr amort,
+    5.5-6.5% fixed).
+
+    The amortization bound is 25, not 30. An earlier draft of this test
+    said 20-30 — wide enough to accept the CMBS amortization the block had
+    mistakenly taken, which is the exact drift it existed to catch. A band
+    that admits both products guards neither.
+    """
     assert 0.60 <= cfg.DEBT_TERMS["max_ltv"] <= 0.80
     assert 1.15 <= cfg.DEBT_TERMS["min_dscr"] <= 1.40
     assert 0.07 <= cfg.DEBT_TERMS["min_debt_yield"] <= 0.11
-    assert 20 <= cfg.DEBT_TERMS["amort_years"] <= 30
+    assert 20 <= cfg.DEBT_TERMS["amort_years"] <= 25
     assert 0.04 <= cfg.DEBT_TERMS["rate"] <= 0.12
 
 
