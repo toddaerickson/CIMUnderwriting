@@ -458,25 +458,61 @@ def create_deal_from_upload(cim_file, rent_roll=None, financials=None) -> Deal:
         input_files=input_files, extract_status="pending")
 
 
+# scripts/cims_rename_plan.py files CIMs under an additive "[SS-TX-Kerrville] "
+# prefix. That prefix is filing metadata, not identity: the same PDF re-uploaded
+# after a rename must still match the deal and comp-DB rows it was first ingested
+# as, or the dedupe check goes quiet and a second deal folder appears.
+CIM_PREFIX_RE = re.compile(r"^\[[^\]]{1,60}\]\s+")
+
+
+def strip_cim_prefix(name: str) -> str:
+    """Drop a leading '[...] ' filing prefix. Comparisons use this on both sides."""
+    return CIM_PREFIX_RE.sub("", name or "")
+
+
 def _comp_db_dupes(filename: str) -> list[dict]:
     """Advisory comp-DB matches; a broken comp DB must not block an
     upload, but it must be loud in the logs."""
     try:
         from data.comp_db import CompDatabase
-        stem = os.path.splitext(filename)[0]
-        return CompDatabase().find_duplicates(filename=filename, property_name=stem)
+        db = CompDatabase()
+        bare = strip_cim_prefix(filename)
+        hits = db.find_duplicates(filename=filename,
+                                  property_name=os.path.splitext(bare)[0])
+        # find_duplicates compares pdf_filename exactly, so it misses whenever the
+        # prefix differs on either side: a prefixed upload against a row stored
+        # before the rename, or a bare upload against a row stored after it. Its
+        # fuzzy branch does not cover the gap — that one matches property_name
+        # ("Expo Storage"), which rarely contains the filename stem ("expo om").
+        # Compare stripped names directly instead; this scans the comps table, but
+        # so does the LIKE above, and it is a small local DB.
+        seen = {(h["pdf_filename"], h["match_type"]) for h in hits}
+        for row in db.get_comp_summary():
+            stored = row.get("pdf_filename") or ""
+            if strip_cim_prefix(stored).casefold() != bare.casefold():
+                continue
+            if (stored, "filename") in seen:
+                continue
+            seen.add((stored, "filename"))
+            hits.append({
+                "property_name": row["property_name"], "city": row["city"],
+                "state": row["state"], "analysis_date": row["analysis_date"],
+                "pdf_filename": stored, "match_type": "filename",
+            })
+        return hits
     except Exception:
         logger.exception("comp DB duplicate check failed")
         return []
 
 
 def find_upload_duplicates(filename: str) -> list[dict]:
-    """Comp-DB matches + Deal rows whose input_files contain this
-    filename. Call BEFORE create_deal_from_upload, or the new row
-    matches itself."""
+    """Comp-DB matches + Deal rows one of whose input_files is this file,
+    compared with any '[...] ' filing prefix stripped from both sides.
+    Call BEFORE create_deal_from_upload, or the new row matches itself."""
     dupes = _comp_db_dupes(filename)
+    bare = strip_cim_prefix(filename)
     for deal in Deal.objects.all():
-        if filename in (deal.input_files or []):
+        if any(strip_cim_prefix(f) == bare for f in (deal.input_files or [])):
             dupes.append({
                 "property_name": deal.property_name, "city": deal.city,
                 "state": deal.state,
