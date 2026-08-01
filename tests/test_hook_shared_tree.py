@@ -380,6 +380,17 @@ def test_guard_allows_reading_remotes(repo):
         assert run_guard(f"git -C {repo} {cmd}", repo, repo) is None, cmd
 
 
+def test_a_consumed_help_flag_is_not_help(repo):
+    """Verified against real git: `commit --allow-empty -m --help` COMMITS —
+    HEAD moves and the message is literally "--help". So only a LEADING
+    `--help` may exempt; scanning the whole arg list fails open.
+    """
+    assert run_guard(f"git -C {repo} commit --allow-empty -m --help",
+                     repo, repo) == "deny"
+    assert run_guard(f"git -C {repo} checkout -b --help", repo, repo) == "deny"
+    assert run_guard(f"git -C {repo} commit --help", repo, repo) is None
+
+
 def test_help_is_never_a_mutation(repo):
     # `git commit --help` opens a man page. Denying it teaches the operator the
     # guard cries wolf, which is how a real deny gets waved through later.

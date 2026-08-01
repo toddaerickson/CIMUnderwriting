@@ -18,8 +18,8 @@ Mutations inside a linked worktree of this clone are ALLOWED. Mutations to OTHER
 reads, non-git Bash, read-only git, and edits outside any repo are ALLOWED — the guard
 only protects this clone's primary tree.
 
-Design (v3 — hardened over two adversarial-review rounds of the naive substring/cwd
-version):
+Design (v4 — hardened over five adversarial-review rounds of the naive substring/cwd
+version; rounds 2-5 each found real holes in what the previous round called done):
   * Heredoc bodies (`… <<EOF … EOF`) are stripped BEFORE parsing, so command examples
     inside a script/PR body written via `cat <<EOF` aren't misread as real commands.
   * Bash is split into segments; cwd is tracked with a proper `cd`/`pushd`/`popd`
@@ -53,8 +53,15 @@ version):
   * Aliases are resolved BEFORE classification. `co = checkout` is an ordinary
     convenience alias, not an attack, and it disabled every rule in this file
     at once, because classification stopped at the literal token and never
-    asked whether the token was a rename. Only the guarded tree pays for the
-    lookup; a `!shell` alias can run anything, so it fails closed.
+    asked whether the token was a rename. The lookup runs for the guarded tree
+    AND for an unresolved target — resolving only the former left
+    `cd $UNSET && git co main` walking through the fail-closed path, which is
+    the one path that most needed it. Every exit that cannot see through an
+    alias fails closed (`!shell`, a globals-only expansion, a chain deeper
+    than 10); a cycle need not, since git itself refuses to run one.
+  * `--help` exempts only as the LEADING argument. `git commit -m --help`
+    COMMITS, with "--help" as the message — verified against real git — so
+    scanning the whole arg list for it exempts a real mutation.
   * Scoped to THIS clone via $CLAUDE_PROJECT_DIR — other repos are never guarded.
   * A git mutation whose target can't be resolved (unexpanded $VAR / missing dir)
     FAILS CLOSED (deny).
@@ -206,7 +213,7 @@ def _split_git(gitargs):
 
 
 def _reset_mut(args):
-    if "--help" in args or "-h" in args:
+    if _helpish(args):
         return False
     if any(a in ("--soft", "--mixed", "--hard", "--merge", "--keep") for a in args):
         return True                                    # explicit mode = ref/tree move
@@ -216,7 +223,7 @@ def _reset_mut(args):
 
 
 def _restore_mut(args):
-    if "--help" in args or "-h" in args:
+    if _helpish(args):
         return False
     staged = "--staged" in args or "-S" in args
     worktree = "--worktree" in args or "-W" in args
@@ -230,6 +237,16 @@ def _branch_mut(args):
                      "-u", "--unset-upstream", "--edit-description")
                or a.startswith("--set-upstream-to")
                for a in args)
+
+
+def _helpish(args):
+    """Only a LEADING `--help` is help.
+
+    Verified against real git: `commit --allow-empty -m --help` COMMITS, with
+    the message set to the literal string "--help". So a positional scan of the
+    arg list exempts a real mutation — it has to be the first argument.
+    """
+    return bool(args) and args[0] in ("--help", "-h")
 
 
 def _dry_run(args):
@@ -250,7 +267,7 @@ def _positional(args):
 def _archive_mut(args):
     # Plain `git archive` streams to stdout; `-o FILE` writes, and FILE may be
     # a tracked path — `archive -o config.py HEAD` replaces it with tar bytes.
-    if "--help" in args or "-h" in args:
+    if _helpish(args):
         return False
     return "-o" in args or any(a.startswith("--output") for a in args)
 
@@ -259,7 +276,7 @@ def _symbolic_ref_mut(args):
     # `symbolic-ref HEAD refs/heads/x` repoints the checked-out branch without
     # touching one file — the collision this guard exists for, invisible to
     # `git status`. One positional reads; two write.
-    if "--help" in args or "-h" in args:
+    if _helpish(args):
         return False
     if "--delete" in args or "-d" in args:
         return True
@@ -273,7 +290,7 @@ def _config_mut(args):
     `core.hooksPath` makes every later commit run code from elsewhere — both
     persist for every session until someone notices. Reads stay allowed.
     """
-    if "--help" in args or "-h" in args:
+    if _helpish(args):
         return False
     if any(a in ("--unset", "--unset-all", "--add", "--replace-all",
                  "--edit", "-e") for a in args):
@@ -285,7 +302,7 @@ def _config_mut(args):
 
 
 def _mv_mut(args):
-    if "--help" in args or "-h" in args:
+    if _helpish(args):
         return False
     return not _dry_run(args)
 
@@ -296,7 +313,7 @@ def _rm_mut(args):
 
 
 def _bisect_mut(args):
-    if "--help" in args or "-h" in args:
+    if _helpish(args):
         return False
     if not args:
         return False                                   # bare `git bisect` prints status
@@ -308,7 +325,7 @@ def _second_word_mut(args, readonly):
 
     Bare (`git remote`, `git submodule`) lists or prints usage, so it is a read.
     """
-    if "--help" in args or "-h" in args or not args:
+    if _helpish(args) or not args:
         return False
     return args[0] not in readonly
 
@@ -358,9 +375,9 @@ def _is_mutation(sub, args):
         # `init --template=<dir>` re-inits in place and COPIES HOOKS into
         # .git/hooks — which then fire on `worktree add`, the command every
         # deny message here tells the operator to run.
-        return not ("--help" in args or "-h" in args)
+        return not _helpish(args)
     if sub in ("checkout", "switch", "pull"):
-        return not ("--help" in args or "-h" in args)  # tree/ref ops; pull = fetch + merge/rebase
+        return not _helpish(args)  # tree/ref ops; pull = fetch + merge/rebase
     if sub == "restore":
         return _restore_mut(args)
     if sub == "reset":
@@ -399,7 +416,7 @@ def _is_mutation(sub, args):
     # index-only carve-out exists for `reset`/`restore --staged`/`rm --cached`,
     # which people use daily, not for commands reached only on purpose.
     if sub in ("checkout-index", "read-tree", "merge-file", "filter-branch"):
-        return not ("--help" in args or "-h" in args)
+        return not _helpish(args)
     return False
 
 
