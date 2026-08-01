@@ -428,6 +428,22 @@ def test_template_sale_month_follows_hold_years():
     assert ws["D182"] == 84
 
 
+def test_template_acquisition_cost_lands_in_the_acquisition_block():
+    """The .xlsm used to compute its purchase-side outlay as price+capex
+    only, so its IRR disagreed with the memo and the .xlsx — which report
+    a cost-inclusive basis — on every deal. Row 24 is inside the
+    template's own ACQUISITION COST block (K27 = SUM(K23:K26))."""
+    from output.template_writer import _write_investment_cf
+    ws = _FakeSheet()
+    cim = _FakeCIM()
+    cim.capex_estimate = 0
+    _write_investment_cf(ws, cim, costs={"acquisition_closing_pct": 0.01,
+                                         "disposition_cost_pct": 0.015})
+    assert ws["K23"] == 4_000_000
+    assert ws["K24"] == pytest.approx(40_000, abs=1e-6)
+    assert ws["B24"] == "Acquisition Closing Costs"
+
+
 def test_template_selling_cost_is_wired_not_hardcoded():
     """K182 was a hardcoded 3.5%. F254 — what the scope contract pointed
     at — is the GP disposition FEE and correctly stays 0; writing the
@@ -462,6 +478,44 @@ def test_irr_gate_config_key_is_not_renamed():
     from webapp.forms import override_key_registry
     assert "min_irr_5yr" in GATES
     assert "GATES.min_irr_5yr" in override_key_registry()
+
+
+# ── 6c. Every surface labels the hold it actually measured ───────────
+
+@pytest.mark.parametrize("hold", [3, 5, 10])
+def test_results_page_labels_the_hold_it_measured(hold):
+    """The primary results screen. It used to hardcode "5-Year IRR", so a
+    3- or 10-year run displayed a correct number under a wrong label —
+    an analyst comparing deals would misread the annualization basis."""
+    from webapp.results import returns_context
+
+    ctx = returns_context({"scenario_results": run_scenarios(
+        adjusted_ttm_noi=300_000, asking_price=4_000_000, nrsf=50_000,
+        hold_years=hold)})
+    labels = [r["label"] for r in ctx["scenario_rows"]]
+    assert f"{hold}-Year IRR" in labels
+    assert f"{hold}-Year MOIC" in labels
+
+
+def test_results_page_falls_back_to_the_config_default_not_a_literal():
+    """A run stored before item B carries neither hold_years nor a
+    projection; it was always five years. The fallback must READ
+    config.DEFAULT_HOLD_YEARS rather than repeat the number."""
+    from config import DEFAULT_HOLD_YEARS
+    from webapp.results import returns_context
+
+    ctx = returns_context({"scenario_results": {"base": {"irr": 0.1}}})
+    assert f"{DEFAULT_HOLD_YEARS}-Year IRR" in [r["label"]
+                                                for r in ctx["scenario_rows"]]
+
+
+def test_excel_va_projection_is_not_truncated_at_five_years():
+    """`min(len(annual_noi), 5)` silently dropped years 6-10."""
+    import inspect
+
+    from output import excel_writer
+    src = inspect.getsource(excel_writer)
+    assert "min(len(annual_noi), 5)" not in src
 
 
 # ── 7. No duplicated projection loop survives ────────────────────────

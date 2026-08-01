@@ -417,6 +417,42 @@ def test_per_deal_costs_beat_the_global_override_row(deals_dir, monkeypatch):
                                          "disposition_cost_pct": 0.03}
     assert (run.applied_overrides["assumptions"]["transaction_costs"]
             == seen["transaction_costs"])
+    # The config stamp must not claim the global 0.02 applied — the run
+    # used the per-deal 0.045. Same rule as SOLVER_TARGET_IRR, but
+    # key-level: the disposition row DID apply and must stay.
+    assert run.applied_overrides["config"] == {
+        "TRANSACTION_COSTS.disposition_cost_pct": 0.03}
+
+
+@pytest.mark.django_db
+def test_costs_resolve_from_pristine_config_during_a_concurrent_run(deals_dir,
+                                                                    monkeypatch):
+    """CROSS-DEAL ISOLATION GATE — do not delete.
+
+    TRANSACTION_COSTS is in _PATCHED_DICTS, so the live config dict is
+    mutated in place for as long as one deal's run holds _ANALYSIS_LOCK.
+    The worker resolves costs BEFORE taking that lock, so resolving off
+    the live dict let one deal's percentages leak into a second deal that
+    never opted into them — and the unconditional stamp then reported the
+    wrong numbers as if they were correct.
+    """
+    from config import TRANSACTION_COSTS
+    from webapp.services import _patched_config, resolve_run_transaction_costs
+
+    pristine = dict(TRANSACTION_COSTS)
+    foreign = {"TRANSACTION_COSTS": {"acquisition_closing_pct": 0.09,
+                                     "disposition_cost_pct": 0.09}}
+    with _patched_config(foreign):          # another deal's run, mid-flight
+        leaked = resolve_run_transaction_costs({}, {})
+    assert leaked == pristine
+
+    # A deal that DOES carry its own delta still resolves it correctly
+    # while the foreign patch is live.
+    with _patched_config(foreign):
+        mine = resolve_run_transaction_costs(
+            {}, {"transaction_costs": {"acquisition_closing_pct": 0.03}})
+    assert mine == {"acquisition_closing_pct": 0.03,
+                    "disposition_cost_pct": pristine["disposition_cost_pct"]}
 
 
 @pytest.mark.django_db

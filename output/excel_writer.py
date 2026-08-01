@@ -12,6 +12,8 @@ Tabs:
 """
 
 import os
+
+import config as cfg
 from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side, numbers
 from registry import ScenarioType
@@ -144,7 +146,7 @@ def _build_inputs_tab(ws, cim_data, fin):
 def _build_scenario_tab(ws, scen_name: str, scen: dict, cim_data):
     """Build a single scenario tab with the hold-period P&L."""
     noi_proj = scen.get("noi_projection", [])
-    years = len(noi_proj) or scen.get("hold_years") or 5
+    years = len(noi_proj) or scen.get("hold_years") or cfg.DEFAULT_HOLD_YEARS
 
     ws.column_dimensions["A"].width = 28
     for i in range(2, 2 + max(years, 7)):
@@ -405,7 +407,8 @@ def _build_value_add_tab(ws, va_results: dict, va_max_offer: dict, cim_data):
 
     # Key assumptions
     base = va_results.get(ScenarioType.BASE, {})
-    va_hold = base.get("hold_years") or len(base.get("annual_noi") or []) or 5
+    va_hold = (base.get("hold_years") or len(base.get("annual_noi") or [])
+               or cfg.DEFAULT_HOLD_YEARS)
     row = _write_section_header(ws, row, "Deal Overview", cols=4)
     overview = [
         ("Asking Price", base.get("asking_price"), CURRENCY_FULL),
@@ -471,7 +474,9 @@ def _build_value_add_tab(ws, va_results: dict, va_max_offer: dict, cim_data):
     annual_noi = base.get("annual_noi", [])
     annual_rev = base.get("annual_revenue", [])
     annual_exp = base.get("annual_expenses", [])
-    years = min(len(annual_noi), 5)
+    # Show the whole hold — this used to cap at 5, so a 10-year VA run
+    # silently lost years 6-10 off the projection table.
+    years = len(annual_noi)
 
     ws.cell(row=row, column=1, value="").font = BOLD_FONT
     for yr in range(years):

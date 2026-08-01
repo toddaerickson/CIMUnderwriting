@@ -96,7 +96,7 @@ def generate_template(
 
     # Populate sections
     _write_property_description(ws, cim_data, hold_years)
-    _write_investment_cf(ws, cim_data)
+    _write_investment_cf(ws, cim_data, costs)
     _write_financing_defaults(ws)
     _write_growth_rates(ws)
     _write_stabilization(ws, cim_data)
@@ -152,10 +152,27 @@ def _write_property_description(ws, cim_data, hold_years: int):
 
 # ── Investment Cash Flows (rows 20-47) ───────────────────────────────
 
-def _write_investment_cf(ws, cim_data):
-    """Fill purchase price and capex."""
+def _write_investment_cf(ws, cim_data, costs: dict):
+    """Fill purchase price, acquisition closing costs and capex.
+
+    Row 24 is a free line inside the template's own ACQUISITION COST
+    block (K27 = SUM(K23:K26), which rolls into total project cost), so
+    closing costs land where the template already totals them. Without
+    this the .xlsm computed its purchase-side outlay as price + capex
+    only, and its IRR disagreed with the memo and the .xlsx — which
+    report a cost-inclusive basis — on every deal (review finding).
+
+    No double count with the Title/Legal soft-cost rows: those are
+    formulas off HARD costs (K33), a different base.
+    """
     if cim_data.asking_price:
         ws["K23"] = cim_data.asking_price
+        acquisition_cost = (cim_data.asking_price
+                            * costs["acquisition_closing_pct"])
+        ws["B24"] = "Acquisition Closing Costs"
+        ws["K24"] = round(acquisition_cost, 2)
+        ws["E24"] = 0          # incurred at closing, same as the price row
+        ws["F24"] = 0
 
     capex = cim_data.capex_estimate or 0
     if capex > 0:

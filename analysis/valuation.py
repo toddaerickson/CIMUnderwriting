@@ -28,14 +28,22 @@ logger = logging.getLogger("cim_analyst")
 COERCED_SCENARIOS = (ScenarioType.BASE, ScenarioType.BEAR)
 
 
-def resolve_transaction_costs(costs: dict = None) -> dict:
+def resolve_transaction_costs(costs: dict = None, base: dict = None) -> dict:
     """Merge a partial cost override onto the config defaults.
 
     Omitting a key means "use the default", never "zero" — a silent zero
     here is exactly the overstated-IRR defect this module was changed to
     fix. Pass explicit zeros to model a genuinely cost-free round trip.
+
+    `base` overrides where the defaults are read from. It exists because
+    TRANSACTION_COSTS is in webapp.services._PATCHED_DICTS: the live dict
+    is mutated in place for the duration of one deal's run, so any caller
+    resolving OUTSIDE that run's lock must pass the pristine snapshot
+    instead (webapp.services.resolve_run_transaction_costs). Callers
+    reached from inside run_analysis are already serialized and can use
+    the default.
     """
-    resolved = dict(TRANSACTION_COSTS)
+    resolved = dict(TRANSACTION_COSTS if base is None else base)
     for key in resolved:
         value = (costs or {}).get(key)
         if value is not None:
