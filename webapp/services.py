@@ -458,13 +458,36 @@ def create_deal_from_upload(cim_file, rent_roll=None, financials=None) -> Deal:
         input_files=input_files, extract_status="pending")
 
 
+# scripts/cims_rename_plan.py files CIMs under an additive "[SS-TX-Kerrville] "
+# prefix. That prefix is filing metadata, not identity: the same PDF re-uploaded
+# after a rename must still match the deal and comp-DB rows it was first ingested
+# as, or the dedupe check goes quiet and a second deal folder appears.
+CIM_PREFIX_RE = re.compile(r"^\[[^\]]{1,60}\]\s+")
+
+
+def strip_cim_prefix(name: str) -> str:
+    """Drop a leading '[...] ' filing prefix. Comparisons use this on both sides."""
+    return CIM_PREFIX_RE.sub("", name or "")
+
+
 def _comp_db_dupes(filename: str) -> list[dict]:
     """Advisory comp-DB matches; a broken comp DB must not block an
     upload, but it must be loud in the logs."""
     try:
         from data.comp_db import CompDatabase
-        stem = os.path.splitext(filename)[0]
-        return CompDatabase().find_duplicates(filename=filename, property_name=stem)
+        db = CompDatabase()
+        bare = strip_cim_prefix(filename)
+        # The stem is passed unprefixed so the fuzzy property_name LIKE matches in
+        # both directions — bare stem against a stored prefixed name and vice versa.
+        hits = db.find_duplicates(filename=filename,
+                                  property_name=os.path.splitext(bare)[0])
+        if bare != filename:
+            # This upload is prefixed but the stored row predates the rename;
+            # its pdf_filename is the bare one, so ask for that exact name too.
+            seen = {(h["pdf_filename"], h["match_type"]) for h in hits}
+            hits += [h for h in db.find_duplicates(filename=bare)
+                     if (h["pdf_filename"], h["match_type"]) not in seen]
+        return hits
     except Exception:
         logger.exception("comp DB duplicate check failed")
         return []
@@ -475,8 +498,9 @@ def find_upload_duplicates(filename: str) -> list[dict]:
     filename. Call BEFORE create_deal_from_upload, or the new row
     matches itself."""
     dupes = _comp_db_dupes(filename)
+    bare = strip_cim_prefix(filename)
     for deal in Deal.objects.all():
-        if filename in (deal.input_files or []):
+        if any(strip_cim_prefix(f) == bare for f in (deal.input_files or [])):
             dupes.append({
                 "property_name": deal.property_name, "city": deal.city,
                 "state": deal.state,
