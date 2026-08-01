@@ -227,7 +227,8 @@ def run_analysis(result: AnalysisResult, progress: Callable = None,
 
     # Step 5: Scenario modeling
     _progress(5, 9, "Running Bear/Base/Bull scenarios...")
-    from model.returns_model import (BASIS_PCT_PRICE, resolve_capital_amount,
+    from model.returns_model import (BASIS_AMOUNT, BASIS_PCT_PRICE,
+                                     resolve_capital_amount,
                                      resolve_capital_structure)
 
     capital = resolve_capital_structure(capital_structure)
@@ -253,6 +254,25 @@ def run_analysis(result: AnalysisResult, progress: Callable = None,
                           if capital["capex_basis"] == BASIS_PCT_PRICE
                           else None)
 
+    # A rate whose driver went missing resolves to $0 (see
+    # resolve_capital_amount). The assumptions form refuses that
+    # combination, but a saved basis outlives the value it was validated
+    # against: re-extracting a deal rewrites cim_json, so a re-parse that
+    # loses NRSF turns a valid "$0.50/SF CapEx" into $0 on the NEXT run
+    # with nothing on screen to say so. A quiet $0 line in the capital
+    # stack is exactly the "empty state hiding a real failure" this
+    # pipeline is not allowed to produce, so it becomes a run warning.
+    for label, entered, basis, resolved in (
+            ("CapEx", cim_data.capex_estimate, capital["capex_basis"], capex),
+            ("Operating reserve", capital["operating_reserve"],
+             capital["operating_reserve_basis"], reserve)):
+        if basis != BASIS_AMOUNT and entered and not resolved:
+            result.errors.append(
+                f"{label} was entered on a '{basis}' basis but resolved to "
+                f"$0 — the figure it multiplies (NRSF, unit count or asking "
+                f"price) is missing from this deal, so it is NOT in the "
+                f"basis. Re-enter it in dollars or restore the missing field.")
+
     if result.adjusted_noi and asking > 0:
         from model.returns_model import build_returns_model
         model = build_returns_model(
@@ -266,6 +286,7 @@ def run_analysis(result: AnalysisResult, progress: Callable = None,
             transaction_costs=transaction_costs,
             reserve=reserve,
             gp_coinvest_pct=capital["gp_coinvest_pct"],
+            capex_pct_of_price=capex_pct_of_price,
         )
         result.scenario_results = model["scenarios"]
         result.sensitivity = model["sensitivity"]

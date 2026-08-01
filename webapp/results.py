@@ -184,6 +184,18 @@ def _hold_years(scenarios: dict, noi_key: str = "noi_projection") -> int:
     return cfg.DEFAULT_HOLD_YEARS
 
 
+def _unconverged(solved) -> bool:
+    """True when a solver produced a price it never actually converged on.
+
+    Runs predating the flag carry no `converged` key; those are read as
+    converged rather than retroactively flagged, since the absence is a
+    missing field, not evidence of a failure.
+    """
+    if not solved or solved.get("max_price") is None:
+        return False
+    return solved.get("converged") is False
+
+
 def returns_context(r) -> dict:
     scen = r.get("scenario_results") or {}
     va = r.get("va_results") or {}
@@ -216,6 +228,14 @@ def returns_context(r) -> dict:
             ("Stabilized NOI", "stabilized_noi", fmt_money),
         ]),
         "max_offer": fmt_money((r.get("max_offer") or {}).get("max_price")),
+        # The bisection returns a price whatever happens; `converged` is
+        # the only thing separating an answer from a bound it never got
+        # away from. It reached the Excel tab but nothing on the web page,
+        # so a non-answer read exactly like an answer. Item D adds an
+        # unbounded reserve dial, which makes an unreachable target IRR
+        # materially easier to hit than transaction costs alone could.
+        "max_offer_unconverged": _unconverged(r.get("max_offer")),
+        "va_max_offer_unconverged": _unconverged(r.get("va_max_offer")),
         "va_max_offer": fmt_money((r.get("va_max_offer") or {}).get("max_price")),
         "has_va_max_offer": bool((r.get("va_max_offer") or {}).get("max_price")),
         "has_sensitivity": bool(sens.get("irr_grid")),

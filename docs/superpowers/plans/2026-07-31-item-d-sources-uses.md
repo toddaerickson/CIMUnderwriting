@@ -149,6 +149,39 @@ which cannot see a DCF.
 - Every existing IRR/MOIC/max-price oracle reproduces unchanged at the defaults.
 - `python -m pytest tests/ -v` green, count up from 343.
 
+## What the review caught
+
+Four findings from the pre-push review, all repaired in the same branch.
+Recorded here because three of them are the *general* shape of defect this
+kind of change produces, not one-off slips.
+
+1. **A basis selector reinterprets the number beside it.** A genuine `2`
+   under `% of price` becomes `$2` under `$ total` the moment the selector
+   moves — silently removing real CapEx from the basis and *overstating*
+   every return, which is the exact direction item B exists to prevent.
+   There is no JavaScript on this page to re-key the field, so the fix is
+   a hidden unit stamp naming the basis the page was DRAWN under: the
+   first save after a unit change is refused, and the re-render stamps the
+   new selection so the second proceeds. It is a confirmation, not a
+   detector — the stamp cannot tell whether the analyst restated the
+   figure, and the message says so.
+2. **The sensitivity grid did not rescale a %-of-price CapEx.** Both
+   solvers got `capex_pct_of_price`; the grid, whose row axis *is* price,
+   did not — so every row but the centre computed a deal whose CapEx had
+   not moved with its price. Same parameter, threaded through
+   `_build_sensitivity`.
+3. **A rate can resolve to $0 long after the form validated it.** The
+   form refuses a rate with no driver, but a saved basis outlives the
+   value it was checked against: re-extraction rewrites `cim_json`, so a
+   re-parse that loses NRSF turns a valid `$0.50/SF` CapEx into $0 on the
+   next run, showing as a quiet $0 line. The engine now raises it as a run
+   warning — an empty state must not hide a real failure.
+4. **Solver non-convergence was invisible on the web page.** The bisection
+   returns a price no matter what; `converged` reached the Excel tab and
+   nothing else, so a bound it never got away from read exactly like a
+   solved answer. Now flagged on the returns tab. Pre-existing, but the
+   unbounded reserve dial makes it materially easier to hit.
+
 ## Out of scope
 
 Construction draw schedules and per-line-item timing. Multi-tranche debt.

@@ -113,6 +113,24 @@ BASIS_DRIVER_FIELDS = {
     BASIS_PCT_PRICE: ("asking_price", "Asking Price"),
 }
 
+#: basis field → (the hidden stamp naming the unit the number on screen was
+#: RENDERED under, the amount field, its label). Changing a basis selector
+#: does not change the number sitting beside it, and that number then means
+#: something else entirely: a genuine "2" under "% of price" becomes $2 of
+#: CapEx under "$ total", which silently removes real capital from the
+#: basis and overstates every return. There is no JavaScript on this page
+#: to re-key the field, so the save is refused once, which forces the
+#: analyst to read the number under its new unit. The template renders each
+#: stamp from the CURRENTLY SELECTED basis, so the second save proceeds.
+#: This is a confirmation, not a detector: the live preview swaps only the
+#: model strip, so the stamp in the DOM names the basis the PAGE was drawn
+#: with whether or not the analyst restated the figure.
+BASIS_UNIT_STAMPS = {
+    "capex_basis": ("capex_unit_stamp", "capex_estimate", "CapEx"),
+    "operating_reserve_basis": ("reserve_unit_stamp", "operating_reserve",
+                                "the operating reserve"),
+}
+
 RC_PCT_KEYS = {"soft_cost_pct", "dev_profit_pct"}
 RC_KEYS = [k for hard, site, _ in cfg.FACILITY_TYPES for k in (hard, site)] \
     + ["soft_cost_pct", "dev_profit_pct"]
@@ -322,20 +340,49 @@ class AssumptionsForm(forms.Form):
         arriving from the CLI, useless as feedback to the person typing
         it. Caught here instead, where the missing field is on screen.
         """
-        for basis_field, amount_field, label in (
-                ("capex_basis", "capex_estimate", "CapEx"),
-                ("operating_reserve_basis", "operating_reserve",
-                 "The operating reserve")):
+        for basis_field, (stamp_field, amount_field,
+                          label) in BASIS_UNIT_STAMPS.items():
             basis = cleaned.get(basis_field)
             if basis not in BASIS_DRIVER_FIELDS or not cleaned.get(amount_field):
                 continue
             driver_field, driver_label = BASIS_DRIVER_FIELDS[basis]
             if not cleaned.get(driver_field):
                 self.add_error(basis_field, forms.ValidationError(
-                    f"{label} is entered as {BASIS_LABELS[basis]}, but "
-                    f"{driver_label} is blank — there is nothing to "
-                    f"multiply by. Enter {driver_label}, or switch the "
-                    f"basis back to {BASIS_LABELS[BASIS_AMOUNT]}."))
+                    f"{label.capitalize()} is entered as "
+                    f"{BASIS_LABELS[basis]}, but {driver_label} is blank — "
+                    f"there is nothing to multiply by. Enter {driver_label}, "
+                    f"or switch the basis back to "
+                    f"{BASIS_LABELS[BASIS_AMOUNT]}."))
+
+    def _confirm_changed_units(self, cleaned):
+        """Refuse the first save after a unit change, so the number gets
+        read once under its new unit.
+
+        The stamp cannot tell whether the analyst restated the figure —
+        the preview swaps only the model strip, so the stamp in the DOM
+        still names the basis the page was DRAWN with either way. So this
+        does not claim they forgot; it makes the change cost one
+        confirmation. The re-render stamps the new selection, so the
+        second save proceeds.
+
+        Read off `self.data` rather than declared as a field because it is
+        a property of the render, not of the model: a form built directly
+        in a test carries no stamp and behaves exactly as it did before
+        this existed.
+        """
+        for basis_field, (stamp_field, amount_field,
+                          label) in BASIS_UNIT_STAMPS.items():
+            stamp = (self.data or {}).get(stamp_field)
+            basis = cleaned.get(basis_field)
+            if not stamp or not basis or stamp == basis:
+                continue
+            self.add_error(basis_field, forms.ValidationError(
+                f"The unit for {label} changed from "
+                f"{BASIS_LABELS.get(stamp, stamp)} to "
+                f"{BASIS_LABELS.get(basis, basis)}. The figure beside it "
+                f"will now be read as {BASIS_LABELS.get(basis, basis)} — "
+                f"check it is stated in that unit, then save again to "
+                f"confirm."))
 
     def clean(self):
         """Run the model error-check register over the submitted values.
@@ -350,6 +397,7 @@ class AssumptionsForm(forms.Form):
         cleaned = super().clean()
         self._derive_income_triple(cleaned)
         self._validate_capital_bases(cleaned)
+        self._confirm_changed_units(cleaned)
         # parse_unit_mix needs getlist; self.data is a QueryDict for every
         # real POST but a plain dict when a form is constructed directly.
         # Without a mix the two unit-mix checks report `skipped`, which is

@@ -752,3 +752,15 @@ def test_deal_list_links_detail(client, operator, deals_dir, fake_run):
     deal = _run_deal(client, deals_dir)
     resp = client.get("/deals/")
     assert f'href="/deals/{deal.pk}/"'.encode() in resp.content
+
+
+@pytest.mark.django_db
+def test_the_assumptions_page_renders_the_unit_stamps(client, operator, deals_dir):
+    """The unit guard in webapp.forms is only real if the page actually
+    emits the stamps it reads."""
+    deal = _make_extracted_deal(deals_dir)
+    content = client.get(f"/deals/{deal.pk}/assumptions/").content.decode()
+    assert 'name="capex_unit_stamp" value="amount"' in content
+    assert 'name="reserve_unit_stamp" value="amount"' in content
+    # And the CapEx basis selector rides in the CapEx driver row itself.
+    assert 'aria-label="CapEx basis"' in content

@@ -588,3 +588,35 @@ def test_a_rate_basis_hides_the_extracted_dollar_figure():
         row = rows["CapEx Estimate"]
         assert row["extracted"] == expected
         assert row["extra_bf"] is not None
+
+
+def test_changing_a_unit_costs_one_confirmation():
+    """A "2" typed under "% of price" becomes $2 of CapEx under "$ total"
+    — silently removing real capital from the basis and overstating every
+    return. There is no JavaScript on the page to re-key the field, so the
+    first save after a unit change is refused (review finding)."""
+    form = _capital_form(capex_estimate=2, capex_basis="amount",
+                         capex_unit_stamp="pct_price")
+    assert not form.is_valid()
+    assert "will now be read as $ total" in str(form.errors["capex_basis"])
+
+    # The template stamps the CURRENT selection, so the restated save goes
+    # through — the refusal is one round trip, not a trap.
+    assert _capital_form(capex_estimate=100_000, capex_basis="amount",
+                         capex_unit_stamp="amount").is_valid()
+
+
+def test_an_unchanged_basis_is_never_refused():
+    for basis, stamp in (("amount", "amount"), ("per_sf", "per_sf")):
+        form = _capital_form(nrsf=50_000, capex_estimate=0.50,
+                             capex_basis=basis, capex_unit_stamp=stamp)
+        assert form.is_valid(), form.errors
+
+
+def test_the_reserve_carries_the_same_unit_guard():
+    form = _capital_form(nrsf=50_000, operating_reserve=75_000,
+                         operating_reserve_basis="per_sf",
+                         reserve_unit_stamp="amount")
+    assert not form.is_valid()
+    assert "operating reserve" in str(form.errors["operating_reserve_basis"])
+

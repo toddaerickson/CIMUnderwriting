@@ -487,3 +487,92 @@ def test_an_unbalanced_stack_is_reported_even_without_a_dcf():
     r = _check(checks.CheckInput(sources_uses=su))
     assert r.status == checks.FAIL
     assert "does not balance" in r.message
+
+
+# ── 11. Review repairs ───────────────────────────────────────────────
+
+def test_pct_of_price_capex_scales_across_the_sensitivity_price_axis():
+    """The grid's row axis IS price. Holding CapEx at the asking-price
+    dollars makes every row but the centre describe a deal whose CapEx did
+    not move with its price — the same defect the solvers carry
+    capex_pct_of_price to avoid (review finding)."""
+    import config as cfg
+
+    pct = 0.05
+    price = 5_000_000
+    common = dict(adjusted_ttm_noi=400_000, asking_price=price, nrsf=50_000,
+                  expense_ratio=0.42)
+    scaled = build_returns_model(capex=price * pct,
+                                 capex_pct_of_price=pct, **common)
+    frozen = build_returns_model(capex=price * pct, **common)
+
+    # Centre cell is the asking price, so both agree there.
+    assert (scaled["sensitivity"]["irr_grid"][4][4]
+            == pytest.approx(frozen["sensitivity"]["irr_grid"][4][4], abs=1e-12))
+    # The -10% price row must not be.
+    assert scaled["sensitivity"]["irr_grid"][0][4] != pytest.approx(
+        frozen["sensitivity"]["irr_grid"][0][4], abs=1e-9)
+    # And the scaled cell must equal a hand-built projection at that price.
+    cheap = scaled["sensitivity"]["price_values"][0]
+    expected = project_cash_flows(
+        ttm_noi=400_000, price=cheap, capex=cheap * pct,
+        params=cfg.SCENARIO_DEFAULTS[ScenarioType.BASE],
+        expense_ratio=0.42, coerce_exit_cap=False,
+        exit_cap_override=scaled["sensitivity"]["cap_values"][4])["irr"]
+    assert scaled["sensitivity"]["irr_grid"][0][4] == pytest.approx(
+        expected, abs=1e-12)
+
+
+def test_a_rate_that_resolves_to_zero_becomes_a_run_warning(mock_cim_data,
+                                                            tmp_path,
+                                                            monkeypatch):
+    """A saved basis outlives the value it was validated against: a
+    re-extraction that loses NRSF turns a valid $/SF CapEx into $0 on the
+    next run. A quiet $0 line in the capital stack is an empty state
+    hiding a real failure (review finding)."""
+    # data.comp_db binds COMP_DB_PATH at import — redirect it or the run
+    # writes into the repo's real comps database.
+    monkeypatch.setattr("data.comp_db.COMP_DB_PATH", str(tmp_path / "c.db"))
+    from engine import AnalysisResult, run_analysis
+
+    mock_cim_data.nrsf = None
+    mock_cim_data.capex_estimate = 0.50
+    result = AnalysisResult(pdf_path=str(tmp_path / "none.pdf"))
+    result.cim_data = mock_cim_data
+    run_analysis(result, output_dir=str(tmp_path),
+                 capital_structure={"capex_basis": "per_sf"})
+
+    assert any("resolved to $0" in e for e in result.errors), result.errors
+    assert any("CapEx" in e for e in result.errors)
+
+
+def test_a_resolvable_rate_raises_no_warning(mock_cim_data, tmp_path,
+                                             monkeypatch):
+    monkeypatch.setattr("data.comp_db.COMP_DB_PATH", str(tmp_path / "c.db"))
+    from engine import AnalysisResult, run_analysis
+
+    mock_cim_data.capex_estimate = 0.50          # nrsf is 50,000
+    result = AnalysisResult(pdf_path=str(tmp_path / "none.pdf"))
+    result.cim_data = mock_cim_data
+    run_analysis(result, output_dir=str(tmp_path),
+                 capital_structure={"capex_basis": "per_sf"})
+
+    assert not any("resolved to $0" in e for e in result.errors)
+    assert result.sources_uses["uses"][2]["amount"] == 25_000.0
+
+
+def test_unconverged_solver_is_flagged_for_the_returns_tab():
+    from webapp.results import returns_context
+
+    ctx = returns_context({"max_offer": {"max_price": 1_500_000.0,
+                                         "converged": False}})
+    assert ctx["max_offer_unconverged"] is True
+    assert returns_context(
+        {"max_offer": {"max_price": 3_900_000.0, "converged": True}}
+    )["max_offer_unconverged"] is False
+    # A run predating the flag has no `converged` key — a missing field is
+    # not evidence of a failure, so it must not be flagged retroactively.
+    assert returns_context(
+        {"max_offer": {"max_price": 3_900_000.0}}
+    )["max_offer_unconverged"] is False
+    assert returns_context({})["max_offer_unconverged"] is False

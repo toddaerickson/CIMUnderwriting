@@ -213,7 +213,8 @@ def build_returns_model(adjusted_ttm_noi: float, asking_price: float,
                         hold_years: int = None,
                         transaction_costs: dict = None,
                         reserve: float = 0.0,
-                        gp_coinvest_pct: float = None) -> dict:
+                        gp_coinvest_pct: float = None,
+                        capex_pct_of_price: float = None) -> dict:
     """
     Build complete returns model for all three scenarios.
 
@@ -226,6 +227,14 @@ def build_returns_model(adjusted_ttm_noi: float, asking_price: float,
     `sources_uses` is built HERE rather than in the engine so its
     acquisition-cost line is the figure the projection actually used, not
     a second computation of the same percentage.
+
+    `capex_pct_of_price` is set when CapEx was entered as a percentage of
+    price (item H); it reaches the sensitivity grid, whose whole axis is
+    price. Holding CapEx at the asking-price dollars while the grid sweeps
+    ±10% would compute every cell but the centre column on a basis the
+    deal does not have — the same defect the solvers carry the parameter
+    to avoid. The scenarios themselves need only the resolved dollars:
+    they are all computed at the asking price.
     """
     scenarios = run_scenarios(
         adjusted_ttm_noi=adjusted_ttm_noi,
@@ -247,6 +256,7 @@ def build_returns_model(adjusted_ttm_noi: float, asking_price: float,
         hold_years=hold_years,
         transaction_costs=transaction_costs,
         reserve=reserve,
+        capex_pct_of_price=capex_pct_of_price,
     )
 
     # Every scenario shares one price, CapEx, reserve and cost set, so
@@ -298,7 +308,8 @@ def _build_sensitivity(ttm_noi: float, base_price: float,
                        custom_scenarios: dict = None,
                        hold_years: int = None,
                        transaction_costs: dict = None,
-                       reserve: float = 0.0) -> dict:
+                       reserve: float = 0.0,
+                       capex_pct_of_price: float = None) -> dict:
     """
     Build IRR sensitivity table.
 
@@ -309,6 +320,10 @@ def _build_sensitivity(ttm_noi: float, base_price: float,
     applies. Coercing here would silently raise every cell below the entry
     cap to it, flattening the left of the grid and destroying the axis the
     table exists to show.
+
+    A percentage-of-price CapEx is RESOLVED PER CELL, because price is
+    this table's row axis: a fixed CapEx would make every row but the
+    centre one describe a deal whose CapEx did not move with its price.
     """
     from config import SCENARIO_DEFAULTS
 
@@ -331,10 +346,14 @@ def _build_sensitivity(ttm_noi: float, base_price: float,
     exit_caps = [base_exit_cap + o for o in cap_offsets]
     cap_labels = [f"{c:.2%}" for c in exit_caps]
 
+    def capex_at(price: float) -> float:
+        return (price * capex_pct_of_price if capex_pct_of_price
+                else (capex or 0.0))
+
     grid = [
         [
             project_cash_flows(
-                ttm_noi=ttm_noi, price=price, capex=capex,
+                ttm_noi=ttm_noi, price=price, capex=capex_at(price),
                 params=base_params,
                 hold_years=hold_years,
                 expense_ratio=expense_ratio,
@@ -342,7 +361,7 @@ def _build_sensitivity(ttm_noi: float, base_price: float,
                 reserve=reserve,
                 coerce_exit_cap=False,
                 exit_cap_override=exit_cap,
-            )["irr"] if (price + capex) > 0 else None
+            )["irr"] if (price + capex_at(price)) > 0 else None
             for exit_cap in exit_caps
         ]
         for price in prices
