@@ -36,6 +36,10 @@ class AnalysisResult:
     va_results: dict = field(default_factory=dict)
     # Capital stack (model.returns_model.build_sources_uses)
     sources_uses: dict = field(default_factory=dict)
+    # The market cap this run priced the exit off, with its class, age band
+    # and source. Every published exit cap derives from it, so it is carried
+    # on the result rather than re-derived by each writer.
+    market_cap: dict = field(default_factory=dict)
     # Solver
     max_offer: dict = field(default_factory=dict)
     va_max_offer: dict = field(default_factory=dict)
@@ -136,7 +140,8 @@ def run_analysis(result: AnalysisResult, progress: Callable = None,
                   expense_line_overrides: dict = None,
                   hold_years: int = None,
                   transaction_costs: dict = None,
-                  capital_structure: dict = None) -> AnalysisResult:
+                  capital_structure: dict = None,
+                  market_cap_rate: float = None) -> AnalysisResult:
     """
     Run full analysis pipeline on an already-extracted CIMData.
 
@@ -198,6 +203,9 @@ def run_analysis(result: AnalysisResult, progress: Callable = None,
                     result.errors.append(msg)
         except Exception as e:
             result.errors.append(f"Enrichment failed: {e}")
+
+    from analysis.valuation import resolve_market_cap
+    from registry import detect_asset_type
 
     # Step 1: Financial analysis
     _progress(1, 9, "Analyzing financials...")
@@ -273,6 +281,15 @@ def run_analysis(result: AnalysisResult, progress: Callable = None,
                 f"price) is missing from this deal, so it is NOT in the "
                 f"basis. Re-enter it in dollars or restore the missing field.")
 
+    # The exit cap is derived from the asset, so the market anchor is
+    # resolved ONCE here — same discipline as CapEx and the reserve above.
+    # Every consumer gets the same dict, which is what keeps the memo, the
+    # .xlsx, the .xlsm, the sensitivity grid and both solvers on one cap.
+    market_cap = resolve_market_cap(
+        detect_asset_type(cim_data), cim_data.year_built,
+        market_cap=market_cap_rate)
+    result.market_cap = market_cap
+
     if result.adjusted_noi and asking > 0:
         from model.returns_model import build_returns_model
         model = build_returns_model(
@@ -287,6 +304,7 @@ def run_analysis(result: AnalysisResult, progress: Callable = None,
             reserve=reserve,
             gp_coinvest_pct=capital["gp_coinvest_pct"],
             capex_pct_of_price=capex_pct_of_price,
+            market_cap=market_cap,
         )
         result.scenario_results = model["scenarios"]
         result.sensitivity = model["sensitivity"]
@@ -305,6 +323,7 @@ def run_analysis(result: AnalysisResult, progress: Callable = None,
                 hold_years=hold_years,
                 transaction_costs=transaction_costs,
                 reserve=reserve,
+                market_cap=market_cap,
             )
 
         # Step 7: Max price solver
@@ -313,7 +332,8 @@ def run_analysis(result: AnalysisResult, progress: Callable = None,
         solver_kwargs = {"hold_years": hold_years,
                          "transaction_costs": transaction_costs,
                          "reserve": reserve,
-                         "capex_pct_of_price": capex_pct_of_price}
+                         "capex_pct_of_price": capex_pct_of_price,
+                         "market_cap": market_cap}
         if solver_target_irr:
             solver_kwargs["target_irr"] = solver_target_irr
         result.max_offer = solve_max_price(

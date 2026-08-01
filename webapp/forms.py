@@ -38,7 +38,6 @@ SCENARIO_PARAM_LABELS = [
     ("rev_cagr_yr1_3", "Rev CAGR Yr 1–3 (%)"),
     ("rev_cagr_yr4_5", "Rev CAGR Yr 4–5 (%)"),
     ("exp_growth", "Expense Growth (%)"),
-    ("exit_cap", "Exit Cap Rate (%)"),
 ]
 SCENARIO_PARAMS = [p for p, _ in SCENARIO_PARAM_LABELS]
 VA_PARAM_LABELS = [
@@ -46,7 +45,6 @@ VA_PARAM_LABELS = [
     ("months_to_stabilize", "Months to Stabilize"),
     ("rent_growth_to_market", "Rent Growth to Mkt (%)"),
     ("post_stabilize_rev_growth", "Post-Stab Rev Growth (%)"),
-    ("exit_cap", "Exit Cap Rate (%)"),
     ("expense_growth", "Expense Growth (%)"),
 ]
 VA_PARAMS = [p for p, _ in VA_PARAM_LABELS]
@@ -259,6 +257,13 @@ class AssumptionsForm(forms.Form):
                 required=False, min_value=0, widget=_num())
         self.fields["solver_target_irr"] = forms.FloatField(
             required=False, min_value=0, widget=_num())
+        # The market cap this asset's class and age band trade at. Blank
+        # means "use the config table cell". Exit cap is DERIVED from this
+        # (market + scenario spread + obsolescence drift x hold), which is
+        # why there is no longer an exit-cap column in the scenario grid.
+        # One unit, so no basis selector and no BASIS_UNIT_STAMPS entry.
+        self.fields["market_cap_rate"] = forms.FloatField(
+            required=False, min_value=0, max_value=100, widget=_num())
         # Timing & round-trip costs. Percent fields follow the module's
         # whole-number convention; hold_years is a plain integer.
         self.fields["hold_years"] = forms.IntegerField(
@@ -472,6 +477,13 @@ def build_initial(deal, eff=None) -> dict:
         initial[f"rc_{key}_high"] = round(float(high), 4)
     initial["solver_target_irr"] = _pct_display(
         saved.get("solver_target_irr", eff["SOLVER_TARGET_IRR"]))
+    # Blank unless the analyst set one: the placeholder is the table cell
+    # for this deal's class and age band, which build_initial cannot know
+    # (it has no cim_data). Seeding a number here would look like a
+    # confirmed market read when nobody confirmed anything.
+    mc_saved = saved.get("market_cap_rate")
+    initial["market_cap_rate"] = (_pct_display(mc_saved)
+                                  if mc_saved is not None else None)
     initial["hold_years"] = saved.get("hold_years", cfg.DEFAULT_HOLD_YEARS)
     txn_saved = saved.get("transaction_costs", {})
     for name in TXN_COST_PARAMS:
@@ -778,6 +790,12 @@ def build_overrides(cleaned, post, deal, eff=None) -> dict:
         if not _same(tgt, eff["SOLVER_TARGET_IRR"]):
             out["solver_target_irr"] = tgt
 
+    # No default to diff against — the table cell depends on the asset, so
+    # any entered figure is by definition an override.
+    mc = cleaned.get("market_cap_rate")
+    if mc is not None:
+        out["market_cap_rate"] = round(mc / 100.0, 6)
+
     hold = cleaned.get("hold_years")
     if hold is not None and int(hold) != cfg.DEFAULT_HOLD_YEARS:
         out["hold_years"] = int(hold)
@@ -866,6 +884,15 @@ def override_key_registry() -> dict:
                     "group": group, "kind": "scalar",
                     "pct": not is_int, "int": is_int,
                     "label": f"{scen.value.title()} {_label(p)}"}
+    # Market cap by asset class and age band. Editable per asset type from
+    # the settings page — the ConfigOverride scope key IS the class, so a
+    # row scoped to "Boat & RV Storage" reaches exactly its own row here.
+    for asset_class, bands in cfg.MARKET_CAP_RATES.items():
+        for band in bands:
+            reg[f"MARKET_CAP_RATES.{asset_class}.{band}"] = {
+                "group": f"Market Cap Rates (as of {cfg.MARKET_CAP_AS_OF})",
+                "kind": "scalar", "pct": True, "int": False,
+                "label": f"{asset_class} — {_label(band)}"}
     for k in cfg.VALUE_ADD_TRIGGERS:
         reg[f"VALUE_ADD_TRIGGERS.{k}"] = {
             "group": "Value-Add Triggers", "kind": "scalar",

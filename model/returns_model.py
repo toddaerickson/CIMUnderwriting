@@ -16,7 +16,8 @@ definition.
 import logging
 
 import config as cfg
-from analysis.valuation import project_cash_flows, run_scenarios
+from analysis.valuation import (project_cash_flows, resolve_exit_cap,
+                                resolve_market_cap, run_scenarios)
 from registry import ScenarioType
 
 logger = logging.getLogger("cim_analyst")
@@ -214,7 +215,8 @@ def build_returns_model(adjusted_ttm_noi: float, asking_price: float,
                         transaction_costs: dict = None,
                         reserve: float = 0.0,
                         gp_coinvest_pct: float = None,
-                        capex_pct_of_price: float = None) -> dict:
+                        capex_pct_of_price: float = None,
+                        market_cap: dict = None) -> dict:
     """
     Build complete returns model for all three scenarios.
 
@@ -236,6 +238,11 @@ def build_returns_model(adjusted_ttm_noi: float, asking_price: float,
     to avoid. The scenarios themselves need only the resolved dollars:
     they are all computed at the asking price.
     """
+    # Resolved once here and shared by the scenarios, the grid and the
+    # summary, so the centre cell of the sensitivity table cannot drift
+    # from the headline base IRR.
+    market_cap = market_cap or resolve_market_cap()
+
     scenarios = run_scenarios(
         adjusted_ttm_noi=adjusted_ttm_noi,
         asking_price=asking_price,
@@ -246,6 +253,7 @@ def build_returns_model(adjusted_ttm_noi: float, asking_price: float,
         hold_years=hold_years,
         transaction_costs=transaction_costs,
         reserve=reserve,
+        market_cap=market_cap,
     )
 
     summary = _build_summary_table(scenarios)
@@ -257,6 +265,7 @@ def build_returns_model(adjusted_ttm_noi: float, asking_price: float,
         transaction_costs=transaction_costs,
         reserve=reserve,
         capex_pct_of_price=capex_pct_of_price,
+        market_cap=market_cap,
     )
 
     # Every scenario shares one price, CapEx, reserve and cost set, so
@@ -309,7 +318,8 @@ def _build_sensitivity(ttm_noi: float, base_price: float,
                        hold_years: int = None,
                        transaction_costs: dict = None,
                        reserve: float = 0.0,
-                       capex_pct_of_price: float = None) -> dict:
+                       capex_pct_of_price: float = None,
+                       market_cap: dict = None) -> dict:
     """
     Build IRR sensitivity table.
 
@@ -340,8 +350,12 @@ def _build_sensitivity(ttm_noi: float, base_price: float,
     prices = [base_price * (1 + s) for s in price_steps]
     price_labels = [f"{s:+.1%}" for s in price_steps]
 
-    # Exit cap steps: -100bps to +100bps in 25bps increments
-    base_exit_cap = base_params["exit_cap"]
+    # Exit cap steps: -100bps to +100bps in 25bps increments, centred on the
+    # DERIVED base cap (market cap for this class and age band, plus the base
+    # spread and drift) so the centre cell still equals the headline base IRR.
+    mc = market_cap or resolve_market_cap()
+    base_exit_cap = resolve_exit_cap(mc["market_cap"], ScenarioType.BASE,
+                                     hold_years)["exit_cap"]
     cap_offsets = [-0.0100, -0.0075, -0.0050, -0.0025, 0.0, 0.0025, 0.0050, 0.0075, 0.0100]
     exit_caps = [base_exit_cap + o for o in cap_offsets]
     cap_labels = [f"{c:.2%}" for c in exit_caps]

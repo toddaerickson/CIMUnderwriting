@@ -100,7 +100,6 @@ SCENARIO_DEFAULTS = {
         "rev_cagr_yr1_3":  0.015,
         "rev_cagr_yr4_5":  0.015,
         "exp_growth":      0.03,
-        "exit_cap":        0.085,
     },
     ScenarioType.BASE: {
         "yr1_noi_bump":    0.05,
@@ -108,7 +107,6 @@ SCENARIO_DEFAULTS = {
         "rev_cagr_yr1_3":  0.025,
         "rev_cagr_yr4_5":  0.025,
         "exp_growth":      0.03,
-        "exit_cap":        0.075,
     },
     ScenarioType.BULL: {
         "yr1_noi_bump":    0.10,
@@ -116,9 +114,76 @@ SCENARIO_DEFAULTS = {
         "rev_cagr_yr1_3":  0.04,
         "rev_cagr_yr4_5":  0.035,
         "exp_growth":      0.03,
-        "exit_cap":        0.065,
     },
 }
+
+# ── Exit Cap: market anchor + obsolescence drift ────────────────────
+# The exit cap is DERIVED, not entered:
+#
+#   exit_cap = market_cap(class, age band)
+#              + scenario spread
+#              + drift_bps_per_year * hold_years
+#
+# It used to be a free-standing per-scenario constant (7.5% base), which
+# priced a 2003 drive-up facility and a 2022 climate-controlled build at
+# the same exit. Age and class are what the market actually prices, and
+# an asset keeps ageing through the hold — hence the drift.
+
+# Current market cap by asset class and age band. Rows are the three
+# values of webapp.services.ASSET_TYPES; columns are registry.AGE_BANDS.
+# Spelled out here rather than imported because config.py must not import
+# Django — tests/test_exit_cap.py carries the no-drift assertion, the same
+# guard tests/test_web_config.py puts on the ASSET_TYPES dropdown.
+#
+# This is a STARTING POINT the analyst confirms, not live data. Cap rates
+# move with the rate environment; MARKET_CAP_AS_OF is printed in the memo
+# and the check register so a stale table is visible rather than silent.
+MARKET_CAP_AS_OF = "2026-Q3"
+
+MARKET_CAP_RATES = {
+    "Self Storage": {
+        "new":   0.0575,
+        "mid":   0.0625,
+        "aging": 0.0675,
+        "old":   0.0750,
+    },
+    "Climate-Controlled Self Storage": {
+        "new":   0.0550,
+        "mid":   0.0600,
+        "aging": 0.0650,
+        "old":   0.0725,
+    },
+    "Boat & RV Storage": {
+        "new":   0.0650,
+        "mid":   0.0700,
+        "aging": 0.0750,
+        "old":   0.0825,
+    },
+}
+
+# Obsolescence drift, bps per year of HOLD. The operator's rule is 5-10
+# bps/yr; bear assumes the asset dates fastest. Age at acquisition is
+# already priced by the band above, so this covers only ageing in hand.
+EXIT_CAP_DRIFT_BPS = {
+    ScenarioType.BEAR: 10.0,
+    ScenarioType.BASE: 7.5,
+    ScenarioType.BULL: 5.0,
+}
+
+# The scenario's view of the market at exit, in bps on top of the market
+# cap. This is the axis that carries "caps widen / caps compress" and is
+# what keeps a bear case punitive: drift alone spans only ~25 bps over a
+# five-year hold, where the old fixed triple spanned 200.
+EXIT_CAP_SCENARIO_SPREAD_BPS = {
+    ScenarioType.BEAR: 100.0,
+    ScenarioType.BASE: 0.0,
+    ScenarioType.BULL: -100.0,
+}
+
+# Fallback when the vintage is unknown. The oldest band is deliberate:
+# an unknown-age asset should not be priced as if it were new.
+MARKET_CAP_UNKNOWN_AGE_BAND = "old"
+
 
 # ── Top-50 MSAs (simplified list for gate check) ────────────────────
 
@@ -229,7 +294,6 @@ VALUE_ADD_SCENARIOS = {
         "months_to_stabilize": 30,
         "rent_growth_to_market": 0.85,   # achieve 85% of rent gap
         "post_stabilize_rev_growth": 0.02,
-        "exit_cap": 0.075,
         "expense_growth": 0.03,
     },
     ScenarioType.BASE: {
@@ -237,7 +301,6 @@ VALUE_ADD_SCENARIOS = {
         "months_to_stabilize": 24,
         "rent_growth_to_market": 1.00,   # close full rent gap
         "post_stabilize_rev_growth": 0.03,
-        "exit_cap": 0.065,
         "expense_growth": 0.03,
     },
     ScenarioType.BULL: {
@@ -245,7 +308,6 @@ VALUE_ADD_SCENARIOS = {
         "months_to_stabilize": 18,
         "rent_growth_to_market": 1.00,
         "post_stabilize_rev_growth": 0.04,
-        "exit_cap": 0.055,
         "expense_growth": 0.025,
     },
 }

@@ -9,6 +9,7 @@ Includes both static DCF solver and value-add solver.
 """
 
 from analysis.valuation import (COERCED_SCENARIOS, project_cash_flows,
+                                resolve_exit_cap, resolve_market_cap,
                                 resolve_transaction_costs)
 from config import (SCENARIO_DEFAULTS, SOLVER_TARGET_IRR, SOLVER_TOLERANCE,
                     SOLVER_MAX_ITERATIONS, VALUE_ADD_SCENARIOS)
@@ -24,7 +25,9 @@ def solve_max_price(adjusted_ttm_noi: float,
                     hold_years: int = None,
                     transaction_costs: dict = None,
                     reserve: float = 0.0,
-                    capex_pct_of_price: float = None) -> dict:
+                    capex_pct_of_price: float = None,
+                    exit_cap: float = None,
+                    market_cap: dict = None) -> dict:
     """
     Find the maximum purchase price that delivers the target IRR.
 
@@ -66,6 +69,16 @@ def solve_max_price(adjusted_ttm_noi: float,
     costs = resolve_transaction_costs(transaction_costs)
     reserve = float(reserve or 0.0)
 
+    # Resolved ONCE, outside the bisection loop. Unlike a percentage-of-price
+    # CapEx, the exit cap does not move with price — it is a property of the
+    # asset's class, age and hold — so re-resolving per iteration would cost
+    # 50 lookups to return the same number. The entry-cap coercion inside
+    # project_cash_flows still moves with price; that is deliberate and is
+    # what makes the objective piecewise (see the convergence note above).
+    if exit_cap is None:
+        mc = market_cap or resolve_market_cap()
+        exit_cap = resolve_exit_cap(mc["market_cap"], scenario, hold_years)["exit_cap"]
+
     def capex_at(price: float) -> float:
         return (price * capex_pct_of_price if capex_pct_of_price
                 else (capex or 0.0))
@@ -91,6 +104,7 @@ def solve_max_price(adjusted_ttm_noi: float,
             hold_years=hold_years, expense_ratio=expense_ratio, costs=costs,
             reserve=reserve,
             coerce_exit_cap=scenario in COERCED_SCENARIOS,
+            exit_cap=exit_cap,
         )["irr"] if (mid + mid_capex) > 0 else None
 
         if irr is None:
@@ -142,7 +156,8 @@ def solve_max_price_value_add(cim_data, financial_analysis: dict,
                                hold_years: int = None,
                                transaction_costs: dict = None,
                                reserve: float = 0.0,
-                               capex_pct_of_price: float = None) -> dict:
+                               capex_pct_of_price: float = None,
+                               market_cap: dict = None) -> dict:
     """
     Find the maximum purchase price for target IRR using the value-add model.
 
@@ -181,7 +196,7 @@ def solve_max_price_value_add(cim_data, financial_analysis: dict,
         irr = compute_va_irr_at_price(cim_data, financial_analysis, mid,
                                       capex_at(mid), params,
                                       hold_years=hold_years, costs=costs,
-                                      reserve=reserve)
+                                      reserve=reserve, market_cap=market_cap)
 
         if irr is None:
             high = mid

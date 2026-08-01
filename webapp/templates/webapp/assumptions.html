@@ -293,6 +293,13 @@
             <label class="grid grid-cols-[10rem_1fr] items-center gap-x-2 text-xs text-slate-600"><span>Hold Period (yrs)</span>
               {{ hold_years_field }}
             </label>
+            <!-- Exit cap is derived from this (market + scenario spread +
+                 obsolescence drift x hold), which is why the scenario grid
+                 below no longer carries an exit-cap row. Blank = use the
+                 table cell for this deal's class and age band. -->
+            <label class="grid grid-cols-[10rem_1fr] items-center gap-x-2 text-xs text-slate-600"><span title="Blank uses the config table for this asset's class and age band">Market Cap (%)</span>
+              {{ market_cap_field }}
+            </label>
             {% for f in txn_cost_fields %}
             <label class="grid grid-cols-[10rem_1fr] items-center gap-x-2 text-xs text-slate-600"><span>{{ f.label }}</span>
               {{ f.field }}
