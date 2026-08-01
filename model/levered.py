@@ -104,6 +104,20 @@ def build_levered_returns(projection: dict, *, sources_uses: dict, debt: dict,
     fixed point. It also matches `model.waterfall`, which accrues pref on
     the START-of-period balance and does not accrue at period 0.
 
+    **"Invested equity" means cumulative CONTRIBUTED equity, not equity
+    net of returns of capital**, and that is the second circularity this
+    convention dodges. Reducing the base by interim returns of capital
+    would require splitting each distribution into return-of-capital and
+    profit — which is what `run_waterfall` does, using distributable cash
+    that this fee has ALREADY been deducted from. Fee → distributable
+    cash → waterfall → return of capital → fee base is a loop, and
+    breaking it would mean iterating to a fixed point for a fee. On a
+    single-asset deal the two definitions agree anyway: capital comes
+    back at sale, in the final period, after that period's fee is struck.
+    They diverge only on a deal that returns capital mid-hold from a
+    refinance, which is out of scope here. Stated because it is a real
+    convention choice, not an oversight.
+
     **A negative levered cash flow is never a negative distribution.**
     `run_waterfall` rejects one outright, because netting a shortfall
     against the pref accrual pays the LP a REDUCED preferred return for
