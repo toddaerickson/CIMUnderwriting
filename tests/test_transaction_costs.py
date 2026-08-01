@@ -28,12 +28,35 @@ The flat oracle case, used throughout:
 import numpy_financial as npf
 import pytest
 
-from analysis.valuation import project_cash_flows, run_scenarios
+from config import SCENARIO_DEFAULTS
+
+from analysis.valuation import (COERCED_SCENARIOS, project_cash_flows,
+                                resolve_market_cap, run_scenarios)
 from model.returns_model import build_returns_model
 from model.solver import solve_max_price
 from registry import ScenarioType
 
 NO_COSTS = {"acquisition_closing_pct": 0.0, "disposition_cost_pct": 0.0}
+
+#: The exit caps that used to live in `config.SCENARIO_DEFAULTS`, retired
+#: when the cap became derived from a market anchor. They stay here to hold
+#: the pins below at their pre-refactor values: the pins prove the ONE
+#: projection loop still computes what three loops used to, and that loop
+#: did not change — only where its exit cap comes from did. Feeding it the
+#: cap the retired constant supplied is what keeps the proof exact.
+RETIRED_EXIT_CAPS = {ScenarioType.BEAR: 0.085,
+                     ScenarioType.BASE: 0.075,
+                     ScenarioType.BULL: 0.065}
+
+#: A market anchor chosen so the BASE scenario's derived cap lands exactly
+#: on the retired 0.075 at the default five-year hold:
+#:     0.07125 + 0 bp spread + 7.5 bp/yr × 5 yrs = 0.0750
+#: The sensitivity grid and the solver are both base-centred, so this keeps
+#: their pins pre-refactor too. Bear and bull deliberately do NOT reconcile
+#: to the same anchor — their retired caps were ±100 bp flat, with no drift
+#: term at all — which is why the nine scenario pins below go through
+#: `project_cash_flows` directly rather than through `run_scenarios`.
+PIN_MARKET_CAP = resolve_market_cap(market_cap=0.075 - 5 * 7.5 / 10_000)
 
 FLAT_PARAMS = {
     "yr1_noi_bump": 0.0,
@@ -41,8 +64,8 @@ FLAT_PARAMS = {
     "rev_cagr_yr1_3": 0.0,
     "rev_cagr_yr4_5": 0.0,
     "exp_growth": 0.0,
-    "exit_cap": 0.10,
 }
+FLAT_EXIT_CAP = 0.10
 FLAT_NOI = 1_000_000
 FLAT_PRICE = 10_000_000
 
@@ -51,7 +74,7 @@ def flat(**kw):
     """The hand-computable case; kw overrides any argument."""
     args = dict(ttm_noi=FLAT_NOI, price=FLAT_PRICE, capex=0,
                 params=FLAT_PARAMS, hold_years=5, expense_ratio=0.50,
-                costs=NO_COSTS)
+                costs=NO_COSTS, exit_cap=FLAT_EXIT_CAP)
     args.update(kw)
     return project_cash_flows(**args)
 
@@ -82,13 +105,23 @@ PINNED = {
 
 @pytest.mark.parametrize("key", sorted(PINNED))
 def test_zero_cost_scenarios_reproduce_pre_refactor_exactly(key):
-    """The refactor is a no-op when costs are off. 1e-9, not approx."""
+    """The refactor is a no-op when costs are off. 1e-9, not approx.
+
+    Fed through `project_cash_flows` with the retired exit-cap constants
+    rather than through `run_scenarios`, because `run_scenarios` now
+    DERIVES the cap and no single market anchor reproduces all three
+    retired ones. What these pin is the projection arithmetic, which is
+    unchanged — they still reproduce to 1e-12, so re-baselining them
+    would have thrown away a live guard rather than recorded a real move.
+    """
     case, scen = key.split(".")
+    st = ScenarioType(scen)
     noi, price, nrsf, capex, er = PIN_CASES[case]
-    result = run_scenarios(
-        adjusted_ttm_noi=noi, asking_price=price, nrsf=nrsf, capex=capex,
-        expense_ratio=er, transaction_costs=NO_COSTS,
-    )[ScenarioType(scen)]
+    result = project_cash_flows(
+        ttm_noi=noi, price=price, capex=capex,
+        params=SCENARIO_DEFAULTS[st], expense_ratio=er, costs=NO_COSTS,
+        coerce_exit_cap=st in COERCED_SCENARIOS,
+        exit_cap=RETIRED_EXIT_CAPS[st])
     irr, moic, yoc = PINNED[key]
     assert result["irr"] == pytest.approx(irr, abs=1e-9)
     assert result["moic"] == pytest.approx(moic, abs=1e-9)
@@ -100,7 +133,7 @@ def test_zero_cost_sensitivity_grid_reproduces_pre_refactor_exactly():
     must not, or every cell below entry cap collapses onto one value."""
     grid = build_returns_model(
         adjusted_ttm_noi=300_000, asking_price=4_000_000, nrsf=50_000,
-        capex=0, transaction_costs=NO_COSTS,
+        capex=0, transaction_costs=NO_COSTS, market_cap=PIN_MARKET_CAP,
     )["sensitivity"]["irr_grid"]
     assert grid[0][0] == pytest.approx(0.15878606011486252, abs=1e-9)
     assert grid[4][4] == pytest.approx(0.10519693532523267, abs=1e-9)
@@ -111,7 +144,8 @@ def test_zero_cost_sensitivity_grid_reproduces_pre_refactor_exactly():
                                              (200_000, 3_625_000.0)])
 def test_zero_cost_solver_reproduces_pre_refactor_exactly(capex, max_price):
     result = solve_max_price(adjusted_ttm_noi=300_000, capex=capex,
-                             transaction_costs=NO_COSTS)
+                             transaction_costs=NO_COSTS,
+                             market_cap=PIN_MARKET_CAP)
     assert result["max_price"] == pytest.approx(max_price, abs=1e-6)
 
 
@@ -286,9 +320,10 @@ def test_solver_honours_hold_years():
     revenue growth against 2% expense growth makes a longer hold worth
     materially more, which is what makes the property observable."""
     growth = dict(FLAT_PARAMS, rev_cagr_yr1_3=0.08, rev_cagr_yr4_5=0.08,
-                  exp_growth=0.02, exit_cap=0.075)
+                  exp_growth=0.02)
     prices = [solve_max_price(adjusted_ttm_noi=300_000, custom_params=growth,
-                              hold_years=h, transaction_costs=COSTS)["max_price"]
+                              hold_years=h, transaction_costs=COSTS,
+                              market_cap=PIN_MARKET_CAP)["max_price"]
               for h in (1, 3, 5, 10)]
     assert prices == sorted(prices), prices
     assert prices[-1] > prices[0] * 2
@@ -297,11 +332,11 @@ def test_solver_honours_hold_years():
 def test_projection_length_reaches_the_solver():
     """The unit-level fact behind the test above: the same price prices
     differently at different holds."""
-    from config import SCENARIO_DEFAULTS
     irrs = {h: project_cash_flows(
                 ttm_noi=300_000, price=3_957_031.25, capex=0,
                 params=SCENARIO_DEFAULTS[ScenarioType.BASE],
-                hold_years=h, costs=COSTS)["irr"]
+                hold_years=h, costs=COSTS,
+                exit_cap=RETIRED_EXIT_CAPS[ScenarioType.BASE])["irr"]
             for h in (3, 5, 10)}
     assert len(set(irrs.values())) == 3
 
@@ -320,7 +355,7 @@ def test_projection_can_be_told_not_to_coerce():
     """The sensitivity grid depends on this: an exit-cap axis is useless if
     every cell below entry cap is silently raised to it."""
     kw = dict(ttm_noi=400_000, price=4_000_000, capex=0,
-              params=dict(FLAT_PARAMS, exit_cap=0.05), hold_years=5,
+              params=FLAT_PARAMS, exit_cap=0.05, hold_years=5,
               expense_ratio=0.40, costs=NO_COSTS)
     assert project_cash_flows(**kw, coerce_exit_cap=True)["exit_cap"] == 0.10
     assert project_cash_flows(**kw, coerce_exit_cap=False)["exit_cap"] == 0.05

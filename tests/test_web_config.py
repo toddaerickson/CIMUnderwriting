@@ -79,7 +79,12 @@ def test_registry_derives_from_config():
     assert reg["EXPENSE_BENCHMARKS.property_tax"]["pct"] is False
     assert reg["EXPENSE_BENCHMARKS.mgmt_fee_pct"]["pct"] is True
     assert reg["REPLACEMENT_COST.soft_cost_pct"]["pct"] is True
-    assert reg["SCENARIO_DEFAULTS.base.exit_cap"]["kind"] == "scalar"
+    assert reg["SCENARIO_DEFAULTS.base.rev_cagr_yr1_3"]["kind"] == "scalar"
+    # Market cap is a three-level key (dict.class.band) whose middle level
+    # is a display string with a space in it — the only registry key of
+    # that shape, so it is the one that proves the splitter handles it.
+    assert reg["MARKET_CAP_RATES.Self Storage.mid"]["kind"] == "scalar"
+    assert reg["MARKET_CAP_RATES.Self Storage.mid"]["pct"] is True
     assert reg["VALUE_ADD_SCENARIOS.bull.months_to_stabilize"]["pct"] is False
     assert reg["VALUE_ADD_TRIGGERS.max_occupancy"]["pct"] is True
     assert reg["SOLVER_TARGET_IRR"]["pct"] is True
@@ -184,7 +189,8 @@ def test_build_config_patch_shapes_and_unknown_keys(caplog):
     deltas = {
         "GATES.min_irr_5yr": 0.12,
         "EXPENSE_BENCHMARKS.property_tax": [1.4, 2.6],
-        "SCENARIO_DEFAULTS.base.exit_cap": 0.07,
+        "SCENARIO_DEFAULTS.base.rev_cagr_yr1_3": 0.07,
+        "MARKET_CAP_RATES.Self Storage.mid": 0.061,
         "SOLVER_TARGET_IRR": 0.12,
         "GATES.retired_key_from_2025": 1.0,      # unknown → skipped, warned
     }
@@ -192,7 +198,9 @@ def test_build_config_patch_shapes_and_unknown_keys(caplog):
     assert solver == 0.12
     assert patch["GATES"] == {"min_irr_5yr": 0.12}
     assert patch["EXPENSE_BENCHMARKS"] == {"property_tax": [1.4, 2.6]}
-    assert patch["SCENARIO_DEFAULTS"] == {ScenarioType.BASE: {"exit_cap": 0.07}}
+    assert patch["SCENARIO_DEFAULTS"] == {
+        ScenarioType.BASE: {"rev_cagr_yr1_3": 0.07}}
+    assert patch["MARKET_CAP_RATES"] == {"Self Storage": {"mid": 0.061}}
     assert skipped == ["GATES.retired_key_from_2025"]
     assert "retired_key_from_2025" in caplog.text
 
@@ -202,28 +210,35 @@ def test_patched_config_mutates_in_place_and_restores():
     # be visible through those bindings, then fully restored.
     from analysis.filters import GATES as bound_gates
     from analysis.physical import REPLACEMENT_COST as bound_rc
+    from analysis.valuation import MARKET_CAP_RATES as bound_mcr
     from analysis.valuation import SCENARIO_DEFAULTS as bound_scen
     from registry import ScenarioType
     from webapp.services import _patched_config
 
     orig_irr = bound_gates["min_irr_5yr"]
-    orig_exit = bound_scen[ScenarioType.BASE]["exit_cap"]
+    orig_growth = bound_scen[ScenarioType.BASE]["rev_cagr_yr1_3"]
+    orig_mcr = bound_mcr["Self Storage"]["mid"]
     orig_rc = bound_rc["ss_driveup_per_sf"]
     orig_alias = bound_rc["non_cc_per_sf"]
     patch = {
         "GATES": {"min_irr_5yr": 0.12, "not_a_key": 9},
-        "SCENARIO_DEFAULTS": {ScenarioType.BASE: {"exit_cap": 0.07}},
+        "SCENARIO_DEFAULTS": {ScenarioType.BASE: {"rev_cagr_yr1_3": 0.07}},
+        "MARKET_CAP_RATES": {"Self Storage": {"mid": 0.061}},
         "REPLACEMENT_COST": {"ss_driveup_per_sf": [100, 120]},
     }
     with _patched_config(patch):
         assert bound_gates["min_irr_5yr"] == 0.12
         assert "not_a_key" not in bound_gates
-        assert bound_scen[ScenarioType.BASE]["exit_cap"] == 0.07
+        assert bound_scen[ScenarioType.BASE]["rev_cagr_yr1_3"] == 0.07
+        # This is the mutation `resolve_run_market_cap` must NOT read: it
+        # is another deal's table for as long as that deal holds the lock.
+        assert bound_mcr["Self Storage"]["mid"] == 0.061
         assert tuple(bound_rc["ss_driveup_per_sf"]) == (100, 120)
         # legacy alias synced (analysis/physical.py:151-154 reads it)
         assert tuple(bound_rc["non_cc_per_sf"]) == (100, 120)
     assert bound_gates["min_irr_5yr"] == orig_irr
-    assert bound_scen[ScenarioType.BASE]["exit_cap"] == orig_exit
+    assert bound_scen[ScenarioType.BASE]["rev_cagr_yr1_3"] == orig_growth
+    assert bound_mcr["Self Storage"]["mid"] == orig_mcr
     assert bound_rc["ss_driveup_per_sf"] == orig_rc
     assert bound_rc["non_cc_per_sf"] == orig_alias
 
@@ -282,7 +297,8 @@ def test_worker_applies_global_overrides_and_stamps_run(deals_dir, monkeypatch):
     def _fake(result, progress=None, output_dir=None, custom_scenarios=None,
               custom_va_scenarios=None, solver_target_irr=None, enrich=False,
               expense_line_overrides=None, hold_years=None,
-              transaction_costs=None, capital_structure=None):
+              transaction_costs=None, capital_structure=None,
+              market_cap_rate=None):
         from analysis.filters import GATES
         seen["min_irr_during_run"] = GATES["min_irr_5yr"]
         seen["solver_target_irr"] = solver_target_irr
@@ -332,7 +348,8 @@ def test_worker_stamps_global_solver_without_per_deal_override(deals_dir,
     def _fake(result, progress=None, output_dir=None, custom_scenarios=None,
               custom_va_scenarios=None, solver_target_irr=None, enrich=False,
               expense_line_overrides=None, hold_years=None,
-              transaction_costs=None, capital_structure=None):
+              transaction_costs=None, capital_structure=None,
+              market_cap_rate=None):
         seen["solver_target_irr"] = solver_target_irr
         result.gate_results = []
         result.gate_summary = {"passed": 0, "failed": 0, "tbd": 0, "total": 0,
@@ -353,9 +370,12 @@ def _capture_run_kwargs(monkeypatch, seen):
     def _fake(result, progress=None, output_dir=None, custom_scenarios=None,
               custom_va_scenarios=None, solver_target_irr=None, enrich=False,
               expense_line_overrides=None, hold_years=None,
-              transaction_costs=None, capital_structure=None):
+              transaction_costs=None, capital_structure=None,
+              market_cap_rate=None):
         seen["hold_years"] = hold_years
         seen["transaction_costs"] = transaction_costs
+        seen["market_cap_rate"] = market_cap_rate
+        seen["custom_scenarios"] = custom_scenarios
         result.gate_results = []
         result.gate_summary = {"passed": 0, "failed": 0, "tbd": 0, "total": 0,
                                "recommendation": "PURSUE",
@@ -385,6 +405,44 @@ def test_hold_and_costs_are_stamped_even_at_the_defaults(deals_dir,
     # and the engine was handed exactly what was stamped
     assert seen["hold_years"] == stamped["hold_years"]
     assert seen["transaction_costs"] == stamped["transaction_costs"]
+    # Same rule for the market cap: it drives every exit value, so a run
+    # sitting on the table default must still say which cell it used.
+    assert stamped["market_cap"]["source"] == "table"
+    assert stamped["market_cap"]["market_cap"] == \
+        cfg.MARKET_CAP_RATES[stamped["market_cap"]["asset_class"]][
+            stamped["market_cap"]["age_band"]]
+    assert seen["market_cap_rate"] == stamped["market_cap"]["market_cap"]
+    assert stamped["ignored_assumptions"] == {}
+
+
+@pytest.mark.django_db
+def test_a_retired_exit_cap_override_is_recorded_as_ignored(deals_dir,
+                                                            monkeypatch):
+    """A deal saved before the exit cap became derived still carries an
+    `exit_cap` in its stored scenario sections. The pipeline ignores it —
+    but silently dropping a number the analyst typed is the failure this
+    repo keeps catching in review, so the run says which ones it dropped.
+    """
+    from tests.test_web_runs import _make_extracted_deal, _start_run
+
+    seen = {}
+    _capture_run_kwargs(monkeypatch, seen)
+    deal = _make_extracted_deal(deals_dir)
+    deal.assumption_overrides = {
+        "scenario_overrides": {"base": {"exit_cap": 0.081,
+                                        "rev_cagr_yr1_3": 0.03}},
+        "va_scenario_overrides": {"bull": {"exit_cap": 0.055}},
+    }
+    deal.save()
+    run = _start_run(deal)
+
+    assert run.applied_overrides["assumptions"]["ignored_assumptions"] == {
+        "scenario_overrides.base.exit_cap": 0.081,
+        "va_scenario_overrides.bull.exit_cap": 0.055,
+    }
+    # the sections themselves still reach the engine, minus nothing — the
+    # retired key is inert there, not stripped
+    assert seen["custom_scenarios"]["base"]["rev_cagr_yr1_3"] == 0.03
 
 
 @pytest.mark.django_db
@@ -455,6 +513,67 @@ def test_costs_resolve_from_pristine_config_during_a_concurrent_run(deals_dir,
                     "disposition_cost_pct": pristine["disposition_cost_pct"]}
 
 
+def test_market_cap_resolves_from_pristine_config_during_a_concurrent_run():
+    """CROSS-DEAL ISOLATION GATE — do not delete.
+
+    MARKET_CAP_RATES is in _PATCHED_DICTS, so the live table is mutated in
+    place for as long as one deal's run holds _ANALYSIS_LOCK. The worker
+    resolves the market cap BEFORE taking that lock, so resolving off the
+    live table would let one deal's cap rates price a second deal's exit —
+    and since the resolved value is stamped unconditionally, the run
+    record would report the leak as if it were correct.
+
+    This is the same defect the transaction-cost gate above pins, and it
+    is worse here: the market cap drives every exit value in the run, so
+    a leak moves every published IRR rather than a few basis points.
+    """
+    class _Cim:
+        brv_enclosed_sf = brv_covered_sf = brv_open_sf = None
+        cc_pct = None
+        year_built = 2015
+
+    from webapp.services import _patched_config, resolve_run_market_cap
+
+    pristine = copy.deepcopy(cfg.MARKET_CAP_RATES)
+    foreign = {"MARKET_CAP_RATES": {"Self Storage": {"mid": 0.0999,
+                                                     "old": 0.0999}}}
+    with _patched_config(foreign):          # another deal's run, mid-flight
+        leaked = resolve_run_market_cap({}, {}, _Cim())
+    assert leaked["market_cap"] == pristine["Self Storage"][leaked["age_band"]]
+    assert leaked["market_cap"] != 0.0999
+
+    # This deal's OWN global delta still resolves while the foreign patch
+    # is live — isolation must not mean ignoring the run's own overrides.
+    with _patched_config(foreign):
+        mine = resolve_run_market_cap(
+            {"MARKET_CAP_RATES": {"Self Storage": {"mid": 0.0501}}},
+            {}, _Cim())
+    assert mine["market_cap"] == 0.0501
+
+    # And a per-deal analyst rate beats both.
+    with _patched_config(foreign):
+        typed = resolve_run_market_cap({}, {"market_cap_rate": 0.042}, _Cim())
+    assert typed["market_cap"] == 0.042
+    assert typed["source"] == "analyst"
+
+
+def test_a_market_cap_patch_merges_one_band_not_the_whole_class_row():
+    """A settings override names one cell (class × band). Replacing the
+    class row with a bare float would leave resolve_market_cap reading a
+    band out of a number."""
+    from webapp.services import _patched_config, build_config_patch
+
+    patch, _, _ = build_config_patch({"MARKET_CAP_RATES.Self Storage.mid":
+                                      0.0501})
+    before = copy.deepcopy(cfg.MARKET_CAP_RATES["Self Storage"])
+    with _patched_config(patch):
+        row = cfg.MARKET_CAP_RATES["Self Storage"]
+        assert row["mid"] == 0.0501
+        assert set(row) == set(before)                 # no bands dropped
+        assert row["new"] == before["new"]             # siblings untouched
+    assert cfg.MARKET_CAP_RATES["Self Storage"] == before
+
+
 @pytest.mark.django_db
 def test_assumptions_baseline_reflects_global_override(deals_dir):
     """With a global scenario override active, the form's initial shows
@@ -470,13 +589,13 @@ def test_assumptions_baseline_reflects_global_override(deals_dir):
     from webapp.models import ConfigOverride
 
     ConfigOverride.objects.create(
-        key="SCENARIO_DEFAULTS.base.exit_cap", value=0.07,
+        key="SCENARIO_DEFAULTS.base.rev_cagr_yr1_3", value=0.07,
         effective_date=datetime.date(2026, 1, 1))
     deal = _make_extracted_deal(deals_dir)
     eff = services.effective_config(deal.asset_type)
 
     initial = build_initial(deal, eff)
-    assert initial["scen_base_exit_cap"] == 7.0          # 0.07 shown as 7
+    assert initial["scen_base_rev_cagr_yr1_3"] == 7.0    # 0.07 shown as 7
 
     form = AssumptionsForm(initial)                      # resubmit as-is
     assert form.is_valid(), form.errors
@@ -496,11 +615,11 @@ def test_assumptions_explicit_change_still_persists(deals_dir):
     deal = _make_extracted_deal(deals_dir)
     eff = services.effective_config(deal.asset_type)
     initial = build_initial(deal, eff)
-    initial["scen_base_exit_cap"] = 8.0                  # user edits to 8%
+    initial["scen_base_rev_cagr_yr1_3"] = 8.0            # user edits to 8%
     form = AssumptionsForm(initial)
     assert form.is_valid(), form.errors
     out = build_overrides(form.cleaned_data, QueryDict(), deal, eff)
-    assert out["scenario_overrides"]["base"]["exit_cap"] == 0.08
+    assert out["scenario_overrides"]["base"]["rev_cagr_yr1_3"] == 0.08
 
 
 # ── Phase 5A: comps browser ──────────────────────────────────────────

@@ -280,6 +280,14 @@ def build_config_patch(deltas: dict):
             scen = ScenarioType(parts[1])
             patch.setdefault(parts[0], {}).setdefault(scen, {})[
                 parts[2]] = float(value)
+        elif parts[0] == "MARKET_CAP_RATES":
+            # Three levels too — dict.class.band — but the middle level is
+            # a plain asset-class string, not a ScenarioType. Flattening it
+            # like a two-level key replaced the whole class row with a
+            # float, and resolve_market_cap would then read a band out of
+            # a number.
+            patch.setdefault(parts[0], {}).setdefault(parts[1], {})[
+                parts[2]] = float(value)
         else:
             patch.setdefault(parts[0], {})[parts[1]] = value
     return patch, solver_irr, skipped
@@ -324,6 +332,36 @@ def resolve_run_market_cap(patch: dict, overrides: dict, cim_data) -> dict:
         detect_asset_type(cim_data), getattr(cim_data, "year_built", None),
         market_cap=(overrides or {}).get("market_cap_rate"),
         base=table)
+
+
+#: Per-scenario keys a stored deal may still carry from before the exit cap
+#: became derived from the market anchor. The pipeline no longer reads them.
+RETIRED_SCENARIO_KEYS = ("exit_cap",)
+
+
+def retired_scenario_overrides(overrides: dict) -> dict:
+    """The stored per-scenario values this run ignored, keyed by path.
+
+    A deal saved before the exit cap became derived still has an
+    `exit_cap` in its scenario sections. Dropping a number an analyst
+    once typed without saying so is the failure mode this repo keeps
+    catching in review, so the run stamp records what it ignored — the
+    analyst can then re-enter it as a market cap if it still reflects
+    their view.
+
+    Empty for every deal saved since; the key is stamped either way, so a
+    reader can tell "nothing was ignored" from "this run predates the
+    check".
+    """
+    found = {}
+    for section in ("scenario_overrides", "va_scenario_overrides"):
+        for scen, params in ((overrides or {}).get(section) or {}).items():
+            if not isinstance(params, dict):
+                continue
+            for key in RETIRED_SCENARIO_KEYS:
+                if key in params:
+                    found[f"{section}.{scen}.{key}"] = params[key]
+    return found
 
 
 def effective_config(asset_type: str = "", on_date=None) -> dict:
@@ -771,7 +809,8 @@ def _analysis_worker(run_pk):
         stamped = {**overrides, "hold_years": hold_years,
                    "transaction_costs": txn_costs,
                    "capital_structure": capital,
-                   "market_cap": market_cap}
+                   "market_cap": market_cap,
+                   "ignored_assumptions": retired_scenario_overrides(overrides)}
         # A per-deal cost supersedes the global row for THAT key, so the
         # global value must not be stamped as applied — same rule as
         # SOLVER_TARGET_IRR above, but key-level, because transaction
