@@ -3,9 +3,9 @@
 working tree of THIS project's shared clone.
 
 Multiple concurrent Claude sessions share this one clone. A session that mutates the
-PRIMARY working tree — edits a repo file, or runs a git branch/commit/reset/checkout
-there — can collide with another session that switches the primary clone's branch out
-from under it (the failure this guard exists to prevent; see CLAUDE.md rule
+PRIMARY working tree — edits a repo file, or runs a git branch/commit/reset/checkout/
+pull there — can collide with another session that switches the primary clone's branch
+out from under it (the failure this guard exists to prevent; see CLAUDE.md rule
 "Simultaneous sessions").
 
 This guard DENIES file mutations (Edit/Write/MultiEdit/NotebookEdit) and git-mutating
@@ -18,8 +18,8 @@ Mutations inside a linked worktree of this clone are ALLOWED. Mutations to OTHER
 reads, non-git Bash, read-only git, and edits outside any repo are ALLOWED — the guard
 only protects this clone's primary tree.
 
-Design (v3 — hardened over two adversarial-review rounds of the naive substring/cwd
-version):
+Design (v4 — hardened over five adversarial-review rounds of the naive substring/cwd
+version; rounds 2-5 each found real holes in what the previous round called done):
   * Heredoc bodies (`… <<EOF … EOF`) are stripped BEFORE parsing, so command examples
     inside a script/PR body written via `cat <<EOF` aren't misread as real commands.
   * Bash is split into segments; cwd is tracked with a proper `cd`/`pushd`/`popd`
@@ -32,10 +32,47 @@ version):
     launder a later primary mutation, and `-c k=v -C <primary>` can't hide the target.
   * A working-tree restore (`checkout … -- <file>`, `restore <file>`) is treated as a
     mutation — it overwrites shared-tree file content. Only index-only ops
-    (`restore --staged`, bare `reset`, `reset -- <path>`) are allowed.
+    (`restore --staged`, bare `reset`, `reset -- <path>`, `rm --cached`) are allowed.
+  * The subcommand list is by WRITE EFFECT, not by familiarity. `pull` shipped
+    unguarded because only its halves (`merge`, `rebase`) were listed while the
+    compound name was not — it rewrites the tree just the same. `rm`/`mv`/`bisect`
+    were the same oversight: each writes the tree without naming a listed subcommand.
+    Two further adversarial sweeps each caught what the previous one missed, and
+    that repetition is the point — the audit, not the list, is the fragile part.
+    Round 2: `sparse-checkout set` DELETES directories from disk,
+    `checkout-index -a -f` DISCARDS uncommitted content, and `submodule update`/
+    `read-tree -u`/`merge-file`/`filter-branch` all write tracked files.
+    Round 3, the subtler shape — commands that write without looking like it:
+    `archive -o <tracked>` overwrites a file with tar bytes, `symbolic-ref HEAD
+    <ref>` MOVES THE CHECKED-OUT BRANCH while `git status` stays clean, and
+    `config core.worktree`/`core.hooksPath` corrupt the shared clone for every
+    later session. Enumerate by asking "does this touch the tree or the branch",
+    never by recognising the name.
+    `fetch` stays ALLOWED — it moves remote-tracking refs only, never the working
+    tree, and it is how a session syncs without touching the shared checkout.
+  * Aliases are resolved BEFORE classification. `co = checkout` is an ordinary
+    convenience alias, not an attack, and it disabled every rule in this file
+    at once, because classification stopped at the literal token and never
+    asked whether the token was a rename. The lookup runs for the guarded tree
+    AND for an unresolved target — resolving only the former left
+    `cd $UNSET && git co main` walking through the fail-closed path, which is
+    the one path that most needed it. Every exit that cannot see through an
+    alias fails closed (`!shell`, a globals-only expansion, a chain deeper
+    than 10); a cycle need not, since git itself refuses to run one.
+  * `--help` exempts only as the LEADING argument. `git commit -m --help`
+    COMMITS, with "--help" as the message — verified against real git — so
+    scanning the whole arg list for it exempts a real mutation.
   * Scoped to THIS clone via $CLAUDE_PROJECT_DIR — other repos are never guarded.
   * A git mutation whose target can't be resolved (unexpanded $VAR / missing dir)
     FAILS CLOSED (deny).
+
+Scope, stated plainly because four adversarial rounds each found something the
+previous one called finished: this classifies the GIT COMMAND WORD and its
+arguments. It cannot see a shell redirect (`git archive HEAD > tracked.py`
+writes through the shell, not through git), and it never sees a non-git writer
+at all. Those are `detect-primary-tree-writes.py`'s job — it snapshots and
+compares, so it covers vectors nobody enumerated. Treat this hook as the half
+that PREVENTS what it recognises, not as a perimeter.
 
 Not defended against (ADVERSARIAL, not the accidental collisions this targets):
 `bash -c '…'`, `eval`, command substitution `$(cd … && git …)`, brace/subshell groups
@@ -176,7 +213,7 @@ def _split_git(gitargs):
 
 
 def _reset_mut(args):
-    if "--help" in args or "-h" in args:
+    if _helpish(args):
         return False
     if any(a in ("--soft", "--mixed", "--hard", "--merge", "--keep") for a in args):
         return True                                    # explicit mode = ref/tree move
@@ -186,7 +223,7 @@ def _reset_mut(args):
 
 
 def _restore_mut(args):
-    if "--help" in args or "-h" in args:
+    if _helpish(args):
         return False
     staged = "--staged" in args or "-S" in args
     worktree = "--worktree" in args or "-W" in args
@@ -194,16 +231,153 @@ def _restore_mut(args):
 
 
 def _branch_mut(args):
-    return any(a in ("-d", "-D", "--delete", "-m", "-M", "--move", "-f", "--force")
-               for a in args)                          # delete/rename/force (not list/create)
+    # delete/rename/force (not list/create), plus the upstream rewrites — those
+    # touch no file but persist in .git/config for every later session.
+    return any(a in ("-d", "-D", "--delete", "-m", "-M", "--move", "-f", "--force",
+                     "-u", "--unset-upstream", "--edit-description")
+               or a.startswith("--set-upstream-to")
+               for a in args)
+
+
+def _helpish(args):
+    """Only a LEADING `--help` is help.
+
+    Verified against real git: `commit --allow-empty -m --help` COMMITS, with
+    the message set to the literal string "--help". So a positional scan of the
+    arg list exempts a real mutation — it has to be the first argument.
+    """
+    return bool(args) and args[0] in ("--help", "-h")
+
+
+def _dry_run(args):
+    """`--dry-run`, `-n`, and git's bundled short forms (`rm -rn`, `mv -fn`).
+
+    Bundles are scanned across SHORT flags only. A substring test over every
+    arg — the shortcut `clean` can afford — would read the `n` in
+    `rm --ignore-unmatch` as a dry run and wave a real deletion through.
+    """
+    return "--dry-run" in args or any(
+        a.startswith("-") and not a.startswith("--") and "n" in a for a in args)
+
+
+def _positional(args):
+    return [a for a in args if not a.startswith("-")]
+
+
+def _archive_mut(args):
+    # Plain `git archive` streams to stdout; `-o FILE` writes, and FILE may be
+    # a tracked path — `archive -o config.py HEAD` replaces it with tar bytes.
+    if _helpish(args):
+        return False
+    return "-o" in args or any(a.startswith("--output") for a in args)
+
+
+def _symbolic_ref_mut(args):
+    # `symbolic-ref HEAD refs/heads/x` repoints the checked-out branch without
+    # touching one file — the collision this guard exists for, invisible to
+    # `git status`. One positional reads; two write.
+    if _helpish(args):
+        return False
+    if "--delete" in args or "-d" in args:
+        return True
+    return len(_positional(args)) >= 2
+
+
+def _config_mut(args):
+    """Writes to the shared clone's config outlive any one command.
+
+    `core.worktree` redirects what this .git calls its working tree and
+    `core.hooksPath` makes every later commit run code from elsewhere — both
+    persist for every session until someone notices. Reads stay allowed.
+    """
+    if _helpish(args):
+        return False
+    if any(a in ("--unset", "--unset-all", "--add", "--replace-all",
+                 "--edit", "-e") for a in args):
+        return True
+    if any(a in ("--get", "--get-all", "--get-regexp", "--get-urlmatch",
+                 "--list", "-l") for a in args):
+        return False
+    return len(_positional(args)) >= 2             # `config <key> <value>`
+
+
+def _mv_mut(args):
+    if _helpish(args):
+        return False
+    return not _dry_run(args)
+
+
+def _rm_mut(args):
+    # --cached unstages but leaves the file on disk — index-only, like `restore --staged`
+    return _mv_mut(args) and "--cached" not in args
+
+
+def _bisect_mut(args):
+    if _helpish(args):
+        return False
+    if not args:
+        return False                                   # bare `git bisect` prints status
+    return args[0] not in ("log", "view", "visualize", "terms", "help")
+
+
+def _second_word_mut(args, readonly):
+    """Deny a two-level subcommand unless its verb is in `readonly`.
+
+    Bare (`git remote`, `git submodule`) lists or prints usage, so it is a read.
+    """
+    if _helpish(args) or not args:
+        return False
+    return args[0] not in readonly
+
+
+ALIAS_SHELL = "\x00ALIAS_SHELL"
+
+
+def _resolve_alias(sub, args, probe, depth=10):
+    """Follow `alias.<sub>` before classifying, so a rename cannot launder a
+    mutation.
+
+    `co = checkout` is an ordinary convenience alias, not an attack — and it
+    disabled every rule in this file, because classification stopped at the
+    literal token and never asked whether the token was a rename.
+
+    Every exit that cannot see through the alias FAILS CLOSED, because the
+    alternative is "too clever to classify" reading as "safe": a `!shell`
+    expansion runs anything, an expansion of only global options
+    (`-c user.name=x commit …`) leaves no subcommand to judge, and a chain
+    deeper than we follow is one real git resolves anyway. A cycle is the one
+    case that need not: git itself refuses it, so it never runs.
+    """
+    seen = set()
+    while probe and sub and sub not in seen and depth > 0:
+        seen.add(sub)
+        expansion = git("-C", probe, "config", "--get", f"alias.{sub}")
+        if not expansion:
+            return sub, args
+        if expansion.startswith("!"):
+            return ALIAS_SHELL, args
+        # Skip the expansion's own globals exactly as a real command's are.
+        nxt, rest = _split_git(expansion.split())
+        if not nxt:
+            return ALIAS_SHELL, args
+        sub, args = nxt, rest + args
+        depth -= 1
+    if depth <= 0:
+        return ALIAS_SHELL, args
+    return sub, args
 
 
 def _is_mutation(sub, args):
+    if sub == ALIAS_SHELL:
+        return True                                    # `!cmd` alias runs anything
     if sub in ("commit", "merge", "rebase", "cherry-pick", "am", "revert", "apply",
-               "update-ref", "update-index", "gc"):
-        return True
-    if sub in ("checkout", "switch"):
-        return not ("--help" in args or "-h" in args)  # switch/checkout are always tree/ref ops
+               "update-ref", "update-index", "gc", "init"):
+        # `init --template=<dir>` re-inits in place and COPIES HOOKS into
+        # .git/hooks — which then fire on `worktree add`, the command every
+        # deny message here tells the operator to run.
+        return not _helpish(args)
+    if sub in ("checkout", "switch", "pull"):
+        return not _helpish(args)  # tree/ref ops; pull = fetch + merge/rebase
     if sub == "restore":
         return _restore_mut(args)
     if sub == "reset":
@@ -217,7 +391,32 @@ def _is_mutation(sub, args):
     if sub == "reflog":
         return bool(args) and args[0] in ("delete", "expire")
     if sub == "worktree":
-        return bool(args) and args[0] in ("remove", "prune", "move")
+        return bool(args) and args[0] in ("remove", "prune", "move", "repair")
+    if sub == "remote":
+        # set-url/add/rename rewrite .git/config — where every session pushes.
+        return _second_word_mut(args, ("show", "get-url", "-v", "--verbose"))
+    if sub == "mv":
+        return _mv_mut(args)
+    if sub == "rm":
+        return _rm_mut(args)
+    if sub == "bisect":
+        return _bisect_mut(args)
+    if sub == "sparse-checkout":
+        return _second_word_mut(args, ("list", "check-rules"))
+    if sub == "submodule":
+        return _second_word_mut(args, ("status", "summary"))
+    if sub == "archive":
+        return _archive_mut(args)
+    if sub == "symbolic-ref":
+        return _symbolic_ref_mut(args)
+    if sub == "config":
+        return _config_mut(args)
+    # Plumbing that writes tracked files. None of it is run casually, so these
+    # are denied outright rather than parsed for a working-tree flag: the
+    # index-only carve-out exists for `reset`/`restore --staged`/`rm --cached`,
+    # which people use daily, not for commands reached only on purpose.
+    if sub in ("checkout-index", "read-tree", "merge-file", "filter-branch"):
+        return not _helpish(args)
     return False
 
 
@@ -270,8 +469,20 @@ def _env_chdir(toks):
     return i, target, un
 
 
-def _reason(target):
+def _reason(target, sub=""):
     branch = git("-C", target, "branch", "--show-current") or "(detached HEAD)"
+    # Syncing the primary tree is a legitimate errand a new worktree cannot run,
+    # so `pull` gets pointed at the solo hatch instead of the generic isolate advice.
+    if sub == "pull":
+        return (
+            f"BLOCKED: `git pull` rewrites the PRIMARY working tree of the shared clone "
+            f"(branch '{branch}') — it is fetch + merge/rebase, and a concurrent session "
+            f"reading this tree would have the files move under it (CLAUDE.md: Simultaneous "
+            f"sessions). A worktree does not sync this tree, so isolating is not the fix "
+            f"here. Either `git fetch origin --prune` (moves remote-tracking refs only, "
+            f"never the working tree — new worktrees branch from origin/main anyway), or, "
+            f"once no other session is live, re-launch with CIM_SOLO=1 and pull --ff-only."
+        )
     return (
         f"BLOCKED: this mutation targets the PRIMARY working tree of the shared clone "
         f"(branch '{branch}'). Concurrent Claude sessions share it; mutating here risks a "
@@ -313,14 +524,25 @@ def _eval_bash(cmd, session_cwd, project_clone):
             continue                                   # command word isn't git
         gitargs = toks[i + 1:]
         sub, subargs = _split_git(gitargs)
-        if not _is_mutation(sub, subargs):
-            continue
         c = _git_c(gitargs, cwd)
         target = None if c is None else (c or seg_cwd)
+        # Resolve the target BEFORE classifying: an alias renames the
+        # subcommand, and reading `alias.<sub>` needs a repo to read it from.
+        # Only the guarded tree pays for the lookup.
+        guarded = _target_guarded(target, project_clone)
+        if not _is_mutation(sub, subargs) and (guarded or target is None):
+            # Pay for the alias lookup only where a verdict could still change:
+            # the guarded tree, or an UNRESOLVED target. Probing `session_cwd`
+            # when the target did not resolve is what keeps `cd $UNSET && git co`
+            # from walking through the fail-closed path — reading an alias needs
+            # SOME repo, and the one we are running in reads global config too.
+            sub, subargs = _resolve_alias(sub, subargs, target or session_cwd)
+        if not _is_mutation(sub, subargs):
+            continue
         if target is None:
             return UNRESOLVED
-        if _target_guarded(target, project_clone):
-            return _reason(target)
+        if guarded:
+            return _reason(target, sub)
     return None
 
 
