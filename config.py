@@ -366,6 +366,43 @@ DEBT_TERMS = {
                               # exit fee; bridge paper is where this bites
 }
 
+# ── Waterfall Terms (item E2) ───────────────────────────────────────
+# Defaults for model.waterfall.WaterfallTerms — ONE tier: an 8%
+# preferred return on unreturned capital, then a 20% promoted interest
+# to the GP on the residual. Operator fund terms, recorded in
+# docs/levered-waterfall-design.md. No catch-up, no clawback, no second
+# hurdle; the tier COUNT is a scope decision, not a setting.
+#
+# `gp_coinvest_pct` is deliberately NOT a key here. It lives in the
+# capital block above as GP_COINVEST_PCT, because
+# model.returns_model.resolve_capital_structure already reads it for the
+# Sources & Uses stack — a second copy is exactly the silent divergence
+# the single-source-of-truth rule forbids.
+#
+# Four of these five values are open LPA questions (docs/scoped-backlog.md
+# item E). They ship as stamped defaults: model.waterfall.assumption_stamp
+# renders the resolved set, and no LP net IRR is displayed without it.
+# `accrual_base="committed"` and `am_fee_treatment="netted_from_lp"` are
+# real market conventions this module does NOT implement and will raise
+# on, rather than quietly running the default.
+#
+# Out of _PATCHED_DICTS for the reason recorded above the capital block:
+# a patched dict is mutated in place for one deal's run, so anything
+# resolving it outside that run's lock reads another deal's terms.
+# Waterfall terms travel as parameters, resolved once via
+# model.waterfall.resolve_waterfall_terms.
+#
+# NOTE FOR ITEM E3: nothing reads these yet.
+WATERFALL_TERMS = {
+    "pref_rate": 0.08,
+    "pref_compounding": "annual",   # "annual" | "simple" — ~19% of promote
+    "ordering": "roc_first",        # only bites when the pref is simple
+    "promote_split": 0.20,          # GP share of the LP-attributable residual
+    "accrual_base": "contributed",  # contributed/unreturned, not committed
+    "am_fee_treatment": "above_waterfall",   # a deal expense, charged by E3
+    "catch_up": False,              # scoped out; True raises
+}
+
 # ── Regional Expense Adjustments ──────────────────────────────────
 # Multipliers applied to national EXPENSE_BENCHMARKS by region.
 # Derived from ISS Self-Storage Expense Guidebook and SSA Operating
