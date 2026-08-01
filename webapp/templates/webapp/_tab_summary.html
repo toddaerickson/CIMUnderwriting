@@ -48,6 +48,56 @@
   </details>
   {% endif %}
 
+  {% comment %} Capital — Sources and Uses read as one table, not two
+     stacked ones: they are the same total counted two ways, and stacking
+     spends a whole block of vertical space making that point. {% endcomment %}
+  {% if has_capital %}
+  <div>
+    <h2 class="text-sm font-semibold mb-1.5">Capital</h2>
+    <div class="bg-white border border-slate-200 rounded-lg overflow-x-auto">
+      <table class="w-full text-sm border-collapse">
+        <thead>
+          <tr class="text-left border-b border-slate-300 text-xs text-slate-600">
+            <th class="py-1.5 pl-3 pr-3">Uses</th>
+            <th class="py-1.5 pr-3 text-right">Amount</th>
+            <th class="py-1.5 pr-3 text-right">%</th>
+            <th class="py-1.5 pl-3 pr-3 border-l border-slate-200">Sources</th>
+            <th class="py-1.5 pr-3 text-right">Amount</th>
+            <th class="py-1.5 pr-3 text-right">%</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in capital_rows %}
+          <tr class="border-b border-slate-100">
+            <td class="py-1.5 pl-3 pr-3 {% if row.use.zero %}text-slate-400{% endif %}">{{ row.use.label|default:"" }}</td>
+            <td class="py-1.5 pr-3 text-right tabular-nums {% if row.use.zero %}text-slate-400{% endif %}">{{ row.use.amount|default:"" }}</td>
+            <td class="py-1.5 pr-3 text-right tabular-nums text-slate-400">{{ row.use.share|default:"" }}</td>
+            <td class="py-1.5 pl-3 pr-3 border-l border-slate-200 {% if row.source.zero %}text-slate-400{% endif %}">{{ row.source.label|default:"" }}</td>
+            <td class="py-1.5 pr-3 text-right tabular-nums {% if row.source.zero %}text-slate-400{% endif %}">{{ row.source.amount|default:"" }}</td>
+            <td class="py-1.5 pr-3 text-right tabular-nums text-slate-400">{{ row.source.share|default:"" }}</td>
+          </tr>
+          {% endfor %}
+          <tr class="border-t border-slate-300 font-medium">
+            <td class="py-1.5 pl-3 pr-3">Total Uses</td>
+            <td class="py-1.5 pr-3 text-right tabular-nums">{{ total_uses }}</td>
+            <td class="py-1.5 pr-3"></td>
+            <td class="py-1.5 pl-3 pr-3 border-l border-slate-200">Total Sources</td>
+            <td class="py-1.5 pr-3 text-right tabular-nums">{{ total_sources }}</td>
+            <td class="py-1.5 pr-3"></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="mt-1.5 text-sm">
+      <span class="font-medium">Equity Required: {{ total_equity }}</span>
+      &middot; GP {{ gp_coinvest_pct }}: {{ gp_equity }} &middot; LP: {{ lp_equity }}
+      {% if not capital_balanced %}
+      <span class="ml-1 rounded px-1.5 py-0.5 text-xs font-semibold bg-red-100 text-red-800">OUT OF BALANCE by {{ capital_delta }}</span>
+      {% endif %}
+    </p>
+  </div>
+  {% endif %}
+
   <div>
     <h2 class="text-sm font-semibold mb-1.5">Go / No-Go Gates</h2>
     <div class="bg-white border border-slate-200 rounded-lg overflow-x-auto">

@@ -5,6 +5,8 @@ preformatted strings out. Percent decimals become display strings HERE
 and nowhere else. Templates stay dumb; formatting stays testable.
 """
 
+from itertools import zip_longest
+
 import config as cfg
 
 
@@ -88,6 +90,54 @@ def header_metrics(deal, r) -> dict:
     }
 
 
+def capital_context(r) -> dict:
+    """Sources & Uses for the summary tab's Capital block.
+
+    Uses and Sources render as ONE two-column table rather than two
+    stacked ones — they are the same total read two ways, and stacking
+    them costs a full block of vertical space to say so. Rows are zipped
+    to the longer side, so adding a debt tranche in item E1 does not need
+    a template change.
+    """
+    su = r.get("sources_uses") or {}
+    if not su:
+        return {"has_capital": False}
+    uses = su.get("uses") or []
+    sources = su.get("sources") or []
+
+    def cell(line, total):
+        if line is None:
+            return None
+        amount = line.get("amount")
+        # A $0 line is kept, not dropped — "no reserve was underwritten"
+        # and "there is no reserve row" are different statements, and the
+        # second one is how an omission goes unnoticed. It is rendered
+        # quietly instead, so the eye skips it without the fact leaving
+        # the page. In the default all-equity case that is three of the
+        # five Uses rows, so it is the difference between a dense block
+        # and a wall of zeros.
+        return {"label": line.get("label"), "amount": fmt_money(amount),
+                "share": fmt_pct((amount / total) if total else None),
+                "zero": not amount}
+
+    total_uses = su.get("total_uses") or 0
+    total_sources = su.get("total_sources") or 0
+    rows = [{"use": cell(u, total_uses), "source": cell(s, total_sources)}
+            for u, s in zip_longest(uses, sources)]
+    return {
+        "has_capital": True,
+        "capital_rows": rows,
+        "total_uses": fmt_money(total_uses),
+        "total_sources": fmt_money(total_sources),
+        "total_equity": fmt_money(su.get("total_equity")),
+        "gp_equity": fmt_money(su.get("gp_equity")),
+        "lp_equity": fmt_money(su.get("lp_equity")),
+        "gp_coinvest_pct": fmt_pct(su.get("gp_coinvest_pct"), digits=0),
+        "capital_balanced": bool(su.get("balanced")),
+        "capital_delta": fmt_money(abs(su.get("delta") or 0)),
+    }
+
+
 def summary_context(r) -> dict:
     summary = r.get("gate_summary") or {}
     rec = summary.get("recommendation", "N/A")
@@ -134,6 +184,18 @@ def _hold_years(scenarios: dict, noi_key: str = "noi_projection") -> int:
     return cfg.DEFAULT_HOLD_YEARS
 
 
+def _unconverged(solved) -> bool:
+    """True when a solver produced a price it never actually converged on.
+
+    Runs predating the flag carry no `converged` key; those are read as
+    converged rather than retroactively flagged, since the absence is a
+    missing field, not evidence of a failure.
+    """
+    if not solved or solved.get("max_price") is None:
+        return False
+    return solved.get("converged") is False
+
+
 def returns_context(r) -> dict:
     scen = r.get("scenario_results") or {}
     va = r.get("va_results") or {}
@@ -166,6 +228,14 @@ def returns_context(r) -> dict:
             ("Stabilized NOI", "stabilized_noi", fmt_money),
         ]),
         "max_offer": fmt_money((r.get("max_offer") or {}).get("max_price")),
+        # The bisection returns a price whatever happens; `converged` is
+        # the only thing separating an answer from a bound it never got
+        # away from. It reached the Excel tab but nothing on the web page,
+        # so a non-answer read exactly like an answer. Item D adds an
+        # unbounded reserve dial, which makes an unreachable target IRR
+        # materially easier to hit than transaction costs alone could.
+        "max_offer_unconverged": _unconverged(r.get("max_offer")),
+        "va_max_offer_unconverged": _unconverged(r.get("va_max_offer")),
         "va_max_offer": fmt_money((r.get("va_max_offer") or {}).get("max_price")),
         "has_va_max_offer": bool((r.get("va_max_offer") or {}).get("max_price")),
         "has_sensitivity": bool(sens.get("irr_grid")),

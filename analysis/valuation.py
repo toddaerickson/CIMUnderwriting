@@ -70,6 +70,7 @@ def project_cash_flows(ttm_noi: float, price: float, capex: float,
                        hold_years: int = None,
                        expense_ratio: float = None,
                        costs: dict = None,
+                       reserve: float = 0.0,
                        coerce_exit_cap: bool = True,
                        exit_cap_override: float = None) -> dict:
     """Canonical unlevered projection: NOI series → cash flows → IRR/MOIC.
@@ -94,6 +95,13 @@ def project_cash_flows(ttm_noi: float, price: float, capex: float,
         hold_years: years held; None → config.DEFAULT_HOLD_YEARS
         expense_ratio: actual OpEx/Revenue ratio; None → clamped default
         costs: partial or full override of config.TRANSACTION_COSTS
+        reserve: upfront operating / working-capital reserve funded at
+            close (item D). It is part of the equity check, so it enters
+            `total_basis` — Sources & Uses could not otherwise tie to the
+            DCF. It is NOT released at exit: crediting the balance back
+            assumes the reserve was never needed, which is the assumption
+            a reserve exists to hedge. Default 0, so nothing published
+            moves until a deal names one.
         coerce_exit_cap: floor the exit cap at the entry cap. The scenario
             engine passes True for base/bear only and the solver matches
             it. The sensitivity grid passes False — its whole purpose is
@@ -148,7 +156,8 @@ def project_cash_flows(ttm_noi: float, price: float, capex: float,
     net_exit_proceeds = exit_value - disposition_cost
 
     acquisition_cost = price * costs["acquisition_closing_pct"]
-    total_basis = price + capex + acquisition_cost
+    reserve = float(reserve or 0.0)
+    total_basis = price + capex + acquisition_cost + reserve
 
     cash_flows = [-total_basis]
     for i, noi in enumerate(noi_series):
@@ -176,6 +185,8 @@ def project_cash_flows(ttm_noi: float, price: float, capex: float,
         "net_exit_proceeds": net_exit_proceeds,
         "acquisition_cost": acquisition_cost,
         "transaction_costs": costs,
+        "reserve": reserve,
+        "capex": capex,
         "total_basis": total_basis,
         "cash_flows": cash_flows,
         "irr": irr,
@@ -189,7 +200,8 @@ def run_scenarios(adjusted_ttm_noi: float, asking_price: float,
                   custom_scenarios: dict = None,
                   expense_ratio: float = None,
                   hold_years: int = None,
-                  transaction_costs: dict = None) -> dict:
+                  transaction_costs: dict = None,
+                  reserve: float = 0.0) -> dict:
     """
     Run Bear / Base / Bull unlevered return scenarios.
 
@@ -203,6 +215,9 @@ def run_scenarios(adjusted_ttm_noi: float, asking_price: float,
                        (falls back to 0.40 if not provided)
         hold_years: hold period in years (default config.DEFAULT_HOLD_YEARS)
         transaction_costs: override of config.TRANSACTION_COSTS
+        reserve: upfront operating reserve, in dollars (see
+                 project_cash_flows) — one figure for the whole deal, so
+                 every scenario shares one total_basis
 
     Returns:
         dict keyed by scenario name, each containing:
@@ -226,6 +241,7 @@ def run_scenarios(adjusted_ttm_noi: float, asking_price: float,
             expense_ratio=expense_ratio,
             hold_years=hold_years,
             transaction_costs=transaction_costs,
+            reserve=reserve,
         )
         for name, params in scenarios.items()
     }
@@ -236,7 +252,8 @@ def _run_single_scenario(scenario_name: str, ttm_noi: float,
                          params: dict,
                          expense_ratio: float = None,
                          hold_years: int = None,
-                         transaction_costs: dict = None) -> dict:
+                         transaction_costs: dict = None,
+                         reserve: float = 0.0) -> dict:
     """Label and reshape one canonical projection for the scenario API."""
     p = project_cash_flows(
         ttm_noi=ttm_noi,
@@ -246,6 +263,7 @@ def _run_single_scenario(scenario_name: str, ttm_noi: float,
         hold_years=hold_years,
         expense_ratio=expense_ratio,
         costs=transaction_costs,
+        reserve=reserve,
         coerce_exit_cap=scenario_name in COERCED_SCENARIOS,
     )
 
@@ -266,6 +284,7 @@ def _run_single_scenario(scenario_name: str, ttm_noi: float,
         "net_exit_proceeds": p["net_exit_proceeds"],
         "acquisition_cost": p["acquisition_cost"],
         "transaction_costs": p["transaction_costs"],
+        "reserve": p["reserve"],
         "cash_flows": p["cash_flows"],
         "irr": p["irr"],
         "moic": p["moic"],

@@ -19,7 +19,8 @@ def generate_memo(property_name: str, cim_data, gate_results: list,
                   scenario_results: dict, value_add: dict,
                   risk_analysis: dict, max_offer: dict,
                   va_results: dict = None, va_max_offer: dict = None,
-                  checks: list = None, output_dir: str = ".") -> str:
+                  checks: list = None, sources_uses: dict = None,
+                  output_dir: str = ".") -> str:
     """
     Generate the SS Investment Memo .docx.
 
@@ -57,7 +58,7 @@ def generate_memo(property_name: str, cim_data, gate_results: list,
     _add_section_5(doc, rent_analysis)
 
     # ── Section 6: Valuation & Returns ──────────────────────────
-    _add_section_6(doc, scenario_results, max_offer)
+    _add_section_6(doc, scenario_results, max_offer, sources_uses)
 
     # ── Section 7: Value-Add Opportunities ──────────────────────
     _add_section_7(doc, value_add, va_results, va_max_offer)
@@ -483,7 +484,7 @@ def _add_section_5(doc, rent):
         doc.add_paragraph(gap["narrative"])
 
 
-def _add_section_6(doc, scenario_results, max_offer):
+def _add_section_6(doc, scenario_results, max_offer, sources_uses=None):
     doc.add_heading("6. Valuation & Returns", level=1)
 
     if not scenario_results:
@@ -520,6 +521,8 @@ def _add_section_6(doc, scenario_results, max_offer):
         doc.add_paragraph(f"{hold}-Year MOIC: {s.get('moic', 0):.2f}x" if s.get("moic") else "MOIC: N/A")
         doc.add_paragraph(f"Yield on Cost: {_fmt_pct(s.get('yield_on_cost'))}")
 
+    _add_sources_uses(doc, sources_uses)
+
     # Max offer
     if max_offer:
         doc.add_heading("Maximum Offer Price", level=2)
@@ -528,6 +531,55 @@ def _add_section_6(doc, scenario_results, max_offer):
             f"the maximum offer price is {_fmt_currency(max_offer.get('max_price'))} "
             f"(implied entry cap: {_fmt_pct(max_offer.get('implied_entry_cap'))})."
         )
+
+
+def _add_sources_uses(doc, sources_uses):
+    """Capital stack under section 6 — what the deal costs and where the
+    money comes from. Every figure is read off build_sources_uses; nothing
+    is recomputed here, so the memo cannot state a basis the model did not
+    use. Senior debt and financing costs read $0 until item E1 sizes a
+    loan, and they are PRINTED as zero rather than omitted, so a reader
+    can see this is an all-equity underwrite rather than guess."""
+    if not sources_uses:
+        return
+    doc.add_heading("Sources & Uses", level=2)
+
+    for title, lines, total_key in (
+            ("Uses", sources_uses.get("uses"), "total_uses"),
+            ("Sources", sources_uses.get("sources"), "total_sources")):
+        rows = list(lines or [])
+        if not rows:
+            continue
+        table = doc.add_table(rows=len(rows) + 2, cols=3)
+        table.style = "Light Grid Accent 1"
+        header = table.rows[0].cells
+        header[0].text = title
+        header[1].text = "Amount"
+        header[2].text = "% of Total"
+        total = sources_uses.get(total_key) or 0
+        for i, line in enumerate(rows, start=1):
+            amount = line.get("amount") or 0
+            cells = table.rows[i].cells
+            cells[0].text = line.get("label") or ""
+            cells[1].text = _fmt_currency(amount)
+            cells[2].text = _fmt_pct(amount / total) if total else "N/A"
+        last = table.rows[len(rows) + 1].cells
+        last[0].text = f"Total {title}"
+        last[1].text = _fmt_currency(total)
+        last[2].text = _fmt_pct(1.0) if total else "N/A"
+        doc.add_paragraph()
+
+    doc.add_paragraph(
+        f"Total equity required: "
+        f"{_fmt_currency(sources_uses.get('total_equity'))} "
+        f"(GP co-invest {_fmt_pct(sources_uses.get('gp_coinvest_pct'))}: "
+        f"{_fmt_currency(sources_uses.get('gp_equity'))}; LP "
+        f"{_fmt_currency(sources_uses.get('lp_equity'))}).")
+    if not sources_uses.get("balanced"):
+        doc.add_paragraph(
+            f"WARNING: Sources and Uses are out of balance by "
+            f"{_fmt_currency(abs(sources_uses.get('delta') or 0))}. The "
+            f"returns above are computed on the Uses figure.")
 
 
 def _add_section_7(doc, value_add, va_results=None, va_max_offer=None):

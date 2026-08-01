@@ -44,6 +44,7 @@ class AnalysisContext:
     # ── Valuation ─────────────────────────────────────────────────
     scenario_results: dict = field(default_factory=dict)
     sensitivity: dict = field(default_factory=dict)
+    sources_uses: dict = field(default_factory=dict)
     va_results: dict = field(default_factory=dict)
     max_offer: dict = field(default_factory=dict)
     va_max_offer: dict = field(default_factory=dict)

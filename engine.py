@@ -34,6 +34,8 @@ class AnalysisResult:
     scenario_results: dict = field(default_factory=dict)
     sensitivity: dict = field(default_factory=dict)
     va_results: dict = field(default_factory=dict)
+    # Capital stack (model.returns_model.build_sources_uses)
+    sources_uses: dict = field(default_factory=dict)
     # Solver
     max_offer: dict = field(default_factory=dict)
     va_max_offer: dict = field(default_factory=dict)
@@ -133,7 +135,8 @@ def run_analysis(result: AnalysisResult, progress: Callable = None,
                   enrich: bool = False,
                   expense_line_overrides: dict = None,
                   hold_years: int = None,
-                  transaction_costs: dict = None) -> AnalysisResult:
+                  transaction_costs: dict = None,
+                  capital_structure: dict = None) -> AnalysisResult:
     """
     Run full analysis pipeline on an already-extracted CIMData.
 
@@ -163,6 +166,13 @@ def run_analysis(result: AnalysisResult, progress: Callable = None,
         transaction_costs: per-analysis override of
             config.TRANSACTION_COSTS. A partial dict is merged onto the
             defaults; a missing key means "default", never zero.
+        capital_structure: per-analysis capital-stack inputs (item D) —
+            `capex_basis`, `operating_reserve`,
+            `operating_reserve_basis`, `gp_coinvest_pct`. A partial dict
+            is merged onto the config defaults. Passed as a parameter
+            rather than patched into config for the reason spelled out in
+            config.py: a patched dict is shared mutable state across
+            concurrent runs.
 
     Returns:
         Updated AnalysisResult with all analysis fields populated
@@ -217,9 +227,51 @@ def run_analysis(result: AnalysisResult, progress: Callable = None,
 
     # Step 5: Scenario modeling
     _progress(5, 9, "Running Bear/Base/Bull scenarios...")
+    from model.returns_model import (BASIS_AMOUNT, BASIS_PCT_PRICE,
+                                     resolve_capital_amount,
+                                     resolve_capital_structure)
+
+    capital = resolve_capital_structure(capital_structure)
     asking = cim_data.asking_price or 0
-    capex = cim_data.capex_estimate or 0
     nrsf = cim_data.nrsf or 1
+
+    # CapEx and the reserve are entered on a basis (item D / H). Resolve
+    # to dollars ONCE, here, and hand dollars to everything downstream —
+    # the scenario engine, the VA engine, the solvers, the memo and the
+    # Excel writer all read the same figure rather than each re-deriving
+    # it from a rate. `cim_data.nrsf` is passed raw, NOT the `or 1`
+    # fallback above: a $/SF rate times a fabricated 1 SF is a fabricated
+    # dollar amount, and resolve_capital_amount's job is to refuse that.
+    capex = resolve_capital_amount(
+        cim_data.capex_estimate, capital["capex_basis"],
+        nrsf=cim_data.nrsf, units=cim_data.total_units, price=asking)
+    reserve = resolve_capital_amount(
+        capital["operating_reserve"], capital["operating_reserve_basis"],
+        nrsf=cim_data.nrsf, units=cim_data.total_units, price=asking)
+    # Only a percentage-of-price CapEx moves with the price the solver is
+    # trying; every other basis is fixed dollars by the time we get here.
+    capex_pct_of_price = (float(cim_data.capex_estimate or 0.0)
+                          if capital["capex_basis"] == BASIS_PCT_PRICE
+                          else None)
+
+    # A rate whose driver went missing resolves to $0 (see
+    # resolve_capital_amount). The assumptions form refuses that
+    # combination, but a saved basis outlives the value it was validated
+    # against: re-extracting a deal rewrites cim_json, so a re-parse that
+    # loses NRSF turns a valid "$0.50/SF CapEx" into $0 on the NEXT run
+    # with nothing on screen to say so. A quiet $0 line in the capital
+    # stack is exactly the "empty state hiding a real failure" this
+    # pipeline is not allowed to produce, so it becomes a run warning.
+    for label, entered, basis, resolved in (
+            ("CapEx", cim_data.capex_estimate, capital["capex_basis"], capex),
+            ("Operating reserve", capital["operating_reserve"],
+             capital["operating_reserve_basis"], reserve)):
+        if basis != BASIS_AMOUNT and entered and not resolved:
+            result.errors.append(
+                f"{label} was entered on a '{basis}' basis but resolved to "
+                f"$0 — the figure it multiplies (NRSF, unit count or asking "
+                f"price) is missing from this deal, so it is NOT in the "
+                f"basis. Re-enter it in dollars or restore the missing field.")
 
     if result.adjusted_noi and asking > 0:
         from model.returns_model import build_returns_model
@@ -232,9 +284,13 @@ def run_analysis(result: AnalysisResult, progress: Callable = None,
             expense_ratio=result.expense_ratio,
             hold_years=hold_years,
             transaction_costs=transaction_costs,
+            reserve=reserve,
+            gp_coinvest_pct=capital["gp_coinvest_pct"],
+            capex_pct_of_price=capex_pct_of_price,
         )
         result.scenario_results = model["scenarios"]
         result.sensitivity = model["sensitivity"]
+        result.sources_uses = model["sources_uses"]
 
         # Step 6: Value-add
         _progress(6, 9, "Checking value-add potential...")
@@ -248,13 +304,16 @@ def run_analysis(result: AnalysisResult, progress: Callable = None,
                 custom_scenarios=custom_va_scenarios,
                 hold_years=hold_years,
                 transaction_costs=transaction_costs,
+                reserve=reserve,
             )
 
         # Step 7: Max price solver
         _progress(7, 9, "Solving for maximum offer price...")
         from model.solver import solve_max_price, solve_max_price_value_add
         solver_kwargs = {"hold_years": hold_years,
-                         "transaction_costs": transaction_costs}
+                         "transaction_costs": transaction_costs,
+                         "reserve": reserve,
+                         "capex_pct_of_price": capex_pct_of_price}
         if solver_target_irr:
             solver_kwargs["target_irr"] = solver_target_irr
         result.max_offer = solve_max_price(
@@ -297,7 +356,7 @@ def run_analysis(result: AnalysisResult, progress: Callable = None,
     from analysis import checks as model_checks
     _check_results = model_checks.run_checks(model_checks.input_from_cim(
         cim_data, result.financial_analysis, result.physical_analysis,
-        result.scenario_results))
+        result.scenario_results, result.sources_uses))
     result.checks = model_checks.to_dicts(_check_results)
     result.check_summary = model_checks.summarize(_check_results)
 
@@ -325,6 +384,7 @@ def run_analysis(result: AnalysisResult, progress: Callable = None,
         va_results=result.va_results,
         va_max_offer=result.va_max_offer,
         checks=result.checks,
+        sources_uses=result.sources_uses,
         output_dir=output_dir,
     )
 
@@ -338,6 +398,7 @@ def run_analysis(result: AnalysisResult, progress: Callable = None,
         va_results=result.va_results,
         va_max_offer=result.va_max_offer,
         checks=result.checks,
+        sources_uses=result.sources_uses,
         output_dir=output_dir,
     )
 
@@ -353,6 +414,7 @@ def run_analysis(result: AnalysisResult, progress: Callable = None,
             property_name=property_name,
             hold_years=hold_years,
             transaction_costs=transaction_costs,
+            capex=capex,
         )
     except Exception as e:
         result.errors.append(f"Template generation failed: {e}")

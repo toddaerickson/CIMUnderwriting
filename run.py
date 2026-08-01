@@ -166,6 +166,7 @@ def stage_valuate(ctx: AnalysisContext):
     )
     ctx.scenario_results = model["scenarios"]
     ctx.sensitivity = model["sensitivity"]
+    ctx.sources_uses = model["sources_uses"]
 
     # Log static scenario summary
     logger.info("  Static DCF Scenarios:")
@@ -266,6 +267,7 @@ def stage_output(ctx: AnalysisContext, comp_db):
         max_offer=ctx.max_offer,
         va_results=ctx.va_results,
         va_max_offer=ctx.va_max_offer,
+        sources_uses=ctx.sources_uses,
         output_dir=ctx.output_dir,
     )
     logger.info("  Memo: %s", ctx.memo_path)
@@ -279,6 +281,7 @@ def stage_output(ctx: AnalysisContext, comp_db):
         max_offer=ctx.max_offer,
         va_results=ctx.va_results,
         va_max_offer=ctx.va_max_offer,
+        sources_uses=ctx.sources_uses,
         output_dir=ctx.output_dir,
     )
     logger.info("  Model: %s", ctx.excel_path)

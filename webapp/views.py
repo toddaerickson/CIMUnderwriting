@@ -242,7 +242,8 @@ def deal_assumptions(request, pk):
         "unit_rows": rows,
         "benchmark_rows": benchmark_rows,
         "driver_rows": f.model_rows(form, f.SECTION_DRIVERS, deal.cim_json or {},
-                                    source_log),
+                                    source_log,
+                                    extras={"capex_estimate": form["capex_basis"]}),
         "sec_property": f.section_fields(form, f.SECTION_PROPERTY, missing_required),
         "sec_size": f.section_fields(form, f.SECTION_SIZE, missing_required),
         "sec_income": f.section_fields(form, f.SECTION_INCOME, missing_required),
@@ -257,6 +258,9 @@ def deal_assumptions(request, pk):
         "hold_years_field": form["hold_years"],
         "txn_cost_fields": [{"label": label, "field": form[name]}
                             for name, label in f.TXN_COST_LABELS],
+        "reserve_field": form["operating_reserve"],
+        "reserve_basis_field": form["operating_reserve_basis"],
+        "gp_coinvest_field": form["gp_coinvest_pct"],
     }
     ctx.update(strip_ctx)
     return render(request, "webapp/assumptions.html", ctx, status=status)
@@ -436,6 +440,7 @@ def deal_detail(request, pk):
         if tab == "summary":
             ctx.update(results_ctx.summary_context(r))
             ctx.update(results_ctx.checks_context(r))
+            ctx.update(results_ctx.capital_context(r))
         elif tab == "returns":
             ctx.update(results_ctx.returns_context(r))
         elif tab == "financials":

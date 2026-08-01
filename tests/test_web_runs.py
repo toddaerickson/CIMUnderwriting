@@ -235,7 +235,7 @@ def fake_run(monkeypatch):
     def _fake(result, progress=None, output_dir=None, custom_scenarios=None,
               custom_va_scenarios=None, solver_target_irr=None, enrich=False,
               expense_line_overrides=None, hold_years=None,
-              transaction_costs=None):
+              transaction_costs=None, capital_structure=None):
         calls["cim_data"] = result.cim_data
         calls["output_dir"] = output_dir
         calls["custom_scenarios"] = custom_scenarios
@@ -279,6 +279,13 @@ def fake_run(monkeypatch):
         result.va_results = {
             "base": {"irr": 0.13, "moic": 1.7, "yield_on_cost": 0.08,
                      "development_spread": 0.02, "stabilized_noi": 300_000.0}}
+        # Built by the real function, not hand-rolled: a fixture carrying
+        # a stale schema is how a display test stays green past a change
+        # that broke the page.
+        from model.returns_model import build_sources_uses
+        result.sources_uses = build_sources_uses(
+            price=3_500_000, capex=100_000, acquisition_cost=35_000,
+            reserve=50_000, gp_coinvest_pct=0.10)
         result.max_offer = {"max_price": 3_100_000.0, "achieved_irr": 0.10,
                             "converged": True}
         result.va_max_offer = {"max_price": 3_300_000.0, "achieved_irr": 0.10,
@@ -615,6 +622,68 @@ def test_run_payload_carries_the_check_register(client, operator, deals_dir,
 
 
 @pytest.mark.django_db
+def test_run_payload_carries_the_capital_stack(client, operator, deals_dir,
+                                               fake_run):
+    deal = _run_deal(client, deals_dir)
+    su = deal.runs.filter(status="done").first().result_json["sources_uses"]
+    assert su["total_uses"] == 3_685_000
+    assert su["total_sources"] == pytest.approx(su["total_uses"])
+    assert [u["key"] for u in su["uses"]] == [
+        "price", "acquisition_cost", "capex", "reserve", "financing_costs"]
+
+
+@pytest.mark.django_db
+def test_capital_structure_is_stamped_even_at_the_defaults(
+        client, operator, deals_dir, fake_run):
+    """Same rule item B set for the hold and the cost percentages: a run
+    that sat on the defaults must SAY so, or it is indistinguishable from
+    a run that predates the setting existing."""
+    import config as cfg
+
+    deal = _run_deal(client, deals_dir)
+    stamped = deal.runs.filter(status="done").first(
+        ).applied_overrides["assumptions"]["capital_structure"]
+    assert stamped == {
+        "capex_basis": cfg.DEFAULT_CAPEX_BASIS,
+        "operating_reserve": cfg.DEFAULT_OPERATING_RESERVE,
+        "operating_reserve_basis": cfg.DEFAULT_OPERATING_RESERVE_BASIS,
+        "gp_coinvest_pct": cfg.GP_COINVEST_PCT,
+    }
+
+
+@pytest.mark.django_db
+def test_summary_tab_renders_the_capital_block(client, operator, deals_dir,
+                                               fake_run):
+    deal = _run_deal(client, deals_dir)
+    content = client.get(f"/deals/{deal.pk}/?tab=summary").content.decode()
+
+    assert "Capital" in content
+    assert "Purchase Price" in content
+    assert "LP Equity" in content
+    assert "$3,685,000" in content            # total uses AND total equity
+    assert "Equity Required: $3,685,000" in content
+    assert "GP 10%: $368,500" in content
+    # In balance, so the warning chip must NOT be on the page.
+    assert "OUT OF BALANCE" not in content
+
+
+@pytest.mark.django_db
+def test_summary_tab_flags_an_unbalanced_capital_stack(
+        client, operator, deals_dir, fake_run, monkeypatch):
+    """The one thing this block exists to catch has to be visible when it
+    happens — a silent mismatch is worse than no block at all."""
+    deal = _run_deal(client, deals_dir)
+    run = deal.runs.filter(status="done").first()
+    payload = run.result_json
+    payload["sources_uses"]["balanced"] = False
+    payload["sources_uses"]["delta"] = 1_234.0
+    run.result_json = payload
+    run.save(update_fields=["result_json"])
+    content = client.get(f"/deals/{deal.pk}/?tab=summary").content.decode()
+    assert "OUT OF BALANCE by $1,234" in content
+
+
+@pytest.mark.django_db
 def test_summary_tab_renders_the_check_register(client, operator, deals_dir,
                                                 fake_run):
     deal = _run_deal(client, deals_dir)
@@ -683,3 +752,43 @@ def test_deal_list_links_detail(client, operator, deals_dir, fake_run):
     deal = _run_deal(client, deals_dir)
     resp = client.get("/deals/")
     assert f'href="/deals/{deal.pk}/"'.encode() in resp.content
+
+
+@pytest.mark.django_db
+def test_the_assumptions_page_renders_the_unit_stamps(client, operator, deals_dir):
+    """The unit guard in webapp.forms is only real if the page actually
+    emits the stamps it reads."""
+    deal = _make_extracted_deal(deals_dir)
+    content = client.get(f"/deals/{deal.pk}/assumptions/").content.decode()
+    assert 'name="capex_unit_stamp" value="amount"' in content
+    assert 'name="reserve_unit_stamp" value="amount"' in content
+    # And the CapEx basis selector rides in the CapEx driver row itself.
+    assert 'aria-label="CapEx basis"' in content
+
+
+@pytest.mark.django_db
+def test_a_unit_change_is_refused_once_then_saves(client, operator, deals_dir):
+    """End-to-end through the real page: the refusal has to reach the
+    analyst, and the second attempt has to go through — a guard that
+    cannot be satisfied is worse than no guard."""
+    deal = _make_extracted_deal(deals_dir)
+    url = f"/deals/{deal.pk}/assumptions/"
+    post = {"asking_price": "3500000", "nrsf": "45000", "total_units": "350",
+            "ttm_noi": "250000", "ttm_egr": "420000", "state": "TX",
+            "physical_occupancy": "92", "economic_occupancy": "78",
+            "capex_estimate": "2", "capex_basis": "pct_price",
+            "capex_unit_stamp": "amount", "reserve_unit_stamp": "amount"}
+
+    first = client.post(url, post)
+    assert first.status_code == 422
+    assert "will now be read as % of price" in first.content.decode()
+    deal.refresh_from_db()
+    assert deal.assumption_overrides in (None, {})
+
+    # The page re-renders stamping the NEW selection, so resubmitting the
+    # figure the analyst just confirmed is accepted.
+    second = client.post(url, {**post, "capex_unit_stamp": "pct_price"})
+    assert second.status_code == 302
+    deal.refresh_from_db()
+    assert deal.assumption_overrides["capital_structure"]["capex_basis"] == "pct_price"
+    assert deal.assumption_overrides["cim_overrides"]["capex_estimate"] == 0.02

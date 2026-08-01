@@ -56,6 +56,7 @@ def generate_template(
     property_name: str = "",
     hold_years: int = None,
     transaction_costs: dict = None,
+    capex: float = None,
 ) -> str:
     """
     Copy the XLSM template and populate input cells with CIM data.
@@ -71,6 +72,10 @@ def generate_template(
         transaction_costs: override of config.TRANSACTION_COSTS; the
             disposition percentage drives the template's cost of sale
             (K182), which was hardcoded at 3.5%
+        capex: CapEx already resolved to DOLLARS (item H). None falls
+            back to reading `cim_data.capex_estimate` as dollars, which
+            is right for every caller that has no basis selector — but
+            wrong for a rate, so the engine passes the resolved figure
 
     Returns:
         Path to the generated .xlsm file
@@ -96,7 +101,7 @@ def generate_template(
 
     # Populate sections
     _write_property_description(ws, cim_data, hold_years)
-    _write_investment_cf(ws, cim_data, costs)
+    _write_investment_cf(ws, cim_data, costs, capex)
     _write_financing_defaults(ws)
     _write_growth_rates(ws)
     _write_stabilization(ws, cim_data)
@@ -152,7 +157,7 @@ def _write_property_description(ws, cim_data, hold_years: int):
 
 # ── Investment Cash Flows (rows 20-47) ───────────────────────────────
 
-def _write_investment_cf(ws, cim_data, costs: dict):
+def _write_investment_cf(ws, cim_data, costs: dict, capex: float = None):
     """Fill purchase price, acquisition closing costs and capex.
 
     Row 24 is a free line inside the template's own ACQUISITION COST
@@ -174,7 +179,10 @@ def _write_investment_cf(ws, cim_data, costs: dict):
         ws["E24"] = 0          # incurred at closing, same as the price row
         ws["F24"] = 0
 
-    capex = cim_data.capex_estimate or 0
+    # `capex` arrives resolved when the caller knows the basis; a bare
+    # cim_data read would write 0.02 into a dollar cell for a deal whose
+    # CapEx was entered as a percentage of price.
+    capex = (cim_data.capex_estimate or 0) if capex is None else capex
     if capex > 0:
         ws["B30"] = "Deferred Maintenance"
         ws["K30"] = capex

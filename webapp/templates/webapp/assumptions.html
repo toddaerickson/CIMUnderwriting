@@ -92,7 +92,15 @@
                 {% if row.bf.name in missing_required %}<span class="required-flag text-red-600 font-bold" title="Required for IRR modeling">!</span> {% endif %}{{ row.label }}
               </td>
               <td class="py-1 pr-3 text-xs text-slate-400">{{ row.extracted|default:"—" }}</td>
-              <td class="py-1 pr-3 w-40">{{ row.bf }}</td>
+              {% comment %} A basis selector shares this cell rather than
+                 taking a fifth column that would be empty on every other
+                 row. It belongs beside the number it reinterprets — that
+                 is the only place the number can be read correctly. {% endcomment %}
+              <td class="py-1 pr-3 w-40">
+                {% if row.extra_bf %}
+                <div class="grid grid-cols-[1fr_7.5rem] gap-1 items-center">{{ row.bf }}{{ row.extra_bf }}</div>
+                {% else %}{{ row.bf }}{% endif %}
+              </td>
               <td class="py-1 text-xs text-slate-400">{{ row.source }}</td>
             </tr>
             {% endfor %}
@@ -273,7 +281,7 @@
           </div>
         </details>
         <div class="mt-2 pt-2 border-t border-slate-100">
-          <div class="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1">Timing &amp; Transaction Costs</div>
+          <div class="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1">Timing, Costs &amp; Capital</div>
           <!-- 15rem track matches every other label/input section on this
                page. 16rem looks like a harmless +1rem to pair with the
                wider label column, but it drops to 3 columns between
@@ -293,7 +301,31 @@
             <label class="grid grid-cols-[10rem_1fr] items-center gap-x-2 text-xs text-slate-600"><span>Solver Target IRR (%)</span>
               {{ solver_field }}
             </label>
+            <!-- Capital stack (item D). The reserve's amount and its
+                 basis are two cells, not one crowded one: a third control
+                 inside a 15rem track pushes past the track and strands the
+                 field, and "Reserve Basis" is a clearer label than an
+                 unlabelled dropdown wedged against a number. -->
+            <label class="grid grid-cols-[10rem_1fr] items-center gap-x-2 text-xs text-slate-600"><span>Operating Reserve</span>
+              {{ reserve_field }}
+            </label>
+            <label class="grid grid-cols-[10rem_1fr] items-center gap-x-2 text-xs text-slate-600"><span>Reserve Basis</span>
+              {{ reserve_basis_field }}
+            </label>
+            <label class="grid grid-cols-[10rem_1fr] items-center gap-x-2 text-xs text-slate-600"><span>GP Co-Invest (% equity)</span>
+              {{ gp_coinvest_field }}
+            </label>
           </div>
+          {% comment %} Unit stamps: the basis each amount on screen was
+             DRAWN under. Changing a selector does not change the number
+             beside it, and that number would then mean something else —
+             a "2" under "% of price" becoming $2 under "$ total" quietly
+             removes real CapEx from the basis. forms.py refuses that save
+             once; because these render from the CURRENT selection, the
+             restated number saves on the next attempt. {% endcomment %}
+          <input type="hidden" name="capex_unit_stamp" value="{{ form.capex_basis.value|default_if_none:'' }}">
+          <input type="hidden" name="reserve_unit_stamp" value="{{ form.operating_reserve_basis.value|default_if_none:'' }}">
+          <p class="mt-1 text-xs text-slate-500">Reserve is funded at close and sits in the DCF basis; it is not the annual capital-reserve expense line.</p>
         </div>
       </div>
     </details>
