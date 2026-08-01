@@ -23,9 +23,14 @@ Three jobs, in the order a lender does them:
 will hand to `build_sources_uses` (`senior_debt`, `financing_costs`) and
 to the levered cash flows.
 
-**Nothing outside `tests/` imports this yet.** E1 ships the engine; E3
-wires it. `tests/test_debt.py` asserts that, which is the proof no
-published unlevered number moved.
+**Wired by item E3a.** While E1 shipped, nothing outside `tests/`
+imported this module and an AST test asserted so — that was the proof no
+published unlevered number had moved. `model.levered` now consumes it
+through `model.returns_model`, so the guard has done its job and is
+retired. The unlevered screen is still untouched by the loan, but the
+reason changed: financing costs stay OUT of `total_basis` by design
+(item E3a's decision, recorded in CLAUDE.md), not because the debt layer
+is unreachable.
 
 Numeric authority: `docs/levered-waterfall-design.md` oracles 4 and 5,
 reproduced to the cent in the test module.
@@ -33,7 +38,7 @@ reproduced to the cent in the test module.
 
 import logging
 import math
-from dataclasses import dataclass, fields
+from dataclasses import asdict, dataclass, fields
 
 import config as cfg
 
@@ -151,6 +156,33 @@ class DebtTerms:
             if value is not None and float(value) < 0:
                 raise ValueError(f"{name} cannot be negative, got {value!r}")
 
+        # The percent-vs-decimal typo, flagged in E1's review and deferred
+        # to item E3a because E3a adds the first live override call sites.
+        # Every field below is a DECIMAL fraction, so `rate=6.5` means
+        # 650%/yr — and it used to construct cleanly, pricing a $6.5M loan
+        # at $3,520,833/mo against a correct $43,888/mo. Eighty times
+        # wrong, silently, in a payment that feeds every levered return.
+        #
+        # `min_dscr` is deliberately absent: it is a coverage RATIO, and
+        # 1.25x is the market term this repo underwrites to.
+        #
+        # This is the model layer's backstop, not the boundary itself —
+        # `webapp.forms` owns the whole-number-percent conversion, as it
+        # does for every other percentage on the assumptions page. A
+        # backstop is still worth having: the CLI, a stored override row
+        # and any programmatic caller never pass through the form.
+        for name in ("rate", "index_rate", "spread", "max_ltv",
+                     "min_debt_yield", "orig_fee_pct", "exit_fee_pct"):
+            value = getattr(self, name)
+            if value is not None and float(value) > 1.0:
+                raise ValueError(
+                    f"{name}={value!r} is greater than 1.0, and these are "
+                    f"DECIMAL fractions — {value!r} means "
+                    f"{float(value):.0%}. If you meant "
+                    f"{float(value) / 100:g}, pass that. Accepting it "
+                    "would price a loan nobody offered and report the "
+                    "result without complaint.")
+
     def all_in_rate(self) -> float:
         """The annual rate actually charged.
 
@@ -236,6 +268,20 @@ def resolve_debt_terms(overrides: dict = None) -> DebtTerms:
     for key in _INT_FIELDS:
         value = resolved.get(key)
         if value is not None:
+            # Finiteness FIRST. `int(float('inf'))` raises OverflowError,
+            # not this module's ValueError, so an infinite override
+            # escaped the clean error contract every other bad input
+            # here obeys — and `DebtTerms.__post_init__`'s own finite
+            # check never got the chance to run. Flagged in E1's review
+            # and deferred to this item because E3a adds the first live
+            # override call sites (`engine.run_analysis(debt_terms=...)`
+            # and the stored per-deal override).
+            if not math.isfinite(float(value)):
+                raise ValueError(
+                    f"{key} must be a finite number, got {value!r} — NaN "
+                    "passes every ordinary guard and infinity raises an "
+                    "OverflowError from int(), neither of which reads as "
+                    "a bad loan term.")
             # Reject rather than truncate, for the same reason
             # `amortization_schedule` rejects a fractional hold: int(25.9)
             # silently re-prices the loan on a shorter schedule.
@@ -509,7 +555,17 @@ def build_debt_schedule(price: float, y1_noi: float, terms: DebtTerms, *,
     return {
         **sized,
         **schedule,
-        "terms": terms,
+        # A plain dict, not the frozen dataclass — the same fix E2 made to
+        # `run_waterfall` after finding it the hard way.
+        # `webapp.services.json_safe` falls back to `str(obj)` on anything
+        # it does not recognise, so the object persisted to JSONB as the
+        # string "DebtTerms(rate=0.0625, ...)": unqueryable, and a consumer
+        # reading `["terms"]["rate"]` got "string indices must be
+        # integers". It degraded silently rather than raising. Item E3a is
+        # what first persists this payload, so the fix lands with it.
+        # The caller that passed `terms` in still has the object;
+        # `DebtTerms(**result["terms"])` rebuilds it.
+        "terms": asdict(terms),
         "origination_fee": origination_fee,
         "exit_fee": exit_fee,
         "financing_costs": origination_fee,

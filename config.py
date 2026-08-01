@@ -411,9 +411,18 @@ DEFAULT_CAPEX_BASIS = "amount"
 # forward curve here, because a checked-in rate path is a hardcoded
 # constant that goes stale.
 #
-# NOTE FOR ITEM E3: nothing reads these yet. When the levered layer is
-# wired, leverage must be OPT-IN per deal — these defaults describe what
-# a loan would look like, not an assertion that every deal carries one.
+# WIRED BY ITEM E3a. E1 left a note here reading "leverage must be
+# OPT-IN per deal". The operator decided otherwise on 2026-08-01: the
+# levered lens is ON by default, sized from this block, because the fund
+# mandate is an LP NET IRR and a levered lens nobody switches on answers
+# the question nobody asked. The note is rewritten rather than deleted so
+# the reversal is visible to whoever reads this block next.
+#
+# What that costs, stated plainly: these defaults now price a real loan on
+# every deal, so they are not a neutral placeholder any more. The unlevered
+# screen is unaffected by design — financing costs stay out of
+# `total_basis` (see the E3a plan) — but every LP net IRR in the app is
+# computed from the numbers below until a deal overrides them in E3b.
 DEBT_TERMS = {
     "loan_type": "senior_fixed",
     "rate": 0.0625,
@@ -456,7 +465,7 @@ DEBT_TERMS = {
 # Waterfall terms travel as parameters, resolved once via
 # model.waterfall.resolve_waterfall_terms.
 #
-# NOTE FOR ITEM E3: nothing reads these yet.
+# WIRED BY ITEM E3a via model.levered.build_levered_returns.
 WATERFALL_TERMS = {
     "pref_rate": 0.08,
     "pref_compounding": "annual",   # "annual" | "simple" — ~19% of promote
@@ -466,6 +475,33 @@ WATERFALL_TERMS = {
     "am_fee_treatment": "above_waterfall",   # a deal expense, charged by E3
     "catch_up": False,              # scoped out; True raises
 }
+
+# ── Asset-Management Fee (item E3a) ─────────────────────────────────
+# The GP's 1% annual management fee. Charged ABOVE the waterfall — it
+# reduces distributable cash before the LP/GP split — which is open LPA
+# question 4's default, stamped on every run by
+# model.levered.build_levered_returns.
+#
+# WHAT THE FEE IS CHARGED ON was left open by E2 on purpose: the design
+# doc names the rate and never the base, and "committed equity",
+# "invested capital" and "asset value" are all live conventions. The
+# operator chose INVESTED EQUITY on 2026-08-01. On the E3a plan's oracle-A
+# fixture the alternatives differ by ~2.4x ($41,600/yr on equity vs
+# ~$100,000/yr on asset value), straight through to LP net IRR — so this
+# is a number that decides an answer, not a formatting detail.
+#
+# MEASURED AT THE START OF EACH PERIOD, before that period's own capital
+# call. That is not a rounding convention, it is what makes the fee
+# computable: a shortfall triggers a call, the call raises invested
+# equity, and an end-of-period base would raise the fee, which deepens
+# the shortfall — a loop with no fixed point. It also matches the pref
+# accrual in model.waterfall, which accrues on the START-of-period
+# balance and does not accrue at period 0.
+#
+# Plain scalars passed as parameters, never a _PATCHED_DICTS entry — see
+# the reason recorded above the capital block.
+AM_FEE_PCT = 0.01
+AM_FEE_BASE = "invested_equity"     # the only base implemented; others raise
 
 # ── Regional Expense Adjustments ──────────────────────────────────
 # Multipliers applied to national EXPENSE_BENCHMARKS by region.

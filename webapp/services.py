@@ -23,7 +23,9 @@ from django.utils import timezone
 
 import config as cfg
 from analysis.valuation import resolve_hold_years, resolve_transaction_costs
+from model.debt import resolve_debt_terms
 from model.returns_model import resolve_capital_structure
+from model.waterfall import resolve_waterfall_terms
 from engine import (AnalysisResult, _apply_overrides, extract_pdf_data,
                     run_analysis)
 from webapp.models import Deal
@@ -806,10 +808,36 @@ def _analysis_worker(run_pk):
         # published exit cap, so a run sitting on the table default must
         # still say which cell it used and for what class and age band.
         market_cap = resolve_run_market_cap(patch, overrides, cim)
+        # Debt and waterfall terms are stamped RESOLVED, like hold_years
+        # and transaction costs, for the same reason: item E3a changed
+        # what every levered figure means, so a run that recorded nothing
+        # because it sat on the defaults would be indistinguishable from
+        # a pre-E3a run instead of self-describing. `gp_coinvest_pct` is
+        # deliberately absent from the debt/waterfall override dicts —
+        # it lives in `capital_structure`, and a second copy is the
+        # divergence the single-source-of-truth rule forbids.
+        debt_terms = dataclasses.asdict(
+            resolve_debt_terms(overrides.get("debt_terms")))
+        waterfall_terms = dataclasses.asdict(resolve_waterfall_terms(
+            overrides.get("waterfall_terms"), capital_structure=capital))
+        # Coerced, not stamped raw: a stored override can hold the string
+        # "0.01", and the stamp is what an auditor reads to reconstruct a
+        # run. `build_levered_returns` floats it anyway, so a string here
+        # would make the record disagree with the arithmetic in type
+        # while agreeing in value — the kind of mismatch that survives
+        # until something tries to compare two runs.
+        am_fee_pct = overrides.get("am_fee_pct")
+        am_fee_pct = (float(am_fee_pct) if am_fee_pct not in (None, "")
+                      else None)
         stamped = {**overrides, "hold_years": hold_years,
                    "transaction_costs": txn_costs,
                    "capital_structure": capital,
                    "market_cap": market_cap,
+                   "debt_terms": debt_terms,
+                   "waterfall_terms": waterfall_terms,
+                   "am_fee_pct": (cfg.AM_FEE_PCT if am_fee_pct is None
+                                  else am_fee_pct),
+                   "am_fee_base": cfg.AM_FEE_BASE,
                    "ignored_assumptions": retired_scenario_overrides(overrides)}
         # A per-deal cost supersedes the global row for THAT key, so the
         # global value must not be stamped as applied — same rule as
@@ -841,6 +869,21 @@ def _analysis_worker(run_pk):
                     # look like an analyst override to resolve_market_cap
                     # and relabel every table lookup as analyst-entered.
                     market_cap=market_cap,
+                    # The RESOLVED dicts, not the raw overrides — the same
+                    # rule hold_years, transaction_costs, capital_structure
+                    # and market_cap already follow, and for the same
+                    # reason: stamping one value while handing the engine
+                    # something it must resolve a second time makes
+                    # "the stamp equals what ran" depend on the two
+                    # resolutions agreeing. They agree today only because
+                    # DEBT_TERMS and WATERFALL_TERMS are deliberately out
+                    # of _PATCHED_DICTS, so nothing can change between the
+                    # two calls. That is an unstated cross-file fact, and
+                    # E3b is exactly the item that could invalidate it.
+                    # Both resolvers are idempotent on their own output.
+                    debt_terms=debt_terms,
+                    waterfall_terms=waterfall_terms,
+                    am_fee_pct=am_fee_pct,
                 )
 
         meta = build_deal_meta(cim, result, deal.deal_dir,
@@ -871,6 +914,20 @@ def _analysis_worker(run_pk):
             # recomputed later against whatever the deal looks like then.
             "checks": result.checks,
             "check_summary": result.check_summary,
+            # The levered lens (item E3a). Persisted HERE, with the run,
+            # rather than recomputed later: the LP net IRR belongs to the
+            # assumption set stamped above, and a figure re-derived next
+            # week against whatever config says then is a different
+            # number wearing this run's date. Both agents auditing E3a
+            # caught the first draft computing these and dropping them on
+            # the floor.
+            #
+            # E3b renders them — results page, memo section, Excel sheet.
+            # Until then they are stored and unshown, which is deliberate
+            # and is why the levered lens is not yet claimed as visible
+            # anywhere in the UI.
+            "debt": result.debt,
+            "levered": result.levered,
             # Provenance: which tier supplied each demographic field
             # (CIM/override vs Census vs default) + why enrichment
             # skipped, so a blank population is explainable from the run

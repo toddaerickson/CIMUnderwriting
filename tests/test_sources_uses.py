@@ -25,6 +25,7 @@ import pytest
 from analysis import checks
 from analysis.valuation import (project_cash_flows, resolve_exit_cap,
                                 resolve_market_cap, run_scenarios)
+from model.debt import DebtTerms
 from model.returns_model import (BASIS_AMOUNT, BASIS_PCT_PRICE, BASIS_PER_SF,
                                  BASIS_PER_UNIT, build_returns_model,
                                  build_sources_uses, resolve_capital_amount,
@@ -216,23 +217,47 @@ def test_gp_coinvest_pct_defaults_to_config_read_at_call_time(monkeypatch):
 @pytest.mark.parametrize("reserve", [0, 75_000, 250_000])
 @pytest.mark.parametrize("capex", [0, 250_000])
 def test_sources_uses_ties_to_total_basis_in_every_scenario(reserve, capex):
+    """Item D's invariant, restated for item E3a.
+
+    `build_returns_model` now sizes a loan on every deal, so Total Uses
+    exceeds the DCF basis by exactly the origination fee — financing
+    costs are a use of funds and are deliberately NOT in `total_basis`,
+    which is what keeps the unlevered screen financing-free. The tie is
+    still exact; it just carries the term."""
     model = build_returns_model(
         adjusted_ttm_noi=400_000, asking_price=5_000_000, nrsf=50_000,
         capex=capex, expense_ratio=0.42, reserve=reserve)
     su = model["sources_uses"]
+    financing = su["financing_costs"]
+    assert financing > 0, "the config default charges a point at close"
     for name, scen in model["scenarios"].items():
-        assert scen["total_basis"] == pytest.approx(su["total_uses"], abs=0.01), name
-        assert scen["total_basis"] == pytest.approx(su["total_sources"], abs=0.01), name
+        assert scen["total_basis"] + financing == pytest.approx(
+            su["total_uses"], abs=0.01), name
+        assert scen["total_basis"] + financing == pytest.approx(
+            su["total_sources"], abs=0.01), name
 
 
-def test_equity_equals_the_dcf_year_zero_outflow():
-    """The other half of the contract's acceptance criterion."""
+def test_equity_equals_the_dcf_year_zero_outflow_plus_financing_less_debt():
+    """The other half of the contract's acceptance criterion, restated for
+    item E3a: the loan DISPLACES equity, so the year-zero equity cheque is
+    the DCF outflow plus the financing cost, less the loan proceeds."""
     model = build_returns_model(
         adjusted_ttm_noi=400_000, asking_price=5_000_000, nrsf=50_000,
         capex=250_000, expense_ratio=0.42, reserve=75_000)
     base = model["scenarios"][ScenarioType.BASE]
-    assert model["sources_uses"]["total_equity"] == pytest.approx(
-        -base["cash_flows"][0], abs=0.01)
+    su = model["sources_uses"]
+    assert su["total_equity"] == pytest.approx(
+        -base["cash_flows"][0] + su["financing_costs"] - su["senior_debt"],
+        abs=0.01)
+    # And with no debt sized, it collapses to item D's original identity.
+    unlevered = build_returns_model(
+        adjusted_ttm_noi=400_000, asking_price=5_000_000, nrsf=50_000,
+        capex=250_000, expense_ratio=0.42, reserve=75_000,
+        debt_terms=DebtTerms(rate=0.0625, max_ltv=0.0, min_dscr=0.0,
+                             min_debt_yield=0.0, orig_fee_pct=0.01))
+    base_u = unlevered["scenarios"][ScenarioType.BASE]
+    assert unlevered["sources_uses"]["total_equity"] == pytest.approx(
+        -base_u["cash_flows"][0], abs=0.01)
 
 
 def test_reserve_is_entered_as_dollars_or_per_sf_to_the_same_effect():
@@ -339,6 +364,76 @@ def test_check_fails_when_uses_and_the_dcf_basis_disagree():
                                 sources_uses=broken))
     assert r.status == checks.FAIL
     assert "DCF basis" in r.message
+
+
+# ── 9. The identity item E3a moved ───────────────────────────────────
+# E1 measured that financing costs break the old `Uses == total_basis`
+# tie by exactly the origination fee. The operator's call on 2026-08-01
+# was to move the IDENTITY rather than the projection, so the unlevered
+# screen stays financing-free. These pin the new identity from both
+# directions.
+
+def _levered_model(financing_costs=60_000.0, senior_debt=6_000_000.0):
+    """A returns model whose stack carries real debt and a real fee."""
+    model = build_returns_model(
+        adjusted_ttm_noi=400_000, asking_price=5_000_000, nrsf=50_000,
+        capex=250_000, expense_ratio=0.42, reserve=75_000)
+    base = next(s for s in model["scenarios"].values() if isinstance(s, dict))
+    model["sources_uses"] = build_sources_uses(
+        price=5_000_000, capex=250_000,
+        acquisition_cost=base["acquisition_cost"], reserve=75_000,
+        financing_costs=financing_costs, senior_debt=senior_debt)
+    return model
+
+
+def test_check_passes_when_uses_exceed_the_basis_by_exactly_the_fee():
+    model = _levered_model()
+    su = model["sources_uses"]
+    base = next(s for s in model["scenarios"].values() if isinstance(s, dict))
+    assert su["financing_costs"] == pytest.approx(60_000.0)
+    assert su["total_uses"] == pytest.approx(base["total_basis"] + 60_000.0)
+    r = _check(checks.CheckInput(scenarios=model["scenarios"],
+                                sources_uses=su))
+    assert r.status == checks.PASS
+    assert r.severity == checks.BLOCKING
+    # The message names both halves, so a reader can see WHY Uses is
+    # bigger than the basis rather than wondering whether it is a bug.
+    assert "financing costs" in r.message
+
+
+def test_check_still_fails_when_the_gap_is_not_the_financing_cost():
+    """The check is no weaker for carrying a financing term: a stack that
+    is off by anything OTHER than the fee still fails loudly."""
+    model = _levered_model()
+    broken = dict(model["sources_uses"])
+    broken["total_uses"] += 1_000
+    broken["total_sources"] = broken["total_uses"]
+    r = _check(checks.CheckInput(scenarios=model["scenarios"],
+                                sources_uses=broken))
+    assert r.status == checks.FAIL
+
+
+def test_check_fails_when_the_fee_is_dropped_from_the_stack():
+    """The other direction: a stack reporting no financing cost while its
+    Uses still contain one is the E1 failure mode, and it still FAILs."""
+    model = _levered_model()
+    broken = dict(model["sources_uses"])
+    broken["financing_costs"] = 0.0
+    r = _check(checks.CheckInput(scenarios=model["scenarios"],
+                                sources_uses=broken))
+    assert r.status == checks.FAIL
+
+
+def test_debt_displaces_equity_rather_than_inflating_uses():
+    """Item D's promise, now that E3a supplies a real loan."""
+    levered = _levered_model()["sources_uses"]
+    unlevered = _levered_model(financing_costs=0.0,
+                               senior_debt=0.0)["sources_uses"]
+    assert levered["total_uses"] - unlevered["total_uses"] == pytest.approx(
+        60_000.0)
+    assert levered["total_equity"] == pytest.approx(
+        unlevered["total_equity"] + 60_000.0 - 6_000_000.0)
+    assert levered["total_uses"] == pytest.approx(levered["total_sources"])
 
 
 def test_check_fails_when_scenarios_disagree_on_the_basis():

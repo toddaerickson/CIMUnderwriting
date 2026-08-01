@@ -17,7 +17,8 @@ import logging
 
 import config as cfg
 from analysis.valuation import (project_cash_flows, resolve_exit_cap,
-                                resolve_market_cap, run_scenarios)
+                                resolve_hold_years, resolve_market_cap,
+                                run_scenarios)
 from registry import ScenarioType
 
 logger = logging.getLogger("cim_analyst")
@@ -154,9 +155,12 @@ def build_sources_uses(price: float, capex: float = 0.0, *,
     are carried as real parameters, not omitted, so E1 wires values into
     an existing schema instead of reshaping this one.
 
-    `total_uses` equals the DCF's `total_basis` by construction while
-    financing costs are zero; `analysis.checks.sources_uses_ties` asserts
-    it on every run so E1 cannot break the tie silently.
+    `total_uses` equals the DCF's `total_basis` PLUS `financing_costs`.
+    Item E3a settled which side of that identity moves: financing costs
+    stay OUT of the unlevered basis, because an origination fee in
+    `total_basis` makes the primary unlevered IRR screen move the moment
+    a deal names a loan. `analysis.checks.sources_uses_ties` asserts the
+    identity to the cent on every run.
     """
     if gp_coinvest_pct is None:
         # Read at CALL time, never bound at import: config scalars are
@@ -200,6 +204,11 @@ def build_sources_uses(price: float, capex: float = 0.0, *,
         "gp_equity": gp_equity,
         "lp_equity": lp_equity,
         "senior_debt": senior_debt,
+        # Lifted out of the `uses` list so `analysis.checks` reads a
+        # number instead of searching the list by key. The DCF basis has
+        # no financing term, so this is exactly the amount by which Uses
+        # legitimately exceeds it — see `_sources_uses_ties`.
+        "financing_costs": float(financing_costs or 0.0),
         "gp_coinvest_pct": gp_coinvest_pct,
         "ltv": (senior_debt / total_uses) if total_uses else None,
         "balanced": abs(total_uses - total_sources) <= SOURCES_USES_TOLERANCE,
@@ -216,7 +225,10 @@ def build_returns_model(adjusted_ttm_noi: float, asking_price: float,
                         reserve: float = 0.0,
                         gp_coinvest_pct: float = None,
                         capex_pct_of_price: float = None,
-                        market_cap: dict = None) -> dict:
+                        market_cap: dict = None,
+                        debt_terms=None,
+                        waterfall_terms=None,
+                        am_fee_pct: float = None) -> dict:
     """
     Build complete returns model for all three scenarios.
 
@@ -225,6 +237,8 @@ def build_returns_model(adjusted_ttm_noi: float, asking_price: float,
         - summary_table: condensed comparison table
         - sensitivity: IRR sensitivity to price and exit cap
         - sources_uses: capital stack, tied to the scenarios' total_basis
+        - debt: the sized loan and its schedule (item E3a)
+        - levered: per-scenario levered returns and LP waterfall (E3a)
 
     `sources_uses` is built HERE rather than in the engine so its
     acquisition-cost line is the figure the projection actually used, not
@@ -273,19 +287,90 @@ def build_returns_model(adjusted_ttm_noi: float, asking_price: float,
     # one capital stack describes the deal, not three.
     any_scenario = next((s for s in scenarios.values() if isinstance(s, dict)),
                         {})
+
+    # ── The levered lens (item E3a) ──────────────────────────────────
+    # THE LOAN IS SIZED ONCE, OFF THE BASE CASE, and the same loan is
+    # carried through bear, base and bull. Sizing per scenario would hand
+    # the bear case a smaller loan and flatten its own downside — the
+    # model would understate exactly the risk the bear case exists to
+    # show. A lender sizes on one underwriting, not on three.
+    from model.debt import build_debt_schedule, resolve_debt_terms
+    from model.levered import build_levered_returns, noi_series
+
+    # The BASE case specifically, and it RAISES rather than falling back
+    # to `any_scenario`. Falling back would size the loan off whichever
+    # scenario happened to compute first — plausibly the bull case's
+    # richer NOI — and the resulting `senior_debt`, `financing_costs` and
+    # `total_equity` are all persisted and shown. `sources_uses_ties`
+    # could not catch it either: it checks the stack's internal
+    # arithmetic, not which NOI justified the loan size.
+    base_scenario = scenarios.get(ScenarioType.BASE)
+    if not isinstance(base_scenario, dict):
+        raise ValueError(
+            "the base scenario is missing, so there is no underwriting to "
+            "size a loan against. Sizing off another scenario would price "
+            "the debt on an NOI the deal is not underwritten to.")
+    debt_terms = debt_terms or resolve_debt_terms()
+    # `noi_series` reads the scenario API's `noi_projection` as well as
+    # the raw projection's `noi`, and RAISES when neither is present.
+    # Defaulting to 0.0 here sized the loan on a Year 1 NOI of zero and
+    # reported it as a debt-yield covenant result — a confident sentence
+    # about a number nobody supplied.
+    debt = build_debt_schedule(
+        price=asking_price,
+        y1_noi=noi_series(base_scenario)[0],
+        terms=debt_terms,
+        hold_years=base_scenario.get("hold_years") or resolve_hold_years(
+            hold_years),
+    )
+
     sources_uses = build_sources_uses(
         price=asking_price,
         capex=capex,
         acquisition_cost=any_scenario.get("acquisition_cost") or 0.0,
         reserve=reserve,
+        financing_costs=debt["financing_costs"],
+        senior_debt=debt["loan"],
         gp_coinvest_pct=gp_coinvest_pct,
     )
+
+    # `waterfall_terms` MUST already carry the deal's GP co-invest — the
+    # caller resolves it with `capital_structure=`. Resolved here without
+    # it, a deal edited to 25% would print a stack split 25/75 beside an
+    # LP net IRR computed on config's 10/90.
+    if waterfall_terms is None:
+        from model.waterfall import resolve_waterfall_terms
+        waterfall_terms = resolve_waterfall_terms(
+            capital_structure={"gp_coinvest_pct":
+                               sources_uses["gp_coinvest_pct"]})
+
+    levered = {}
+    for name, scen in scenarios.items():
+        # Only the isinstance guard — `run_scenarios` can put a non-dict
+        # in a slot, and `any_scenario` above already tolerates that. A
+        # scenario that IS a dict but cannot be levered raises out of
+        # `build_levered_returns`; skipping it here would publish an
+        # unlevered-looking results page with no levered lens and no
+        # explanation, which is the empty-state-hiding-a-failure mode.
+        if not isinstance(scen, dict):
+            logger.warning(
+                "scenario %s is not a dict (%s), so it gets no levered "
+                "lens. The results page will show two levered scenarios "
+                "where three are expected — say so rather than letting the "
+                "gap read as 'this scenario has no debt'.",
+                name, type(scen).__name__)
+            continue
+        levered[name] = build_levered_returns(
+            scen, sources_uses=sources_uses, debt=debt,
+            waterfall_terms=waterfall_terms, am_fee_pct=am_fee_pct)
 
     return {
         "scenarios": scenarios,
         "summary_table": summary,
         "sensitivity": sensitivity,
         "sources_uses": sources_uses,
+        "debt": debt,
+        "levered": levered,
     }
 
 
