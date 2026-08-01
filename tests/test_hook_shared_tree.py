@@ -294,6 +294,45 @@ def test_guard_allows_read_only_bisect_queries(repo):
         assert run_guard(f"git -C {repo} {cmd}", repo, repo) is None, cmd
 
 
+def test_guard_denies_writes_that_do_not_look_like_writes(repo):
+    """Round 3. None of these name a tree-writing verb. `archive -o` overwrites
+    a tracked file; `symbolic-ref` moves the checked-out branch with no file
+    changing at all — the guard's core collision, wearing no costume; `config
+    core.worktree` redirects what the shared .git calls its working tree, and
+    `core.hooksPath` makes every later commit run code from elsewhere.
+    """
+    assert run_guard(f"git -C {repo} archive -o config.py HEAD",
+                     repo, repo) == "deny"
+    assert run_guard(f"git -C {repo} symbolic-ref HEAD refs/heads/other",
+                     repo, repo) == "deny"
+    assert run_guard(f"git -C {repo} config core.worktree /tmp/elsewhere",
+                     repo, repo) == "deny"
+    assert run_guard(f"git -C {repo} config core.hooksPath /tmp/hooks",
+                     repo, repo) == "deny"
+
+
+def test_guard_allows_reading_config_refs_and_archiving_to_stdout(repo):
+    for cmd in ("config --get user.email", "config --list", "config user.email",
+                "symbolic-ref --short HEAD", "archive HEAD",
+                "sparse-checkout check-rules"):
+        assert run_guard(f"git -C {repo} {cmd}", repo, repo) is None, cmd
+
+
+def test_an_alias_cannot_launder_a_mutation(repo):
+    """`co = checkout` is an ordinary convenience alias, not an attack, and it
+    silently disabled every rule in this file — classification stopped at the
+    literal token and never asked whether the token was a rename.
+    """
+    git(repo, "config", "alias.co", "checkout")
+    assert run_guard(f"git -C {repo} co other-branch", repo, repo) == "deny"
+    # A shell alias can run anything, so it is denied without inspection.
+    git(repo, "config", "alias.sync", "!git pull --ff-only")
+    assert run_guard(f"git -C {repo} sync", repo, repo) == "deny"
+    # A read-only alias stays allowed.
+    git(repo, "config", "alias.st", "status")
+    assert run_guard(f"git -C {repo} st", repo, repo) is None
+
+
 def test_pull_deny_reason_points_at_solo_mode_not_just_a_worktree(repo):
     payload = json.dumps({"tool_name": "Bash", "cwd": str(repo),
                           "tool_input": {"command": f"git -C {repo} pull"}})

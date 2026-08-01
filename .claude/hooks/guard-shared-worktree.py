@@ -37,14 +37,24 @@ version):
     unguarded because only its halves (`merge`, `rebase`) were listed while the
     compound name was not — it rewrites the tree just the same. `rm`/`mv`/`bisect`
     were the same oversight: each writes the tree without naming a listed subcommand.
-    A second, adversarial sweep then caught what the first still missed —
-    `sparse-checkout set` DELETES directories from disk, `checkout-index -a -f`
-    DISCARDS uncommitted content, and `submodule update`/`read-tree -u`/
-    `merge-file`/`filter-branch` all write tracked files. The lesson worth keeping
-    is that the audit, not the list, is the fragile part: enumerate by asking
-    "does this touch the tree", never by recognising the name.
+    Two further adversarial sweeps each caught what the previous one missed, and
+    that repetition is the point — the audit, not the list, is the fragile part.
+    Round 2: `sparse-checkout set` DELETES directories from disk,
+    `checkout-index -a -f` DISCARDS uncommitted content, and `submodule update`/
+    `read-tree -u`/`merge-file`/`filter-branch` all write tracked files.
+    Round 3, the subtler shape — commands that write without looking like it:
+    `archive -o <tracked>` overwrites a file with tar bytes, `symbolic-ref HEAD
+    <ref>` MOVES THE CHECKED-OUT BRANCH while `git status` stays clean, and
+    `config core.worktree`/`core.hooksPath` corrupt the shared clone for every
+    later session. Enumerate by asking "does this touch the tree or the branch",
+    never by recognising the name.
     `fetch` stays ALLOWED — it moves remote-tracking refs only, never the working
     tree, and it is how a session syncs without touching the shared checkout.
+  * Aliases are resolved BEFORE classification. `co = checkout` is an ordinary
+    convenience alias, not an attack, and it disabled every rule in this file
+    at once, because classification stopped at the literal token and never
+    asked whether the token was a rename. Only the guarded tree pays for the
+    lookup; a `!shell` alias can run anything, so it fails closed.
   * Scoped to THIS clone via $CLAUDE_PROJECT_DIR — other repos are never guarded.
   * A git mutation whose target can't be resolved (unexpanded $VAR / missing dir)
     FAILS CLOSED (deny).
@@ -213,12 +223,53 @@ def _branch_mut(args):
 def _dry_run(args):
     """`--dry-run`, `-n`, and git's bundled short forms (`rm -rn`, `mv -fn`).
 
-    Bundles are scanned across SHORT flags only. The substring shortcut `clean`
-    gets away with would read the `n` in `rm --ignore-unmatch` as a dry run and
-    wave a real deletion through.
+    Bundles are scanned across SHORT flags only. A substring test over every
+    arg — the shortcut `clean` can afford — would read the `n` in
+    `rm --ignore-unmatch` as a dry run and wave a real deletion through.
     """
     return "--dry-run" in args or any(
         a.startswith("-") and not a.startswith("--") and "n" in a for a in args)
+
+
+def _positional(args):
+    return [a for a in args if not a.startswith("-")]
+
+
+def _archive_mut(args):
+    # Plain `git archive` streams to stdout; `-o FILE` writes, and FILE may be
+    # a tracked path — `archive -o config.py HEAD` replaces it with tar bytes.
+    if "--help" in args or "-h" in args:
+        return False
+    return "-o" in args or any(a.startswith("--output") for a in args)
+
+
+def _symbolic_ref_mut(args):
+    # `symbolic-ref HEAD refs/heads/x` repoints the checked-out branch without
+    # touching one file — the collision this guard exists for, invisible to
+    # `git status`. One positional reads; two write.
+    if "--help" in args or "-h" in args:
+        return False
+    if "--delete" in args or "-d" in args:
+        return True
+    return len(_positional(args)) >= 2
+
+
+def _config_mut(args):
+    """Writes to the shared clone's config outlive any one command.
+
+    `core.worktree` redirects what this .git calls its working tree and
+    `core.hooksPath` makes every later commit run code from elsewhere — both
+    persist for every session until someone notices. Reads stay allowed.
+    """
+    if "--help" in args or "-h" in args:
+        return False
+    if any(a in ("--unset", "--unset-all", "--add", "--replace-all",
+                 "--edit", "-e") for a in args):
+        return True
+    if any(a in ("--get", "--get-all", "--get-regexp", "--get-urlmatch",
+                 "--list", "-l") for a in args):
+        return False
+    return len(_positional(args)) >= 2             # `config <key> <value>`
 
 
 def _mv_mut(args):
@@ -247,7 +298,37 @@ def _second_word_mut(args, readonly):
     return not (args and args[0] in readonly)
 
 
+ALIAS_SHELL = "\x00ALIAS_SHELL"
+
+
+def _resolve_alias(sub, args, target, depth=3):
+    """Follow `alias.<sub>` before classifying, so a rename cannot launder a
+    mutation.
+
+    `co = checkout` is an ordinary convenience alias, not an attack — and it
+    disabled every rule in this file, because classification stopped at the
+    literal token and never asked whether the token was a rename. Bounded
+    depth, and a `!shell` alias can run anything so it fails closed.
+    """
+    seen = set()
+    while target and sub and sub not in seen and depth > 0:
+        seen.add(sub)
+        expansion = git("-C", target, "config", "--get", f"alias.{sub}")
+        if not expansion:
+            break
+        if expansion.startswith("!"):
+            return ALIAS_SHELL, args
+        parts = expansion.split()
+        if not parts:
+            break
+        sub, args = parts[0], parts[1:] + args
+        depth -= 1
+    return sub, args
+
+
 def _is_mutation(sub, args):
+    if sub == ALIAS_SHELL:
+        return True                                    # `!cmd` alias runs anything
     if sub in ("commit", "merge", "rebase", "cherry-pick", "am", "revert", "apply",
                "update-ref", "update-index", "gc"):
         return True
@@ -274,9 +355,15 @@ def _is_mutation(sub, args):
     if sub == "bisect":
         return _bisect_mut(args)
     if sub == "sparse-checkout":
-        return _second_word_mut(args, ("list",))
+        return _second_word_mut(args, ("list", "check-rules"))
     if sub == "submodule":
         return _second_word_mut(args, ("status", "summary"))
+    if sub == "archive":
+        return _archive_mut(args)
+    if sub == "symbolic-ref":
+        return _symbolic_ref_mut(args)
+    if sub == "config":
+        return _config_mut(args)
     # Plumbing that writes tracked files. None of it is run casually, so these
     # are denied outright rather than parsed for a working-tree flag: the
     # index-only carve-out exists for `reset`/`restore --staged`/`rm --cached`,
@@ -390,13 +477,19 @@ def _eval_bash(cmd, session_cwd, project_clone):
             continue                                   # command word isn't git
         gitargs = toks[i + 1:]
         sub, subargs = _split_git(gitargs)
-        if not _is_mutation(sub, subargs):
-            continue
         c = _git_c(gitargs, cwd)
         target = None if c is None else (c or seg_cwd)
+        # Resolve the target BEFORE classifying: an alias renames the
+        # subcommand, and reading `alias.<sub>` needs a repo to read it from.
+        # Only the guarded tree pays for the lookup.
+        guarded = _target_guarded(target, project_clone)
+        if guarded:
+            sub, subargs = _resolve_alias(sub, subargs, target)
+        if not _is_mutation(sub, subargs):
+            continue
         if target is None:
             return UNRESOLVED
-        if _target_guarded(target, project_clone):
+        if guarded:
             return _reason(target, sub)
     return None
 
