@@ -212,6 +212,7 @@ def deal_assumptions(request, pk):
             "sf_per_capita": None, "sf_per_capita_problem": "unavailable",
             "sf_per_capita_limit": cfg.GATES.get("max_sf_per_capita"),
             "noi_state": "—", "benchmark_rows": services.stale_benchmark_rows(),
+            "check_rows": [], "flagged_checks": [], "check_summary": {},
             "preview_error": True, "stale": False,
         }
 
@@ -293,6 +294,7 @@ def assumptions_preview(request, pk):
             "sf_per_capita": None, "sf_per_capita_problem": "unavailable",
             "sf_per_capita_limit": cfg.GATES.get("max_sf_per_capita"),
             "noi_state": "—", "benchmark_rows": services.stale_benchmark_rows(),
+            "check_rows": [], "flagged_checks": [], "check_summary": {},
             "preview_error": True, "stale": False,
         }
     return render(request, "webapp/_model_preview.html", strip_ctx)
@@ -430,6 +432,7 @@ def deal_detail(request, pk):
         ctx["run_warnings"] = r.get("errors") or []
         if tab == "summary":
             ctx.update(results_ctx.summary_context(r))
+            ctx.update(results_ctx.checks_context(r))
         elif tab == "returns":
             ctx.update(results_ctx.returns_context(r))
         elif tab == "financials":

@@ -25,6 +25,32 @@
   {% if stale %}
   <div class="col-span-full text-xs text-amber-700">Showing last valid values — one or more inputs could not be read.</div>
   {% endif %}
+  {% comment %} Model error-check register (analysis/checks.py). Lives INSIDE
+     #model-strip so it rides the same hx-swap="outerHTML" replacement as the
+     stat tiles above — a sibling would go stale on every preview refresh.
+     Only fired checks get a row: the full register (passes and skips
+     included) is on the run's Summary tab, the Excel Checks sheet and the
+     memo. Severity is carried by the leading token, not by colour alone. {% endcomment %}
+  {% if check_summary %}
+  <div class="col-span-full border-t border-slate-200 pt-1.5">
+    {% comment %} space-y-1.5, not the strip's 0.5: findings are prose that
+       wraps to 2+ lines, and at a 2px rhythm two wrapped findings run
+       together. The severity token is a fixed-width column so the message
+       text starts at the same x-offset whatever the severity mix. {% endcomment %}
+    {% if flagged_checks %}
+    <ul class="space-y-1.5 text-xs">
+      {% for c in flagged_checks %}
+      <li class="flex gap-1.5 {% if c.tone == 'fail' %}text-red-700{% else %}text-amber-700{% endif %}">
+        <span class="font-semibold whitespace-nowrap inline-block w-20 shrink-0">{% if c.tone == 'fail' %}BLOCKING{% else %}ADVISORY{% endif %}</span>
+        <span><span class="font-medium">{{ c.label }}</span> — {{ c.message }}</span>
+      </li>
+      {% endfor %}
+    </ul>
+    {% else %}
+    <p class="text-xs text-emerald-700">Model checks: {{ check_summary.passed }} passed, none flagged{% if check_summary.skipped %} ({{ check_summary.skipped }} not testable){% endif %}.</p>
+    {% endif %}
+  </div>
+  {% endif %}
   {% comment %} These spans exist only as out-of-band swap targets for the
      benchmark table's exp-cim-*/exp-low-*/exp-high-*/exp-used-*/exp-flag-*
      cells (Income & Expenses section) — never meant to be seen here.

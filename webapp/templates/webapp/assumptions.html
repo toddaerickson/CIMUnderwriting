@@ -157,11 +157,20 @@
             {{ it.bf }}
           </label>
           {% endfor %}
+          {% comment %} One accept control for every blocking finding — the
+             findings are named above it so the analyst accepts specific
+             statements, not a category. Each accepted finding is recorded in
+             the run's overrides (build_overrides → accepted_checks). {% endcomment %}
           {% if form.show_noi_accept %}
-          <label class="col-span-full flex items-center gap-2 text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded px-2 py-1.5">
-            {{ form.accept_noi_discrepancy }}
-            Accept stated NOI anyway — the discrepancy is recorded with the run
-          </label>
+          <div class="col-span-full text-xs text-amber-900 bg-amber-50 border border-amber-200 rounded px-2 py-1.5">
+            <ul class="mb-1 space-y-0.5 list-disc list-inside">
+              {% for c in form.blocking_findings %}<li><span class="font-medium">{{ c.label }}</span> — {{ c.message }}</li>{% endfor %}
+            </ul>
+            <label class="flex items-center gap-2 font-medium">
+              {{ form.accept_noi_discrepancy }}
+              Accept the flagged discrepancies — each is recorded with the run
+            </label>
+          </div>
           {% endif %}
         </div>
         <div>

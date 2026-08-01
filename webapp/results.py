@@ -21,6 +21,47 @@ def fmt_x(v):
 SCENARIOS = ("bear", "base", "bull")
 
 
+# ── Model error-check register (analysis/checks.py) ─────────────────
+
+#: status/severity → template tone token. One mapping for the assumptions
+#: strip, the results tab and anything else that renders the register, so a
+#: blocking failure can never read as an advisory one on a different page.
+_CHECK_TONES = {("fail", "blocking"): "fail", ("fail", "advisory"): "warn",
+                ("pass", "blocking"): "ok", ("pass", "advisory"): "ok"}
+
+
+def check_tone(status: str, severity: str) -> str:
+    return _CHECK_TONES.get((status, severity), "skip")
+
+
+def check_rows(results) -> list[dict]:
+    """CheckResult objects → template rows. Accepts the dataclasses (live
+    preview) or the stored dicts from result_json (results page)."""
+    from analysis import checks
+
+    if results and isinstance(results[0], dict):
+        results = checks.from_dicts(results)
+    return [{"id": r.id, "label": r.label, "severity": r.severity,
+             "status": r.status, "message": r.message, "values": r.values,
+             "source": r.source, "tone": check_tone(r.status, r.severity)}
+            for r in results or []]
+
+
+#: register display order — findings first, then verified, then the ones
+#: that were not testable. A register read top-down should hit the
+#: problems first.
+_CHECK_ORDER = {"fail": 0, "pass": 1, "skipped": 2}
+
+
+def checks_context(r) -> dict:
+    rows = sorted(check_rows(r.get("checks") or []),
+                  key=lambda row: (_CHECK_ORDER.get(row["status"], 3),
+                                   row["label"]))
+    return {"check_rows": rows,
+            "flagged_checks": [row for row in rows if row["status"] == "fail"],
+            "check_summary": r.get("check_summary") or {}}
+
+
 def _metric_rows(block, metrics):
     rows = []
     for label, key, fmt in metrics:

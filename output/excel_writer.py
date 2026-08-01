@@ -8,6 +8,7 @@ Tabs:
   4. Bull Case — same structure
   5. Sensitivity — IRR sensitivity table (price × exit cap)
   6. Max Offer — solved max price and derivation
+  7. Checks — the model error-check register (analysis/checks.py)
 """
 
 import os
@@ -36,7 +37,8 @@ THIN_BORDER = Border(
 def generate_excel(property_name: str, cim_data, financial_analysis: dict,
                    scenario_results: dict, sensitivity: dict,
                    max_offer: dict, va_results: dict = None,
-                   va_max_offer: dict = None, output_dir: str = ".") -> str:
+                   va_max_offer: dict = None, checks: list = None,
+                   output_dir: str = ".") -> str:
     """
     Generate the SS Returns Model .xlsx.
 
@@ -67,6 +69,11 @@ def generate_excel(property_name: str, cim_data, financial_analysis: dict,
     # Tab 7: Max Offer
     ws_max = wb.create_sheet(title="Max Offer")
     _build_max_offer_tab(ws_max, max_offer, cim_data)
+
+    # Tab 8: Checks — the whole register, not just the findings, so the
+    # workbook says what was verified as well as what failed.
+    if checks:
+        _build_checks_tab(wb.create_sheet(title="Checks"), checks)
 
     filename = f"SS_Returns_Model_{safe_name}.xlsx"
     filepath = os.path.join(output_dir, filename)
@@ -524,6 +531,45 @@ def _build_value_add_tab(ws, va_results: dict, va_max_offer: dict, cim_data):
                 cell_b.number_format = fmt
             cell_b.font = BOLD_FONT
             row += 1
+
+
+def _build_checks_tab(ws, checks: list):
+    """Model error-check register. Findings sort to the top — a register
+    read top-down should hit the problems first — but every check is
+    listed, including the ones that were not testable, because "we did not
+    look" and "we looked and it was fine" are different claims."""
+    STATUS_FILL = {
+        "fail": PatternFill(start_color="FFD9D9", end_color="FFD9D9",
+                            fill_type="solid"),
+        "pass": PatternFill(start_color="DDF3E4", end_color="DDF3E4",
+                            fill_type="solid"),
+    }
+    ORDER = {"fail": 0, "pass": 1, "skipped": 2}
+
+    row = _write_section_header(ws, 1, "Model Error-Check Register", cols=5)
+    for col, title in enumerate(
+            ("Check", "Severity", "Status", "Finding", "Source"), start=1):
+        cell = ws.cell(row=row, column=col, value=title)
+        cell.font = BOLD_FONT
+        cell.border = THIN_BORDER
+    row += 1
+
+    for c in sorted(checks, key=lambda c: (ORDER.get(c.get("status"), 3),
+                                           c.get("label") or "")):
+        status = c.get("status") or ""
+        values = (c.get("label") or c.get("id") or "",
+                  (c.get("severity") or "").title(), status.upper(),
+                  c.get("message") or "", c.get("source") or "")
+        for col, value in enumerate(values, start=1):
+            cell = ws.cell(row=row, column=col, value=value)
+            cell.font = VALUE_FONT
+            cell.alignment = Alignment(vertical="top", wrap_text=(col == 4))
+            if status in STATUS_FILL:
+                cell.fill = STATUS_FILL[status]
+        row += 1
+
+    for col, width in ((1, 30), (2, 12), (3, 10), (4, 90), (5, 42)):
+        ws.column_dimensions[get_column_letter(col)].width = width
 
 
 # ── Helpers ─────────────────────────────────────────────────────────

@@ -100,16 +100,22 @@ def _run_single_scenario(scenario_name: str, ttm_noi: float,
 
     # Exit value = Year 5 NOI / exit cap rate
     exit_cap = params["exit_cap"]
+    requested_exit_cap = exit_cap
     yr5_noi = noi_series[-1]
     exit_value = yr5_noi / exit_cap
 
     # Entry cap rate (on adjusted TTM NOI)
     entry_cap = ttm_noi / asking_price if asking_price > 0 else 0
 
-    # Enforce exit cap >= entry cap in base and bear cases
+    # Enforce exit cap >= entry cap in base and bear cases. The coercion is
+    # RECORDED, not just applied: the scenario's returns are computed on the
+    # raised cap, so a run that silently swapped the analyst's entered cap
+    # for a different one has to say so (analysis.checks.exit_cap_coercion).
+    exit_cap_coerced = False
     if scenario_name in (ScenarioType.BASE, ScenarioType.BEAR) and exit_cap < entry_cap:
         exit_cap = entry_cap
         exit_value = yr5_noi / exit_cap
+        exit_cap_coerced = True
 
     # Cash flows for IRR: Year 0 = negative total basis, Years 1-4 = NOI, Year 5 = NOI + exit
     cash_flows = [-total_basis]
@@ -142,6 +148,8 @@ def _run_single_scenario(scenario_name: str, ttm_noi: float,
         "revenue_projection": rev_series,
         "expense_projection": exp_series,
         "exit_cap": exit_cap,
+        "requested_exit_cap": requested_exit_cap,
+        "exit_cap_coerced": exit_cap_coerced,
         "entry_cap": entry_cap,
         "exit_value": exit_value,
         "cash_flows": cash_flows,

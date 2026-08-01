@@ -572,6 +572,80 @@ def test_assumptions_preview_contract(client, django_user_model, settings, tmp_p
 
 
 @pytest.mark.django_db
+def test_preview_renders_the_check_register_panel(client, django_user_model,
+                                                  settings, tmp_path):
+    """The live preview runs the WHOLE register — including the checks the
+    form itself cannot see, since expense lines only exist after
+    analyze_financials(). The panel must live inside #model-strip so it
+    rides the same outerHTML swap as the stat tiles."""
+    from webapp.models import Deal
+    settings.CIM_DEALS_DIR = str(tmp_path)
+    user = django_user_model.objects.create_user(username="op2", password="x")
+    client.force_login(user)
+    deal = Deal.objects.create(
+        deal_id="pvc", property_name="PVC",
+        cim_json={"property_name": "PVC", "state": "OK", "nrsf": 50_000.0})
+
+    resp = client.post(f"/deals/{deal.pk}/assumptions/preview/", {
+        # OpEx of $20k on $560k revenue is 3.6% — far below the 35-55% band.
+        "ttm_total_revenue": "560000", "ttm_total_expenses": "20000",
+        "ttm_noi": "540000", "nrsf": "50000", "state": "OK",
+    })
+    assert resp.status_code == 200
+    html = resp.content.decode()
+
+    assert "OpEx / Revenue band" in html
+    # Severity token, not colour alone — and the same vocabulary the
+    # summary tab's Severity column uses ("Advisory", not "Check").
+    assert "ADVISORY" in html
+    assert "BLOCKING" not in html
+    # Panel is nested inside the swapped element, not a stranded sibling.
+    strip = html[html.index('id="model-strip"'):]
+    assert "OpEx / Revenue band" in strip
+
+
+@pytest.mark.django_db
+def test_preview_flags_expense_lines_the_cim_never_stated(
+        client, django_user_model, settings, tmp_path):
+    """A CIM with no extracted expense lines runs on benchmark floors for
+    every category. That is a real finding, not a clean bill of health —
+    the analyst is looking at benchmarks, not at the seller's numbers."""
+    from webapp.models import Deal
+    settings.CIM_DEALS_DIR = str(tmp_path)
+    user = django_user_model.objects.create_user(username="op3", password="x")
+    client.force_login(user)
+    deal = Deal.objects.create(
+        deal_id="pvo", property_name="PVO",
+        cim_json={"property_name": "PVO", "state": "OK", "nrsf": 50_000.0,
+                  "ttm_gpr": 600_000.0, "ttm_egr": 550_000.0})
+
+    resp = client.post(f"/deals/{deal.pk}/assumptions/preview/", {
+        "ttm_total_revenue": "560000", "ttm_total_expenses": "220000",
+        "ttm_noi": "340000", "nrsf": "50000", "state": "OK",
+        "physical_occupancy": "92", "economic_occupancy": "84",
+    })
+    html = resp.content.decode()
+    assert "Expense line floors" in html
+    assert "not stated in the CIM" in html
+    # Nothing blocking here — the income triple balances and occupancy is
+    # coherent, so the analyst is informed, not stopped.
+    assert "BLOCKING" not in html
+
+
+def test_preview_panel_reports_a_clean_register():
+    """The no-findings branch of the panel, rendered directly — reaching it
+    through a real deal would require an expense line for every category."""
+    from django.template.loader import render_to_string
+
+    html = render_to_string("webapp/_model_preview.html", {
+        "check_summary": {"passed": 9, "failed": 0, "skipped": 1},
+        "flagged_checks": [], "benchmark_rows": []})
+    assert "none flagged" in html
+    assert "9 passed" in html
+    assert "1 not testable" in html
+
+
+@pytest.mark.django_db
 def test_preview_renders_computed_values_not_the_fallback(client, django_user_model,
                                                            settings, tmp_path):
     """id="model-strip"/id="noi-chip"/id="exp-used-*" containers render on
