@@ -14,7 +14,9 @@ stabilized NOI, development spread, and monthly detail.
 """
 
 import numpy_financial as npf
-from analysis.valuation import resolve_hold_years, resolve_transaction_costs
+from analysis.valuation import (COERCED_SCENARIOS, resolve_exit_cap,
+                                resolve_hold_years, resolve_market_cap,
+                                resolve_transaction_costs)
 from config import VALUE_ADD_SCENARIOS, VALUE_ADD_TRIGGERS
 from registry import ScenarioType
 
@@ -47,7 +49,8 @@ def run_value_add_scenarios(cim_data, financial_analysis: dict,
                             custom_scenarios: dict = None,
                             hold_years: int = None,
                             transaction_costs: dict = None,
-                            reserve: float = 0.0) -> dict:
+                            reserve: float = 0.0,
+                            market_cap: dict = None) -> dict:
     """
     Run Bear / Base / Bull value-add scenarios with monthly cash flows.
 
@@ -110,6 +113,7 @@ def run_value_add_scenarios(cim_data, financial_analysis: dict,
             hold_years=hold_years,
             costs=transaction_costs,
             reserve=reserve,
+            market_cap=market_cap,
         )
         results[name] = result
 
@@ -126,7 +130,8 @@ def _run_single_va_scenario(name: str, params: dict,
                              capex: float,
                              hold_years: int = None,
                              costs: dict = None,
-                             reserve: float = 0.0) -> dict:
+                             reserve: float = 0.0,
+                             market_cap: dict = None) -> dict:
     """Compute a single value-add scenario with monthly granularity.
 
     This is a genuinely different engine from `analysis.valuation.
@@ -146,7 +151,13 @@ def _run_single_va_scenario(name: str, params: dict,
     months_to_stab = int(params["months_to_stabilize"])
     target_occ = params["target_occupancy"]
     rent_capture = params["rent_growth_to_market"]
-    exit_cap = params["exit_cap"]
+    # Same resolver the static DCF uses. This engine used to read its own
+    # `params["exit_cap"]` off a second config triple 100 bps tighter than
+    # the static one, so the two published different exits for one asset.
+    mc = market_cap or resolve_market_cap()
+    cap_detail = resolve_exit_cap(mc["market_cap"], name, hold_years)
+    exit_cap = cap_detail["exit_cap"]
+    requested_exit_cap = exit_cap
     expense_growth_annual = params["expense_growth"]
     post_stab_rev_growth = params["post_stabilize_rev_growth"]
 
@@ -209,9 +220,14 @@ def _run_single_va_scenario(name: str, params: dict,
     # Entry cap = Year 1 NOI / asking price
     entry_cap = annual_noi[0] / asking_price if asking_price > 0 else 0
 
-    # Enforce exit cap >= entry cap for base and bear
-    if name in (ScenarioType.BASE, ScenarioType.BEAR) and exit_cap < entry_cap:
+    # Enforce exit cap >= entry cap for base and bear. RECORDED, not just
+    # applied — this used to be a hand-rolled copy that set no flags, so a
+    # coerced VA scenario was invisible to analysis.checks.exit_cap_coercion
+    # while the static side reported its own.
+    exit_cap_coerced = False
+    if name in COERCED_SCENARIOS and exit_cap < entry_cap:
         exit_cap = entry_cap
+        exit_cap_coerced = True
         exit_value = yr5_noi / exit_cap if exit_cap > 0 else 0
 
     # Disposition costs come out of gross exit value, same rule the static
@@ -272,6 +288,9 @@ def _run_single_va_scenario(name: str, params: dict,
         "hold_years": hold_years,
         "entry_cap": entry_cap,
         "exit_cap": exit_cap,
+        "requested_exit_cap": requested_exit_cap,
+        "exit_cap_coerced": exit_cap_coerced,
+        "exit_cap_detail": {**mc, **cap_detail},
         "irr": irr,
         "moic": moic,
         "yield_on_cost": yoc,
@@ -288,13 +307,22 @@ def compute_va_irr_at_price(cim_data, financial_analysis: dict,
                              params: dict,
                              hold_years: int = None,
                              costs: dict = None,
-                             reserve: float = 0.0) -> float | None:
+                             reserve: float = 0.0,
+                             market_cap: dict = None,
+                             scenario=ScenarioType.BASE) -> float | None:
     """
     Compute VA IRR at a given purchase price.
     Used by the bisection solver, so acquisition closing costs must be
     derived from `price` inside this call rather than added afterwards.
     `capex` arrives already resolved for this price — the solver owns the
     %-of-price basis, since only it knows which price is being tried.
+
+    `scenario` names which case is being solved. It used to be hardcoded
+    to BASE here while the caller selected `params` by its own scenario
+    argument, so solving for bull silently applied base's exit-cap spread
+    and drift AND base's exit ≥ entry coercion — which bull is exempt
+    from by design. Nothing passes a non-default scenario today; this
+    keeps that from becoming wrong the moment something does.
     """
     in_place_rent_psf = _compute_in_place_rent_psf(cim_data)
     market_rent_psf = cim_data.market_rent_psf or in_place_rent_psf
@@ -308,7 +336,7 @@ def compute_va_irr_at_price(cim_data, financial_analysis: dict,
     monthly_expenses_start = adj_expenses / 12
 
     result = _run_single_va_scenario(
-        name=ScenarioType.BASE,
+        name=scenario,
         params=params,
         nrsf=nrsf,
         in_place_rent_psf=in_place_rent_psf,
@@ -320,6 +348,7 @@ def compute_va_irr_at_price(cim_data, financial_analysis: dict,
         hold_years=hold_years,
         costs=costs,
         reserve=reserve,
+        market_cap=market_cap,
     )
     return result.get("irr")
 

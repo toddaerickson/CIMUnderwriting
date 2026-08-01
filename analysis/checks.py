@@ -22,6 +22,7 @@ in; see webapp.forms.check_input_from_cleaned.
 
 from dataclasses import dataclass, field, asdict
 
+from analysis.valuation import describe_market_cap
 from config import EXPENSE_BENCHMARKS
 
 # ── Severities & statuses ───────────────────────────────────────────
@@ -63,6 +64,10 @@ EXPENSE_FLOOR_FRACTION = 0.5
 # pipeline computes itself, so it holds to the cent or something is
 # broken — a looser band would let a real disagreement hide inside it.
 SOURCES_USES_TOLERANCE_ABS = 0.01
+
+# Rebuilding anchor + spread + drift is float arithmetic over decimals, so
+# this absorbs representation error and nothing an analyst could enter.
+EXIT_CAP_DERIVATION_EPSILON = 1e-9
 
 
 def noi_recon_tolerance(revenue: float) -> float:
@@ -120,6 +125,8 @@ class CheckInput:
     benchmarks: dict | None = None  # state-adjusted bands; None → national
     price_vs_replacement: dict | None = None
     scenarios: dict | None = None
+    va_scenarios: dict | None = None   # model.value_add_model, same shape
+    market_cap: dict | None = None     # analysis.valuation.resolve_market_cap
     sources_uses: dict | None = None   # model.returns_model.build_sources_uses
 
 
@@ -151,8 +158,48 @@ def _pct(v) -> str:
     return f"{v:.1%}"
 
 
+def _cap(v) -> str:
+    """Cap rates to three places. `_pct`'s single decimal cannot show a
+    7.5 bp/yr drift, and showing the derivation is the point."""
+    return f"{v:.3%}"
+
+
+def _bps(v) -> str:
+    """Signed basis points — spread and drift are both modifiers to an
+    anchor, so the sign is part of the number."""
+    return f"{v:+g} bp"
+
+
 def _mix_present(inp: CheckInput) -> bool:
     return bool(inp.unit_mix)
+
+
+def _scenario_label(name) -> str:
+    """`registry.ScenarioType` subclasses str but not StrEnum, so
+    `str(ScenarioType.BASE)` is `'ScenarioType.BASE'` — and the register
+    runs in-process on enum-keyed results, only seeing plain strings when
+    a stored run is read back. Normalizing here is what stopped the
+    findings reading "Scenariotype.Base"."""
+    return str(getattr(name, "value", name))
+
+
+def _scenario_rows(inp: CheckInput) -> list:
+    """(label, scenario dict) for the static scenarios followed by the
+    value-add ones.
+
+    Both engines resolve their exit cap through the one
+    `analysis.valuation.resolve_exit_cap`, so both belong to every check
+    that reads one. The value-add side used to be absent from this
+    register entirely — it ran its own coercion and set no flags, so a
+    coerced VA cap was invisible on all five surfaces.
+    """
+    rows = [(_scenario_label(name), scen)
+            for name, scen in (inp.scenarios or {}).items()
+            if isinstance(scen, dict)]
+    rows += [(f"value-add {_scenario_label(name)}", scen)
+             for name, scen in (inp.va_scenarios or {}).items()
+             if isinstance(scen, dict)]
+    return rows
 
 
 # ── The checks ──────────────────────────────────────────────────────
@@ -344,20 +391,114 @@ def _expense_line_floor(inp):
                   "the source.", values)
 
 
+def _market_exit_cap(inp):
+    """Where the exit cap came from: market anchor + spread + drift × hold.
+
+    The exit cap used to be a free-standing constant an analyst could read
+    off the settings page. It is now derived, so a reader who cannot
+    retrace it has lost something — this check exists to hand back the
+    parts. It reports the anchor and rebuilds each scenario's cap from its
+    own recorded components.
+
+    Advisory, not blocking. The two findings here are that the derivation
+    rested on something unconfirmed (an unknown vintage picked the band by
+    fallback) or that the parts no longer add up — and while the second
+    reads like a pipeline defect, the register keeps `blocking` for the
+    identities in `_sources_uses_ties`, which is what actually refuses to
+    publish a deal.
+    """
+    mc = inp.market_cap or {}
+    rows = _scenario_rows(inp)
+    if not mc and not rows:
+        return (SKIPPED, "No market cap anchor and no scenarios — the exit "
+                         "cap derivation is not testable.", {})
+
+    values = {"asset_class": mc.get("asset_class"),
+              "age_band": mc.get("age_band"),
+              "age_band_known": mc.get("age_band_known"),
+              "market_cap": mc.get("market_cap"),
+              "market_cap_source": mc.get("source"),
+              "table_market_cap": mc.get("table_market_cap"),
+              "as_of": mc.get("as_of")}
+
+    # Every consumer is handed the SAME resolved anchor, so more than one
+    # distinct value here means a consumer was missed when the cap was
+    # threaded through — the failure the one-resolve discipline prevents.
+    anchors = set()
+    if mc.get("market_cap") is not None:
+        anchors.add(round(float(mc["market_cap"]), 10))
+
+    scen_values, problems, lines = {}, [], []
+    for label, scen in rows:
+        detail = scen.get("exit_cap_detail") or {}
+        anchor = detail.get("market_cap")
+        spread = detail.get("scenario_spread_bps")
+        drift_total = detail.get("drift_total_bps")
+        requested = scen.get("requested_exit_cap")
+        scen_values[label] = {
+            "market_cap": anchor,
+            "scenario_spread_bps": spread,
+            "drift_bps_per_year": detail.get("drift_bps_per_year"),
+            "drift_total_bps": drift_total,
+            "hold_years": detail.get("hold_years"),
+            "requested_exit_cap": requested,
+            "applied_exit_cap": scen.get("exit_cap")}
+        if None in (anchor, spread, drift_total, requested):
+            problems.append(f"{label} does not carry its exit-cap derivation")
+            continue
+        anchors.add(round(float(anchor), 10))
+        rebuilt = (float(anchor)
+                   + (float(spread) + float(drift_total)) / 10_000.0)
+        if abs(rebuilt - float(requested)) > EXIT_CAP_DERIVATION_EPSILON:
+            problems.append(f"{label} publishes {_cap(requested)} but its own "
+                            f"parts rebuild to {_cap(rebuilt)}")
+            continue
+        lines.append(f"{label.title()} {_cap(requested)} = {_cap(anchor)} "
+                     f"{_bps(spread)} spread {_bps(drift_total)} drift "
+                     f"over {detail.get('hold_years')} yrs")
+    values["scenarios"] = scen_values
+
+    if len(anchors) > 1:
+        problems.append("scenarios are priced off different market caps ("
+                        + ", ".join(_cap(a) for a in sorted(anchors))
+                        + "), so at least one consumer did not receive the "
+                          "resolved anchor")
+    # An analyst-entered rate stands on its own; only a table lookup needs
+    # the vintage, and without one it lands in the fallback band by default.
+    if mc.get("source") == "table" and mc.get("age_band_known") is False:
+        problems.append(f"the year built is unknown, so the anchor came from "
+                        f"the {mc.get('age_band')!r} band by fallback rather "
+                        f"than from the asset's actual age")
+
+    anchor_txt = ""
+    if mc.get("market_cap") is not None:
+        anchor_txt = (f"{mc.get('asset_class') or 'Asset'} in the "
+                      f"{mc.get('age_band') or '—'} band anchors at "
+                      f"{_cap(mc['market_cap'])} "
+                      f"({describe_market_cap(mc)}). ")
+    if problems:
+        return (FAIL, anchor_txt + "The exit cap derivation needs confirming: "
+                + "; ".join(problems) + ".", values)
+    return (PASS, anchor_txt + ("Derived caps — " + "; ".join(lines) + "."
+                                if lines else
+                                "No scenario has been projected yet."), values)
+
+
 def _exit_cap_coercion(inp):
-    if not inp.scenarios:
+    rows = _scenario_rows(inp)
+    if not rows:
         return (SKIPPED, "No scenarios computed.", {})
     coerced, values = [], {}
-    for name, scen in inp.scenarios.items():
-        if not isinstance(scen, dict) or not scen.get("exit_cap_coerced"):
+    for label, scen in rows:
+        if not scen.get("exit_cap_coerced"):
             continue
         requested = scen.get("requested_exit_cap")
         applied = scen.get("exit_cap")
-        values[str(name)] = {"requested_exit_cap": requested,
-                             "applied_exit_cap": applied}
-        coerced.append(f"{str(name).title()} raised from "
-                       f"{_pct(requested) if requested is not None else '—'} "
-                       f"to {_pct(applied) if applied is not None else '—'}")
+        values[label] = {"requested_exit_cap": requested,
+                         "applied_exit_cap": applied}
+        coerced.append(f"{label.title()} raised from "
+                       f"{_cap(requested) if requested is not None else '—'} "
+                       f"to {_cap(applied) if applied is not None else '—'}")
     if not coerced:
         return (PASS, "No scenario needed its exit cap raised to meet the "
                       "exit ≥ entry rule.", values)
@@ -465,8 +606,12 @@ CHECKS = (
     CheckSpec("opex_per_nrsf_band", "Total OpEx $/NRSF band", ADVISORY,
               "financial_analysis.expense_ratio_check.opex_per_nrsf",
               _opex_per_nrsf_band),
+    CheckSpec("market_exit_cap", "Exit cap derivation", ADVISORY,
+              "market_cap, scenario_results[*].exit_cap_detail, "
+              "va_results[*].exit_cap_detail", _market_exit_cap),
     CheckSpec("exit_cap_coercion", "Exit cap ≥ entry cap", ADVISORY,
-              "scenario_results[*].requested_exit_cap", _exit_cap_coercion),
+              "scenario_results[*].requested_exit_cap, "
+              "va_results[*].requested_exit_cap", _exit_cap_coercion),
     CheckSpec("price_vs_replacement", "Price vs replacement cost", ADVISORY,
               "physical_analysis.price_vs_replacement", _price_vs_replacement),
 )
@@ -543,7 +688,8 @@ def _unit_mix_dicts(unit_mix) -> tuple:
 
 
 def input_from_cim(cim, financial_analysis=None, physical_analysis=None,
-                   scenario_results=None, sources_uses=None) -> CheckInput:
+                   scenario_results=None, sources_uses=None,
+                   va_results=None, market_cap=None) -> CheckInput:
     """Build the register's input from a CIMData plus whichever analysis
     outputs the caller has. Bands come from the ratio check the pipeline
     already computed (state-adjusted), never from a second read of raw
@@ -575,5 +721,7 @@ def input_from_cim(cim, financial_analysis=None, physical_analysis=None,
         price_vs_replacement=(physical_analysis or {}).get(
             "price_vs_replacement"),
         scenarios=scenario_results,
+        va_scenarios=va_results,
+        market_cap=market_cap,
         sources_uses=sources_uses,
     )

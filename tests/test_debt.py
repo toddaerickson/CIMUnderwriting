@@ -495,16 +495,21 @@ def test_financing_costs_break_the_basis_tie_until_e3_extends_it():
     from analysis.valuation import project_cash_flows
     from model.returns_model import build_sources_uses
 
+    # The exit cap is an argument, not a scenario parameter — it is derived
+    # from a market anchor. A fixed 6.25% keeps this test's arithmetic
+    # unchanged; nothing here is about where the cap comes from.
     params = {"yr1_noi_bump": 0.0, "stabilized_occ": 0.88,
               "rev_cagr_yr1_3": 0.03, "rev_cagr_yr4_5": 0.03,
-              "exp_growth": 0.03, "exit_cap": 0.0625}
+              "exp_growth": 0.03}
+    exit_cap = 0.0625
     price, capex, ttm_noi = 10_000_000.0, 0.0, 600_000.0
 
     terms = DebtTerms(rate=0.065, amort_years=25, term_years=10,
                       max_ltv=0.65, min_dscr=1.25, min_debt_yield=0.10,
                       orig_fee_pct=0.01)
     debt = build_debt_schedule(price, ttm_noi, terms, hold_years=5)
-    proj = project_cash_flows(ttm_noi, price, capex, params, hold_years=5)
+    proj = project_cash_flows(ttm_noi, price, capex, params, hold_years=5,
+                              exit_cap=exit_cap)
     su = build_sources_uses(price, capex,
                             acquisition_cost=proj["acquisition_cost"],
                             reserve=proj["reserve"],

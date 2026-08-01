@@ -8,7 +8,7 @@ CIM data and analysis outputs.
 from typing import Optional
 
 from config import GATES
-from registry import ScenarioType
+from registry import ScenarioType, asset_age
 
 
 def identify_risks(cim_data, gate_results: list, financial_analysis: dict,
@@ -278,8 +278,7 @@ def _operational_risks(cim_data) -> list:
 
     year_built = cim_data.year_built
     if year_built:
-        import datetime
-        age = datetime.date.today().year - year_built
+        age = asset_age(year_built)
         if age > 25:
             risks.append({
                 "category": "Operational",

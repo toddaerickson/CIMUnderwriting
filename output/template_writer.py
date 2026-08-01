@@ -15,6 +15,7 @@ import shutil
 from datetime import datetime
 
 import openpyxl
+from registry import ScenarioType
 
 logger = logging.getLogger(__name__)
 
@@ -110,7 +111,7 @@ def generate_template(
     _write_vacancy(ws, cim_data)
     _write_opex(ws, cim_data, financial_analysis)
     _write_capex(ws, cim_data)
-    _write_reversion(ws, cim_data, financial_analysis, costs)
+    _write_reversion(ws, cim_data, financial_analysis, costs, scenario_results)
     _write_waterfall(ws)
     _write_summary_notes(ws_summary, cim_data)
 
@@ -391,8 +392,25 @@ def _write_capex(ws, cim_data):
 
 # ── Reversion / Sale Assumptions ─────────────────────────────────────
 
-def _write_reversion(ws, cim_data, financial_analysis: dict, costs: dict):
-    """Set cap rate and sale assumptions."""
+def _write_reversion(ws, cim_data, financial_analysis: dict, costs: dict,
+                     scenario_results: dict = None):
+    """Set cap rate and sale assumptions.
+
+    K180 ("Market Cap Rate Today") and K181 ("Cap Rate at Sale") come from
+    the run's resolved market anchor and base-case exit cap, so the .xlsm
+    prints the same two rates as the memo and the .xlsx. They used to be
+    the ENTRY cap and the workbook's own `= K180 + 0.005`, which made this
+    a second underwriting model that disagreed with the Python one on
+    every deal.
+
+    Overwriting K181 replaces a formula with a value, deliberately: the
+    terminal cap is no longer "entry + 50 bp", so a cell that keeps
+    tracking K180 by that rule would drift away from the published exit
+    the moment anyone edited K180. Nothing depends on K181 REMAINING a
+    formula — `J224` (the interpolated cap at stabilization) and `K224`
+    read its value, and `J224` still interpolates correctly between an
+    anchor and a wider terminal cap, which is the drift model.
+    """
     noi = financial_analysis.get("adjusted_ttm_noi", {}).get("analyst_adjusted_noi")
     price = cim_data.asking_price
 
@@ -402,8 +420,18 @@ def _write_reversion(ws, cim_data, financial_analysis: dict, costs: dict):
     else:
         entry_cap = 0.065
 
-    ws["K180"] = round(entry_cap, 4)     # Market cap rate today
-    # K181 is formula = K180 + 0.005 (terminal cap = entry + 50bps)
+    base = (scenario_results or {}).get(ScenarioType.BASE) or {}
+    detail = base.get("exit_cap_detail") or {}
+    market_cap = detail.get("market_cap")
+    exit_cap = base.get("exit_cap")
+    if market_cap is not None and exit_cap is not None:
+        ws["K180"] = round(float(market_cap), 6)
+        ws["K181"] = round(float(exit_cap), 6)
+    else:
+        # No scenario ran, so there is no resolved anchor to write. Leave
+        # K181's own formula in place rather than inventing a terminal cap
+        # off a number that is not a market cap.
+        ws["K180"] = round(entry_cap, 4)
     #
     # K182 is the template's cost of sale — the cell our disposition
     # assumption belongs in. (The scoped backlog pointed at F254 in the

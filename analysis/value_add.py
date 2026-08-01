@@ -6,6 +6,7 @@ current operations and benchmark performance.
 """
 
 from config import EXPENSE_BENCHMARKS, GATES
+from registry import asset_age
 
 
 def identify_value_add(cim_data, financial_analysis: dict, rent_analysis: dict = None) -> dict:
@@ -156,8 +157,7 @@ def _capex_opportunities(cim_data) -> list:
     nrsf = cim_data.nrsf or 0
 
     if year_built:
-        import datetime
-        age = datetime.date.today().year - year_built
+        age = asset_age(year_built)
         if age > 20:
             items.append({
                 "item": "Roof Replacement / Repair",

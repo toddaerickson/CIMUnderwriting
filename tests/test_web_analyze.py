@@ -433,12 +433,15 @@ def test_save_scenario_delta_stores_full_section(client, operator, deals_dir,
                                                  fake_extract):
     import config as cfg
     deal = _extracted_deal(client, deals_dir, fake_extract)
-    _post_assumptions(client, deal, {"scen_bear_exit_cap": "9"})
+    _post_assumptions(client, deal, {"scen_bear_exp_growth": "9"})
     deal.refresh_from_db()
     scen = deal.assumption_overrides["scenario_overrides"]
-    assert scen["bear"]["exit_cap"] == 0.09
+    assert scen["bear"]["exp_growth"] == 0.09
     # untouched values persisted alongside (auditability)
-    assert scen["base"]["exit_cap"] == cfg.SCENARIO_DEFAULTS["base"]["exit_cap"]
+    assert scen["base"]["exp_growth"] == cfg.SCENARIO_DEFAULTS["base"]["exp_growth"]
+    # The exit cap is no longer a scenario parameter — it is derived from
+    # the market anchor, so it must not reappear in a saved section.
+    assert "exit_cap" not in scen["bear"]
     assert "va_scenario_overrides" not in deal.assumption_overrides
 
 

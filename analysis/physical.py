@@ -6,6 +6,7 @@ replacement cost for comparison against asking price.
 """
 
 from config import REPLACEMENT_COST, FACILITY_TYPES
+from registry import age_band, asset_age
 
 
 def analyze_physical(cim_data) -> dict:
@@ -49,18 +50,26 @@ def _build_profile(cim_data) -> dict:
     }
 
 
+#: Prose per age band. The BANDS themselves live in registry.AGE_BANDS —
+#: this narrative used to carry its own copy of the 5/15/30 ladder, and
+#: that ladder is now load-bearing (the exit-cap table keys off it), so a
+#: second copy here would let the memo describe a "mid-life asset" while
+#: the model priced it in the aging band.
+_AGE_NARRATIVE = {
+    "new":   "modern construction, minimal deferred maintenance expected.",
+    "mid":   "mid-life asset, normal wear expected.",
+    "aging": "aging asset, inspect for deferred maintenance.",
+    "old":   "significant age, budget for capital improvements.",
+}
+
+
 def _age_narrative(year_built) -> str:
-    if year_built is None:
+    band = age_band(year_built)
+    if band is None:
         return "Year built not available."
-    import datetime
-    age = datetime.date.today().year - year_built
-    if age <= 5:
-        return f"Built {year_built} ({age} years old) — modern construction, minimal deferred maintenance expected."
-    if age <= 15:
-        return f"Built {year_built} ({age} years old) — mid-life asset, normal wear expected."
-    if age <= 30:
-        return f"Built {year_built} ({age} years old) — aging asset, inspect for deferred maintenance."
-    return f"Built {year_built} ({age} years old) — significant age, budget for capital improvements."
+    age = asset_age(year_built)
+    return (f"Built {year_built} ({age} years old) — "
+            f"{_AGE_NARRATIVE[band]}")
 
 
 def _compute_replacement_cost(cim_data) -> dict:
