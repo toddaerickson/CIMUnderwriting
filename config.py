@@ -130,10 +130,12 @@ SCENARIO_DEFAULTS = {
 # an asset keeps ageing through the hold — hence the drift.
 
 # Current market cap by asset class and age band. Rows are the three
-# values of webapp.services.ASSET_TYPES; columns are registry.AGE_BANDS.
-# Spelled out here rather than imported because config.py must not import
-# Django — tests/test_exit_cap.py carries the no-drift assertion, the same
-# guard tests/test_web_config.py puts on the ASSET_TYPES dropdown.
+# values of registry.ASSET_TYPES (which webapp.services re-exports as the
+# settings-page scope vocabulary); columns are the keys of
+# registry.AGE_BANDS. Spelled out here rather than imported so this table
+# reads as data — tests/test_exit_cap.py carries the no-drift assertion
+# against both, the same guard tests/test_web_config.py puts on the
+# ASSET_TYPES dropdown.
 #
 # This is a STARTING POINT the analyst confirms, not live data. Cap rates
 # move with the rate environment; MARKET_CAP_AS_OF is printed in the memo

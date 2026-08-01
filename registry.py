@@ -5,6 +5,7 @@ Eliminates duplicated string constants, keyword lists, and magic numbers
 that were previously scattered across 8+ files.
 """
 
+import datetime
 from dataclasses import dataclass
 from enum import Enum
 
@@ -145,7 +146,6 @@ def asset_age(year_built, as_of=None) -> int | None:
     if not year_built:
         return None
     if as_of is None:
-        import datetime
         year = datetime.date.today().year
     else:
         year = getattr(as_of, "year", as_of)

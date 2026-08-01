@@ -229,6 +229,21 @@ def test_asset_age_never_goes_negative():
     assert asset_age(2030, as_of=datetime.date(2026, 1, 1)) == 0
 
 
+def test_the_memo_age_narrative_keys_off_the_same_bands():
+    """`analysis.physical` carried its own copy of the 5/15/30 ladder for
+    the memo's prose. Now that the ladder prices the exit, a second copy
+    would let the memo call an asset "mid-life" while the model priced it
+    in the aging band."""
+    from analysis.physical import _AGE_NARRATIVE, _age_narrative
+
+    assert set(_AGE_NARRATIVE) == set(AGE_BAND_LABELS)
+    assert _age_narrative(None) == "Year built not available."
+    assert "mid-life" in _age_narrative(
+        datetime.date.today().year - 10)
+    assert "significant age" in _age_narrative(
+        datetime.date.today().year - 40)
+
+
 # ── 5. The projection refuses to invent a cap ────────────────────────
 
 def test_project_cash_flows_requires_an_exit_cap():
