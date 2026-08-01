@@ -307,7 +307,10 @@ def analyse(path: Path, check_placeholders: bool = True) -> dict:
 
     # locate() wants per-page text, cover first; `cover` is that page split into
     # lines for the title heuristic, so rejoin it.
-    locs, src = locate([" ".join(cover), body])
+    # allow_zipless: a filing prefix is a proposal a human confirms from the CSV,
+    # so a plausible city is worth surfacing here. The analysis pipeline, which
+    # feeds city/state into the population gate, leaves it off.
+    locs, src = locate([" ".join(cover), body], allow_zipless=True)
     if not locs:                       # last resort: the user's own filename annotation
         locs, src = find_locations(norm_text(path.stem)), "filename"
     states = sorted({loc[1] for loc in locs})

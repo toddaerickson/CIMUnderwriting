@@ -83,12 +83,15 @@ ADDR_RE_LOOSE = re.compile(
 ADDR_RE_NOCOMMA = re.compile(
     r"([A-Za-z][A-Za-z\.\-' ]{2,28}?)\s+([A-Z]{2})\s+(\d{5})\b")
 # "For Sale - Creedmoor, TX" — plenty of covers name the city with no ZIP at all.
-# Used only as a last resort and only on the cover page: without the ZIP to anchor
-# it, this pattern matches ordinary prose ("...in Austin, TX and nearby...") and
-# would be reckless against a whole document.
+# Deliberately NOT case-insensitive, and the city must be capitalised. With no ZIP
+# to anchor it and `[A-Z]{2}` accepting any two letters, a case-blind version reads
+# ordinary prose as an address: "Rent growth has been strong, in a healthy
+# secondary market" yielded Location('Has Been Strong', 'IN'). Requiring real
+# capitalisation is what separates "Creedmoor, TX" from "strong, in a".
+# Opt-in only (allow_zipless) and cover-page only — see locate().
 ADDR_RE_NOZIP = re.compile(
-    r"(?:^|[,|•·\n-])\s*([A-Za-z][A-Za-z\.\-' ]{2,28}?),\s*"
-    r"([A-Z]{2}|" + _ST_ALT + r")(?![A-Za-z])", re.IGNORECASE)
+    r"(?:^|[,|•·\n-])\s*([A-Z][A-Za-z\.\-' ]{2,28}?),\s*"
+    r"([A-Z]{2}|" + "|".join(n.title() for n in STATES) + r")(?![A-Za-z])")
 
 # Tokens that are never part of a city name, used to trim a capture that has run
 # backwards into the street line or a field label ("State Belton" -> "Belton").
@@ -97,6 +100,9 @@ NOISE_TOKENS = {
     "the", "at", "of", "and", "in", "on", "is", "to", "rsf", "psf", "nrsf",
     "sf", "sqft", "acres", "acre", "units", "unit", "price", "cap", "rate",
     "offering", "memorandum", "subject", "located", "situated",
+    # Cover-page marketing wording. Without these, "For Sale - Creedmoor, TX"
+    # trims to "Sale - Creedmoor" rather than "Creedmoor".
+    "sale", "for", "lease", "presented", "exclusively", "confidential",
 }
 
 STREET_SUFFIX = re.compile(
@@ -138,7 +144,10 @@ def tidy_city(c: str) -> str:
     keep = []
     for t in reversed(c.split()):
         tl = t.strip(".,").lower()
+        # A token with no letters at all is a separator the capture swallowed
+        # ("For Sale - Creedmoor"), never part of the name.
         if (STREET_SUFFIX.match(tl) or tl in NOISE_TOKENS
+                or not any(ch.isalpha() for ch in t)
                 or any(ch.isdigit() for ch in t) or "." in t):
             break
         keep.append(t)
@@ -153,16 +162,29 @@ def tidy_city(c: str) -> str:
     return " ".join(fix(w) for w in c.split())
 
 
+# STATES keys hold one space between words, and the split-state pattern captures
+# whatever the text layer produced — "Te xas", "New  York", "N e w Y o r k".
+# Squeezing ALL whitespace out gives "newyork", which is not a key, and silently
+# drops every two-word state; collapsing runs to a single space is what works.
+_STATES_SQUEEZED = {re.sub(r"\s+", "", k): v for k, v in STATES.items()}
+
+
+def _state_code(raw: str) -> str:
+    """-> two-letter code, or '' if the text is not a state."""
+    collapsed = re.sub(r"\s+", " ", (raw or "").strip()).lower()
+    if len(collapsed) == 2:
+        return collapsed.upper()
+    return (STATES.get(collapsed)
+            or _STATES_SQUEEZED.get(re.sub(r"\s+", "", collapsed), ""))
+
+
 def _harvest(rx, text: str) -> list:
     out = []
     for m in rx.finditer(text):
         if near_broker(text, m.start()):
             continue
         city = tidy_city(m.group(1))
-        # Squeeze the whitespace back out before the lookup: the split-state
-        # pattern legitimately captures "Te xas", which is not a key in STATES.
-        key = re.sub(r"\s+", "", m.group(2)).lower()
-        st = key.upper() if len(key) == 2 else STATES.get(key, "")
+        st = _state_code(m.group(2))
         if st not in ST_CODES or len(city) < 3:
             continue
         # A 'city' ending in a street suffix is really the tail of the street line.
@@ -182,7 +204,7 @@ def find_locations(text: str) -> list:
     return []
 
 
-def locate(pages) -> tuple:
+def locate(pages, allow_zipless: bool = False) -> tuple:
     """-> (locations, source). Cover page first, body only as a fallback.
 
     The cover carries the subject property's address; the disclaimer pages carry
@@ -190,7 +212,12 @@ def locate(pages) -> tuple:
     of relying on proximity suppression to untangle it afterwards.
 
     `pages` is the per-page text list from pdf_reader.extract_pdf(); a plain
-    string is accepted and treated as a single blob."""
+    string is accepted and treated as a single blob.
+
+    allow_zipless opts into the ADDR_RE_NOZIP last resort. It is off by default
+    because an unanchored match is a plausible city, not a proven one, and the
+    analysis pipeline feeds city/state into the population gate. Filing tools
+    that surface the result for a human to confirm can turn it on."""
     if isinstance(pages, str):
         pages = [pages]
     pages = [p for p in (pages or []) if p]
@@ -204,28 +231,26 @@ def locate(pages) -> tuple:
     hits = find_locations(body)
     if hits:
         return hits, "body text"
-    # Last resort, cover only — see ADDR_RE_NOZIP. Callers should treat this as
-    # needing confirmation, not as a clean read.
+    if not allow_zipless:
+        return [], "not found"
     return _harvest(ADDR_RE_NOZIP, cover_txt), "cover page (no ZIP)"
 
 
-def best_city_state(pages) -> tuple:
+def best_city_state(pages, allow_zipless: bool = False) -> tuple:
     """-> (city, state, source) using the most frequent city, or (None, None, src).
 
     Most-frequent rather than first because a cover often repeats the subject
     address in the header and once more in the highlights, while a stray match
-    appears once."""
+    appears once. The state is resolved the same way, among the hits for the
+    winning city only: taking the first-seen state instead hands a document that
+    lists 'Springfield, IL' as a comp above two mentions of the subject
+    'Springfield, MO' the comp's state."""
     from collections import Counter
 
-    locs, src = locate(pages)
+    locs, src = locate(pages, allow_zipless=allow_zipless)
     if not locs:
         return None, None, src
-    states = {loc.state for loc in locs}
     city = Counter(loc.city for loc in locs).most_common(1)[0][0]
-    if len(states) > 1:
-        # Portfolio, or a broker address leaked past suppression. Take the state
-        # that goes with the winning city rather than an arbitrary one.
-        state = next(loc.state for loc in locs if loc.city == city)
-    else:
-        state = states.pop()
+    state = Counter(loc.state for loc in locs
+                    if loc.city == city).most_common(1)[0][0]
     return city, state, src

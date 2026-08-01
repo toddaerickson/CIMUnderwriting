@@ -61,6 +61,19 @@ def test_real_cover_lines(line, city, state):
         Location(loc.city, loc.state, "") for loc in find_locations(line)]
 
 
+@pytest.mark.parametrize("line,city,state", [
+    ("Buffalo, New York 14201", "Buffalo", "NY"),
+    ("Raleigh, North Carolina 27601", "Raleigh", "NC"),
+    ("Providence, Rhode Island 02901", "Providence", "RI"),
+    ("Charleston, West Virginia 25301", "Charleston", "WV"),
+])
+def test_two_word_state_names_spelled_out(line, city, state):
+    """Squeezing all whitespace out of the capture before the STATES lookup turns
+    'New York' into 'newyork', which is not a key — every two-word state then
+    fails the ST_CODES check and the address is dropped with no fallback."""
+    assert (city, state) in [(h.city, h.state) for h in find_locations(line)]
+
+
 def test_letter_split_state_name():
     """green-storage-plus-austin-tx-om.pdf sets the state as 'Te xas'. The
     filename claims Austin; the document says Spicewood, and 78669 is
@@ -119,9 +132,13 @@ def test_locate_on_empty_input():
 
 # ── the zip-less last resort ─────────────────────────────────────────
 
-def test_cover_without_a_zip_is_found_but_labelled():
-    """Austin open gravel Creedmoor — the cover names the city and no ZIP."""
-    locs, src = locate(["Boat & RV Storage Property For Sale - Creedmoor, TX"])
+def test_zip_less_matching_is_opt_in():
+    """Off by default: an unanchored match is a plausible city, not a proven one,
+    and the analysis pipeline feeds city/state into the population gate."""
+    cover = ["Boat & RV Storage Property For Sale - Creedmoor, TX"]
+    assert locate(cover) == ([], "not found")
+
+    locs, src = locate(cover, allow_zipless=True)
     assert src == "cover page (no ZIP)"
     assert locs[0].city == "Creedmoor"
 
@@ -129,17 +146,25 @@ def test_cover_without_a_zip_is_found_but_labelled():
 def test_zip_less_source_is_reported_so_callers_can_downgrade():
     """The rename script keys its confidence off this string; a plain
     'cover page' would file an unproven city as HIGH."""
-    _, src = locate(["Boat & RV Storage For Sale - Creedmoor, TX"])
+    _, src = locate(["Boat & RV Storage For Sale - Creedmoor, TX"],
+                    allow_zipless=True)
     assert "no ZIP" in src
 
 
 def test_zip_less_matching_is_never_applied_to_the_body():
-    """Without a ZIP to anchor it the pattern matches ordinary prose, so it must
-    stay on the cover. Here the body would otherwise yield 'Austin'."""
+    """Even opted in, it stays on the cover: unanchored it reads prose as an
+    address. Here the body would otherwise yield 'Austin'."""
     pages = ["EXPO STORAGE", "Comparable facilities in Austin, TX trade at 6%."]
-    locs, src = locate(pages)
+    locs, src = locate(pages, allow_zipless=True)
     assert locs == []
     assert src == "cover page (no ZIP)"
+
+
+def test_zip_less_matching_does_not_fabricate_a_city_from_prose():
+    """A case-blind version read 'strong, in a healthy secondary market' as
+    Location('Has Been Strong', 'IN') — 'in' is a valid state code."""
+    prose = ["Rent growth has been strong, in a healthy secondary market."]
+    assert locate(prose, allow_zipless=True)[0] == []
 
 
 # ── best_city_state ──────────────────────────────────────────────────
@@ -155,6 +180,16 @@ def test_state_follows_the_winning_city_when_states_disagree():
     text = "Kerrville, TX 78028 and Kerrville, TX 78028 and Ada, OK 74820"
     city, state, _ = best_city_state(text)
     assert (city, state) == ("Kerrville", "TX")
+
+
+def test_same_city_name_under_two_states_takes_the_most_common():
+    """Taking the first-seen state hands a document that lists 'Springfield, IL'
+    as a comp above two mentions of the subject 'Springfield, MO' the comp's
+    state — a real shape, since same-named cities are common."""
+    text = ("Comp: Springfield, IL 62701 | Subject: Springfield, MO 65801 "
+            "| Subject: Springfield, MO 65801")
+    city, state, _ = best_city_state(text)
+    assert (city, state) == ("Springfield", "MO")
 
 
 def test_best_city_state_returns_none_when_nothing_is_found():
@@ -183,6 +218,17 @@ def test_parse_cim_falls_back_to_flat_text_without_pages():
 
     data = parse_cim({"text": "Sited at Gordonville, TX 76245", "tables": []})
     assert (data.city, data.state) == ("Gordonville", "TX")
+
+
+def test_parse_cim_will_not_use_a_zip_less_guess():
+    """city/state reach extract/enrichment.py's geocode, which backfills
+    population_3mi — the field gating 'Population >= 50,000 within 3 miles'. An
+    unconfirmed city must not drive that; the rename script surfaces it instead."""
+    from extract.parser import parse_cim
+
+    raw = {"text": "", "tables": [],
+           "pages": ["Boat & RV Storage For Sale - Creedmoor, TX"]}
+    assert parse_cim(raw).city is None
 
 
 def test_parse_cim_leaves_city_none_when_absent():
