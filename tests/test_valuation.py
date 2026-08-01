@@ -49,6 +49,41 @@ def test_exit_cap_ge_entry_cap_base():
     assert base["exit_cap"] >= base["entry_cap"]
 
 
+def test_exit_cap_coercion_is_recorded_not_just_applied():
+    """A 7.5% entry cap forces the base case's 7.5% exit cap up. The
+    scenario must say the cap it used is not the cap that was asked for —
+    otherwise the returns are computed on a number nobody entered
+    (analysis.checks.exit_cap_coercion reads these two keys)."""
+    coerced = run_scenarios(
+        adjusted_ttm_noi=400_000,
+        asking_price=4_000_000,       # 10% entry cap, above every exit cap
+        nrsf=50_000,
+    )[ScenarioType.BASE]
+    assert coerced["exit_cap_coerced"] is True
+    assert coerced["requested_exit_cap"] == 0.075        # config default
+    assert coerced["exit_cap"] == coerced["entry_cap"] == 0.10
+
+    untouched = run_scenarios(
+        adjusted_ttm_noi=200_000,
+        asking_price=4_000_000,       # 5% entry cap, below every exit cap
+        nrsf=50_000,
+    )[ScenarioType.BASE]
+    assert untouched["exit_cap_coerced"] is False
+    assert untouched["requested_exit_cap"] == untouched["exit_cap"] == 0.075
+
+
+def test_bull_exit_cap_is_never_coerced():
+    """The exit >= entry rule is base/bear only — bull is allowed to
+    underwrite cap compression, and must not be reported as coerced."""
+    bull = run_scenarios(
+        adjusted_ttm_noi=400_000,
+        asking_price=4_000_000,
+        nrsf=50_000,
+    )[ScenarioType.BULL]
+    assert bull["exit_cap_coerced"] is False
+    assert bull["exit_cap"] == bull["requested_exit_cap"] == 0.065
+
+
 def test_noi_projection_has_five_years():
     """Each scenario should have a 5-year NOI projection."""
     results = run_scenarios(

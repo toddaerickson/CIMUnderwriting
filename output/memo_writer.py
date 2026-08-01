@@ -17,7 +17,7 @@ def generate_memo(property_name: str, cim_data, gate_results: list,
                   scenario_results: dict, value_add: dict,
                   risk_analysis: dict, max_offer: dict,
                   va_results: dict = None, va_max_offer: dict = None,
-                  output_dir: str = ".") -> str:
+                  checks: list = None, output_dir: str = ".") -> str:
     """
     Generate the SS Investment Memo .docx.
 
@@ -39,7 +39,8 @@ def generate_memo(property_name: str, cim_data, gate_results: list,
     _add_title_page(doc, cim_data)
 
     # ── Section 1: Investment Summary ───────────────────────────
-    _add_section_1(doc, cim_data, gate_results, scenario_results, max_offer)
+    _add_section_1(doc, cim_data, gate_results, scenario_results, max_offer,
+                   checks)
 
     # ── Section 2: Market Overview ──────────────────────────────
     _add_section_2(doc, market_analysis)
@@ -102,7 +103,8 @@ def _add_title_page(doc, cim_data):
     doc.add_page_break()
 
 
-def _add_section_1(doc, cim_data, gate_results, scenario_results, max_offer):
+def _add_section_1(doc, cim_data, gate_results, scenario_results, max_offer,
+                   checks=None):
     doc.add_heading("1. Investment Summary", level=1)
 
     # Key metrics table
@@ -129,6 +131,8 @@ def _add_section_1(doc, cim_data, gate_results, scenario_results, max_offer):
         row[1].text = val
 
     _add_occupancy_spread_note(doc, cim_data)
+
+    _add_model_checks(doc, checks)
 
     doc.add_paragraph()
 
@@ -181,6 +185,46 @@ def _add_section_1(doc, cim_data, gate_results, scenario_results, max_offer):
             f"Maximum Offer Price (for {max_offer.get('target_irr', 0.10):.0%} "
             f"Base Case IRR): {_fmt_currency(mp)}"
         ).bold = True
+
+
+def _add_model_checks(doc, checks):
+    """Model error-check register, section 1. Findings only — the full
+    register (passes and not-testable rows included) is the Excel Checks
+    sheet. A memo that lists ten green checks buries the one red one."""
+    if not checks:
+        return
+
+    failed = [c for c in checks if c.get("status") == "fail"]
+    doc.add_paragraph()
+    if not failed:
+        tested = sum(1 for c in checks if c.get("status") == "pass")
+        skipped = len(checks) - tested
+        doc.add_paragraph(
+            f"Model checks: {tested} of {len(checks)} integrity checks passed "
+            f"and none were flagged"
+            + (f"; {skipped} were not testable from the data supplied."
+               if skipped else ".")
+        )
+        return
+
+    doc.add_heading("Model Checks", level=2)
+    doc.add_paragraph(
+        f"{len(failed)} of {len(checks)} integrity checks flagged. Blocking "
+        f"findings were accepted by the analyst with the discrepancy recorded; "
+        f"advisory findings do not stop the model but change how its outputs "
+        f"should be read."
+    )
+    table = doc.add_table(rows=1, cols=3)
+    table.style = "Light Grid Accent 1"
+    hdr = table.rows[0].cells
+    hdr[0].text = "Check"
+    hdr[1].text = "Severity"
+    hdr[2].text = "Finding"
+    for c in failed:
+        row = table.add_row().cells
+        row[0].text = c.get("label") or c.get("id") or ""
+        row[1].text = (c.get("severity") or "").title()
+        row[2].text = c.get("message") or ""
 
 
 def _add_occupancy_spread_note(doc, cim_data):

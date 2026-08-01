@@ -512,37 +512,55 @@ def stale_benchmark_rows() -> list[dict]:
 
 
 def model_strip_context(deal, cim, fin, form) -> dict:
-    """Context for the dense-model-view preview partial: SF/capita,
-    the Revenue−Expenses=NOI chip, and the expense benchmark rows (the
-    SAME rows the Income & Expenses table renders — single source, see
+    """Context for the dense-model-view preview partial: SF/capita, the
+    model error-check register, and the expense benchmark rows (the SAME
+    rows the Income & Expenses table renders — single source, see
     expense_benchmark_rows()).
 
-    The NOI chip is recomputed from the merged `cim` values (not from
-    form.errors) — the preview must show a state even when the form's
+    The register runs against the merged `cim` + its financial analysis, not
+    against form.errors — the preview must show a state even when the form's
     clean() rejected the submission, since a rejected form still leaves
-    cleaned_data populated for the individually-valid fields.
+    cleaned_data populated for the individually-valid fields. This is also
+    the surface that sees MORE than the form does: expense lines and the
+    benchmark bands only exist after analyze_financials().
     """
+    from analysis import checks
     from analysis.filters import sf_per_capita
-    from webapp.forms import noi_recon_tolerance
+    from webapp.results import check_rows
 
     spc, spc_problem = sf_per_capita(cim)
-    rev, exp, noi = cim.ttm_total_revenue, cim.ttm_total_expenses, cim.ttm_noi
-    if None not in (rev, exp, noi):
-        delta = round(rev - exp - noi, 2)
-        noi_state = ("ok" if abs(delta) <= noi_recon_tolerance(rev)
-                     else f"off by ${abs(delta):,.0f}")
-    else:
-        noi_state = "—"
+    results = checks.run_checks(checks.input_from_cim(cim, fin))
     lines = (fin.get("expense_analysis") or {}).get("lines", [])
+    rows = check_rows(results)
     return {
         "deal": deal,
         "population_3mi": cim.population_3mi,
         "median_hhi_3mi": cim.median_hhi_3mi,
         "sf_per_capita": spc, "sf_per_capita_problem": spc_problem,
         "sf_per_capita_limit": cfg.GATES["max_sf_per_capita"],
-        "noi_state": noi_state,
+        "noi_state": noi_chip_state(results),
+        "check_rows": rows,
+        "flagged_checks": [r for r in rows if r["status"] == checks.FAIL],
+        "check_summary": checks.summarize(results),
         "benchmark_rows": expense_benchmark_rows(deal, lines, cim=cim),
     }
+
+
+def noi_chip_state(results) -> str:
+    """The Rev − Exp = NOI chip's three display states, derived from the
+    register's identity result so the chip and the check panel can never
+    disagree: "ok", "—" (not testable), or the signed miss."""
+    from analysis import checks
+
+    for r in results:
+        if r.id != "income_identity":
+            continue
+        if r.status == checks.PASS:
+            return "ok"
+        if r.status == checks.FAIL:
+            return f"off by ${abs(r.values.get('delta') or 0):,.0f}"
+        break
+    return "—"
 
 
 def expense_benchmark_rows(deal, expense_lines=None, cim=None) -> list[dict]:
@@ -708,6 +726,11 @@ def _analysis_worker(run_pk):
             "adjusted_noi": result.adjusted_noi,
             "expense_ratio": result.expense_ratio,
             "errors": result.errors,
+            # Model error-check register — stored with the run so a finding
+            # stays attached to the numbers it was raised against, not
+            # recomputed later against whatever the deal looks like then.
+            "checks": result.checks,
+            "check_summary": result.check_summary,
             # Provenance: which tier supplied each demographic field
             # (CIM/override vs Census vs default) + why enrichment
             # skipped, so a blank population is explainable from the run

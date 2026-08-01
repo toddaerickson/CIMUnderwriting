@@ -294,6 +294,24 @@ def fake_run(monkeypatch):
              "description": "Street rates falling", "mitigation": "Verify trend"}]}
         result.adjusted_noi = 230_000.0
         result.expense_ratio = 0.42
+        result.checks = [
+            {"id": "expense_line_floor", "label": "Expense line floors",
+             "severity": "advisory", "status": "fail",
+             "message": "Expense lines that cannot be taken at face value — "
+                        "below half the benchmark floor: Property Taxes at "
+                        "$0.00/SF vs a $1.20/SF floor.",
+             "values": {}, "source": "financial_analysis"},
+            {"id": "egr_le_gpr", "label": "EGR ≤ GPR", "severity": "blocking",
+             "status": "pass", "message": "EGR sits below GPR.",
+             "values": {}, "source": "ttm_gpr, ttm_egr"},
+            {"id": "price_vs_replacement", "label": "Price vs replacement cost",
+             "severity": "advisory", "status": "skipped",
+             "message": "Asking price or replacement cost unavailable.",
+             "values": {}, "source": "physical_analysis"},
+        ]
+        result.check_summary = {"total": 3, "passed": 1, "failed": 1,
+                                "skipped": 1, "blocking_failed": 0,
+                                "advisory_failed": 1}
         result.errors = ["Template generation failed: test-only"]
         return result
 
@@ -580,6 +598,38 @@ def test_detail_bad_tab_falls_back_to_summary(client, operator, deals_dir, fake_
     resp = client.get(f"/deals/{deal.pk}/?tab=nope")
     assert resp.status_code == 200
     assert b"Go / No-Go Gates" in resp.content
+
+
+@pytest.mark.django_db
+def test_run_payload_carries_the_check_register(client, operator, deals_dir,
+                                                fake_run):
+    """The register is stored WITH the run: a finding must stay attached to
+    the numbers it was raised against, not be recomputed later against
+    whatever the deal looks like by then."""
+    deal = _run_deal(client, deals_dir)
+    r = deal.runs.filter(status="done").first().result_json
+    assert [c["id"] for c in r["checks"]] == [
+        "expense_line_floor", "egr_le_gpr", "price_vs_replacement"]
+    assert r["check_summary"]["advisory_failed"] == 1
+
+
+@pytest.mark.django_db
+def test_summary_tab_renders_the_check_register(client, operator, deals_dir,
+                                                fake_run):
+    deal = _run_deal(client, deals_dir)
+    content = client.get(f"/deals/{deal.pk}/?tab=summary").content.decode()
+
+    assert "Model Checks" in content
+    assert "1 flagged" in content
+    # The finding itself, not just the heading — a hardcoded "0 flagged"
+    # summary line would otherwise leave every other assertion green.
+    assert "below half the benchmark floor: Property Taxes" in content
+    # Findings sort above the passes and the not-testable rows.
+    assert (content.index("Expense line floors")
+            < content.index("EGR ≤ GPR")
+            < content.index("Price vs replacement cost"))
+    # Register is open because something is flagged.
+    assert "<details open>" in content
 
 
 @pytest.mark.django_db

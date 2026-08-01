@@ -6,6 +6,48 @@
     {{ gate_summary.recommendation }} ({{ gate_summary.passed }}/{{ gate_summary.total }} gates passed)
   </div>
 
+  {% comment %} Model error-check register — above the gates because a gate
+     computed from a bad input is worse than a failed gate. Open when
+     something is flagged, collapsed to its one-line summary when not.
+     Severity is carried by the STATUS/severity text, not colour alone. {% endcomment %}
+  {% if check_rows %}
+  <details {% if flagged_checks %}open{% endif %}>
+    <summary class="cursor-pointer select-none text-sm font-semibold mb-1.5">
+      Model Checks —
+      {% if flagged_checks %}<span class="text-red-700">{{ flagged_checks|length }} flagged</span>{% else %}<span class="text-emerald-700">none flagged</span>{% endif %}
+      <span class="font-normal text-slate-500">({{ check_summary.passed|default:0 }} passed, {{ check_summary.skipped|default:0 }} not testable)</span>
+    </summary>
+    <div class="bg-white border border-slate-200 rounded-lg overflow-x-auto">
+      <table class="w-full text-sm border-collapse">
+        <thead>
+          <tr class="text-left border-b border-slate-300 text-xs text-slate-600">
+            <th class="py-1.5 pl-3 pr-3">Check</th>
+            <th class="py-1.5 pr-3">Severity</th>
+            <th class="py-1.5 pr-3">Status</th>
+            <th class="py-1.5 pr-3">Finding</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for c in check_rows %}
+          <tr class="border-b border-slate-100">
+            <td class="py-1.5 pl-3 pr-3 font-medium">{{ c.label }}</td>
+            <td class="py-1.5 pr-3 text-slate-600">{{ c.severity|capfirst }}</td>
+            <td class="py-1.5 pr-3">
+              <span class="inline-block rounded px-1.5 py-0.5 text-xs font-semibold
+                    {% if c.tone == 'fail' %}bg-red-100 text-red-800
+                    {% elif c.tone == 'warn' %}bg-amber-100 text-amber-800
+                    {% elif c.tone == 'ok' %}bg-green-100 text-green-800
+                    {% else %}bg-slate-100 text-slate-600{% endif %}">{{ c.status|upper }}</span>
+            </td>
+            <td class="py-1.5 pr-3 text-slate-600">{{ c.message }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </details>
+  {% endif %}
+
   <div>
     <h2 class="text-sm font-semibold mb-1.5">Go / No-Go Gates</h2>
     <div class="bg-white border border-slate-200 rounded-lg overflow-x-auto">

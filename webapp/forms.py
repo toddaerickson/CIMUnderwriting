@@ -2,9 +2,10 @@
 
 Percent convention: templates and form data hold WHOLE numbers (type 6
 for 6%); snapshots, config defaults, and stored overrides hold decimals.
-Conversion happens ONLY in build_initial (×100) and build_overrides
-(÷100) — never in custom form fields, so bound redisplay round-trips
-the raw submitted strings untouched.
+Conversion happens ONLY in build_initial (×100), build_overrides (÷100)
+and check_input_from_cleaned (÷100, read-only) — never in custom form
+fields, so bound redisplay round-trips the raw submitted strings
+untouched.
 """
 import logging
 import math
@@ -13,6 +14,8 @@ from django import forms
 from django.utils import timezone
 
 import config as cfg
+from analysis import checks
+from analysis.checks import noi_recon_tolerance      # noqa: F401 (re-export)
 from webapp.services import ASSET_TYPES
 from registry import ScenarioType
 
@@ -128,17 +131,38 @@ SECTION_DRIVERS = [
 
 INPUT_CSS = "w-full border border-slate-300 rounded px-2 py-1 text-sm"
 
-# Revenue − Expenses = NOI identity tolerance. CIM rounding makes exact
-# equality unrealistic; a miss beyond max($1k, 1% of revenue) is a
-# data-entry or extraction error unless the analyst explicitly accepts it
-# (legitimate below-the-line items exist). The acceptance + delta are
-# recorded in the saved assumptions so the discrepancy stays auditable.
-NOI_RECON_TOLERANCE_ABS = 1_000.0
-NOI_RECON_TOLERANCE_PCT = 0.01
+# Every input-integrity check — including the Revenue − Expenses = NOI
+# identity this module used to own outright — lives in analysis/checks.py so
+# the form, the live preview, the engine, the memo and the Excel writer all
+# read one registry. `noi_recon_tolerance` is re-exported above for the
+# callers that already import it from here.
 
 
-def noi_recon_tolerance(revenue: float) -> float:
-    return max(NOI_RECON_TOLERANCE_ABS, NOI_RECON_TOLERANCE_PCT * abs(revenue))
+def _pct_decimal(v):
+    """Whole-number form percent → decimal. Read-only: feeds the check
+    register, never a field value (see the module docstring)."""
+    return v / 100.0 if v is not None else None
+
+
+def check_input_from_cleaned(cleaned, unit_mix=None) -> checks.CheckInput:
+    """cleaned_data (form units) → the register's canonical units.
+
+    The form can see the income statement, size and occupancy; it cannot see
+    the analysis outputs (expense lines, scenarios, replacement cost), so
+    those checks come back `skipped` here and run for real in the preview
+    and the engine.
+    """
+    return checks.CheckInput(
+        ttm_gpr=cleaned.get("ttm_gpr"),
+        ttm_egr=cleaned.get("ttm_egr"),
+        ttm_total_revenue=cleaned.get("ttm_total_revenue"),
+        ttm_total_expenses=cleaned.get("ttm_total_expenses"),
+        ttm_noi=cleaned.get("ttm_noi"),
+        nrsf=cleaned.get("nrsf"),
+        unit_mix=tuple(unit_mix or ()),
+        physical_occupancy=_pct_decimal(cleaned.get("physical_occupancy")),
+        economic_occupancy=_pct_decimal(cleaned.get("economic_occupancy")),
+    )
 
 
 def _text():
@@ -194,51 +218,65 @@ class AssumptionsForm(forms.Form):
             required=False,
             widget=forms.CheckboxInput(
                 attrs={"class": "rounded border-slate-300"}))
-        # Set by clean(): tells the template to reveal the accept checkbox.
+        # Set by clean(): tells the template to reveal the accept control.
+        # Named for the identity check it was introduced for; it now reveals
+        # the same single control for ANY blocking finding, and
+        # blocking_findings says which ones are being accepted.
         self.show_noi_accept = False
+        self.blocking_findings = []
+        self.check_results = []
 
     def clean_state(self):
         return (self.cleaned_data.get("state") or "").upper()
 
-    def clean(self):
-        """Income identity: Revenue − Expenses = NOI.
-
-        The form round-trips the merged CIM-snapshot + override values, so
-        this checks the exact triple the analysis will use. Exactly two
-        present → the third is derived. All three present and off by more
-        than the tolerance → block, unless the analyst ticks the accept
-        checkbox (recorded via build_overrides for auditability).
-        """
-        cleaned = super().clean()
+    def _derive_income_triple(self, cleaned):
+        """Exactly two of Revenue / Expenses / NOI present → derive the
+        third. Derivation, not checking: it runs BEFORE the register so a
+        derived NOI satisfies the identity instead of tripping it."""
         rev = cleaned.get("ttm_total_revenue")
         exp = cleaned.get("ttm_total_expenses")
         noi = cleaned.get("ttm_noi")
-        present = sum(v is not None for v in (rev, exp, noi))
-        if present == 2:
-            if rev is None:
-                cleaned["ttm_total_revenue"] = round(noi + exp, 2)
-            elif exp is None:
-                derived = round(rev - noi, 2)
-                if derived < 0:
-                    raise forms.ValidationError(
-                        f"TTM NOI ${noi:,.0f} exceeds Total Revenue "
-                        f"${rev:,.0f} — expenses would be negative. "
-                        f"Check the two entered values.")
-                cleaned["ttm_total_expenses"] = derived
-            else:
-                cleaned["ttm_noi"] = round(rev - exp, 2)
-        elif present == 3:
-            delta = rev - exp - noi
-            tol = noi_recon_tolerance(rev)
-            if abs(delta) > tol and not cleaned.get("accept_noi_discrepancy"):
-                self.show_noi_accept = True
+        if sum(v is not None for v in (rev, exp, noi)) != 2:
+            return
+        if rev is None:
+            cleaned["ttm_total_revenue"] = round(noi + exp, 2)
+        elif exp is None:
+            derived = round(rev - noi, 2)
+            if derived < 0:
                 raise forms.ValidationError(
-                    f"Income identity check failed: Revenue ${rev:,.0f} − "
-                    f"Expenses ${exp:,.0f} = ${rev - exp:,.0f}, but TTM NOI "
-                    f"is entered as ${noi:,.0f} — off by ${abs(delta):,.0f} "
-                    f"(tolerance ${tol:,.0f}). Fix the inputs, or tick "
-                    f"“Accept stated NOI anyway” to proceed with "
-                    f"the discrepancy recorded.")
+                    f"TTM NOI ${noi:,.0f} exceeds Total Revenue "
+                    f"${rev:,.0f} — expenses would be negative. "
+                    f"Check the two entered values.")
+            cleaned["ttm_total_expenses"] = derived
+        else:
+            cleaned["ttm_noi"] = round(rev - exp, 2)
+
+    def clean(self):
+        """Run the model error-check register over the submitted values.
+
+        The form round-trips the merged CIM-snapshot + override values, so
+        the register sees the exact numbers the analysis will use. Blocking
+        findings invalidate the form unless the analyst ticks the accept
+        control, which records every accepted finding via build_overrides.
+        Advisory findings are carried on `check_results` for display and
+        never block.
+        """
+        cleaned = super().clean()
+        self._derive_income_triple(cleaned)
+        # parse_unit_mix needs getlist; self.data is a QueryDict for every
+        # real POST but a plain dict when a form is constructed directly.
+        # Without a mix the two unit-mix checks report `skipped`, which is
+        # the honest answer — they are advisory either way.
+        mix = parse_unit_mix(self.data) if hasattr(self.data, "getlist") else None
+        self.check_results = checks.run_checks(
+            check_input_from_cleaned(cleaned, mix))
+        self.blocking_findings = checks.blocking_failures(self.check_results)
+        if self.blocking_findings and not cleaned.get("accept_noi_discrepancy"):
+            self.show_noi_accept = True
+            raise forms.ValidationError(
+                [r.message for r in self.blocking_findings]
+                + ["Fix the inputs, or tick “Accept the flagged "
+                   "discrepancies” to proceed with them recorded."])
         return cleaned
 
 
@@ -502,6 +540,20 @@ def build_overrides(cleaned, post, deal, eff=None) -> dict:
         delta = round(rev - exp - noi, 2)
         if abs(delta) > noi_recon_tolerance(rev):
             out["noi_reconciliation"] = {"accepted": True, "delta": delta}
+
+    # The accept control now covers every blocking finding, not just the
+    # identity delta above, so the run's applied_overrides records WHICH
+    # integrity findings were waived and in what words. Recomputed here
+    # rather than read off the form for the same reason the delta above is:
+    # build_overrides is called with cleaned_data, not with a form.
+    if cleaned.get("accept_noi_discrepancy"):
+        accepted = checks.blocking_failures(checks.run_checks(
+            check_input_from_cleaned(
+                cleaned,
+                parse_unit_mix(post) if hasattr(post, "getlist") else None)))
+        if accepted:
+            out["accepted_checks"] = [{"id": r.id, "message": r.message}
+                                      for r in accepted]
 
     from registry import EXPENSE_KEYS
     exp_o = {k: cleaned[f"exp_{k}"] for k in EXPENSE_KEYS

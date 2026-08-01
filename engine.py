@@ -40,6 +40,9 @@ class AnalysisResult:
     # Value-add & risks
     value_add: dict = field(default_factory=dict)
     risk_analysis: dict = field(default_factory=dict)
+    # Model error-check register (analysis/checks.py), JSON-safe rows
+    checks: list = field(default_factory=list)
+    check_summary: dict = field(default_factory=dict)
     # Outputs
     memo_path: str = ""
     excel_path: str = ""
@@ -272,6 +275,17 @@ def run_analysis(result: AnalysisResult, progress: Callable = None,
         cim_data, result.gate_results, result.financial_analysis,
         result.scenario_results, result.rent_analysis)
 
+    # Model error-check register — evaluated ONCE here, then handed to every
+    # output surface. The memo, the Excel Checks sheet and the results page
+    # must report the same findings, not three independent evaluations of
+    # slightly different inputs.
+    from analysis import checks as model_checks
+    _check_results = model_checks.run_checks(model_checks.input_from_cim(
+        cim_data, result.financial_analysis, result.physical_analysis,
+        result.scenario_results))
+    result.checks = model_checks.to_dicts(_check_results)
+    result.check_summary = model_checks.summarize(_check_results)
+
     # Step 9: Generate output files
     _progress(9, 9, "Generating memo & model...")
     if not output_dir:
@@ -295,6 +309,7 @@ def run_analysis(result: AnalysisResult, progress: Callable = None,
         max_offer=result.max_offer,
         va_results=result.va_results,
         va_max_offer=result.va_max_offer,
+        checks=result.checks,
         output_dir=output_dir,
     )
 
@@ -307,6 +322,7 @@ def run_analysis(result: AnalysisResult, progress: Callable = None,
         max_offer=result.max_offer,
         va_results=result.va_results,
         va_max_offer=result.va_max_offer,
+        checks=result.checks,
         output_dir=output_dir,
     )
 

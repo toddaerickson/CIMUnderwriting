@@ -278,6 +278,88 @@ def test_noi_identity_derived_negative_expenses_blocks():
     assert "negative" in str(form.non_field_errors())
 
 
+# ── The rest of the blocking register (analysis/checks.py) ────────────
+# The identity check above is one entry in the register now; these are the
+# other two blocking entries, which reach the form through the same path.
+
+def test_form_blocks_when_economic_occupancy_exceeds_physical():
+    form = _income_form(physical_occupancy=80, economic_occupancy=92)
+    assert not form.is_valid()
+    assert "exceeds physical" in str(form.non_field_errors())
+    assert form.show_noi_accept is True
+    assert [f.id for f in form.blocking_findings] == ["occupancy_sanity"]
+
+
+def test_form_blocks_when_egr_exceeds_gpr():
+    form = _income_form(ttm_gpr=720_000, ttm_egr=800_000)
+    assert not form.is_valid()
+    assert "cannot be larger" in str(form.non_field_errors())
+    assert [f.id for f in form.blocking_findings] == ["egr_le_gpr"]
+
+
+def test_form_reports_every_blocking_finding_at_once():
+    form = _income_form(ttm_total_revenue=560_000, ttm_total_expenses=220_000,
+                        ttm_noi=400_000, ttm_gpr=720_000, ttm_egr=800_000,
+                        physical_occupancy=80, economic_occupancy=92)
+    assert not form.is_valid()
+    assert {f.id for f in form.blocking_findings} == {
+        "income_identity", "occupancy_sanity", "egr_le_gpr"}
+
+
+def test_form_percent_fields_reach_the_register_as_decimals():
+    """Whole-number form percents (92) must not read as 9200% occupancy."""
+    form = _income_form(physical_occupancy=92, economic_occupancy=80)
+    assert form.is_valid(), form.errors
+    by_id = {r.id: r for r in form.check_results}
+    assert by_id["occupancy_sanity"].status == "pass"
+    assert by_id["occupancy_sanity"].values["physical_occupancy"] == 0.92
+
+
+def test_form_carries_advisory_findings_without_blocking():
+    # OpEx/Revenue of 220k/560k = 39.3% passes; 20k/560k = 3.6% does not.
+    form = _income_form(ttm_total_revenue=560_000, ttm_total_expenses=20_000,
+                        ttm_noi=540_000)
+    assert form.is_valid(), form.errors
+    flagged = [r.id for r in form.check_results if r.status == "fail"]
+    assert "opex_ratio_band" in flagged
+    assert form.blocking_findings == []
+
+
+@pytest.mark.django_db
+def test_accepting_records_every_waived_finding():
+    from django.http import QueryDict
+    from webapp.forms import build_overrides
+    from webapp.models import Deal
+
+    form = _income_form(ttm_total_revenue=560_000, ttm_total_expenses=220_000,
+                        ttm_noi=400_000, physical_occupancy=80,
+                        economic_occupancy=92, accept_noi_discrepancy="on")
+    assert form.is_valid(), form.errors
+    deal = Deal.objects.create(deal_id="acc", property_name="Acc", cim_json={})
+    out = build_overrides(form.cleaned_data, QueryDict(""), deal)
+
+    assert {c["id"] for c in out["accepted_checks"]} == {"income_identity",
+                                                         "occupancy_sanity"}
+    assert "off by $60,000" in out["accepted_checks"][0]["message"]
+    # the identity's own audit record is unchanged
+    assert out["noi_reconciliation"] == {"accepted": True, "delta": -60_000.0}
+
+
+@pytest.mark.django_db
+def test_nothing_is_recorded_when_there_was_nothing_to_accept():
+    from django.http import QueryDict
+    from webapp.forms import build_overrides
+    from webapp.models import Deal
+
+    form = _income_form(ttm_total_revenue=560_000, ttm_total_expenses=220_000,
+                        ttm_noi=340_000, accept_noi_discrepancy="on")
+    assert form.is_valid(), form.errors
+    deal = Deal.objects.create(deal_id="acc2", property_name="Acc2",
+                               cim_json={})
+    out = build_overrides(form.cleaned_data, QueryDict(""), deal)
+    assert "accepted_checks" not in out
+
+
 @pytest.mark.django_db
 def test_market_verification_roundtrip_and_old_snapshots():
     """New ChoiceField survives the save/initial plumbing; snapshots
