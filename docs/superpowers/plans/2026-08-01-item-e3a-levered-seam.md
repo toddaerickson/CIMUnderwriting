@@ -288,6 +288,66 @@ two were the proof that E1 and E2 moved no published number; wiring is
 now the point, so they have done their job. Deleting them is stated here
 so it reads as the plan rather than as a guard quietly disappearing.
 
+## What the audit found, and what changed
+
+Two independent agents reviewed the production diff. Both, separately,
+found the same blocking defect, and it was the one this plan had already
+promised not to ship.
+
+**BLOCKING — the levered lens was computed and thrown away.** `engine.py`
+set `result.debt` and `result.levered`, and `webapp/services.py`'s
+persisted payload never carried either. Every deal computed an LP net
+IRR, a waterfall, an AM fee and a debt schedule, then discarded all of it
+when the worker returned. No error, no log, nothing missing on screen —
+the failure mode was silence, on every single run. This plan's own text
+says "the levered lens is computed and **persisted** on every deal", so
+this was a gap against the stated acceptance criterion, not a scope
+question. Fixed: `"debt"` and `"levered"` join the payload, with
+`test_run_payload_carries_the_levered_lens` as the regression. Rendering
+them stays E3b, and the payload comment says so, so the gap that remains
+is deliberate and legible instead of invisible.
+
+**The tie check was self-referential.** `_sources_uses_ties` read
+`financing_costs` from the very `sources_uses` dict it was validating. A
+caller that forgot to pass `financing_costs=debt["financing_costs"]`
+produces a `total_uses` missing the fee AND a reported `financing_costs`
+of 0 — both wrong the same way, so `uses == basis + 0` reconciled and the
+BLOCKING check PASSED on a deal underfunded by the whole origination fee,
+which surfaces as an equity shortfall at closing. `CheckInput` now
+carries `debt`, and the check cross-validates against the module that
+computed the fee. The test asserts the old blind spot: same broken stack,
+PASS without `debt=`, FAIL with it.
+
+**`matures_before_exit` was a log line nobody reads.** E1 computed it and
+warned; E1 was unwired, so it was dead code. E3a put a sized loan on
+every deal and made it live. A `logger.warning` reaches a server log
+while the results page shows a levered IRR computed as though the loan
+amortized straight past its own maturity — no refinancing, no rate reset,
+no prepayment cost. It is now `loan_matures_before_exit`, ADVISORY in the
+register, where every other assumption-quality finding already lives.
+
+**Three hardening fixes**, none reachable today, all one refactor away:
+the `debt` dict was aliased into all three scenarios' results rather than
+copied (the first consumer to annotate it in place would corrupt the
+other two); `payoff_balance` and `exit_fee` silently defaulted to 0.0,
+which on a missing key computes the exit as though the loan were forgiven
+at sale and reports an LP net IRR that is too HIGH; and `am_fee_pct` used
+`is None` where every sibling resolver in the repo uses
+`not in (None, "")`, which would have made E3b's form field raise on
+`float("")` the day it landed.
+
+One agent also asked whether the AM-fee base should decline as capital is
+returned mid-hold. It should not, and the docstring now argues why:
+splitting a distribution into capital and profit is what the waterfall
+does, from distributable cash the fee has already been deducted from — a
+second circularity. On a single-asset deal the two definitions agree.
+
+Also corrected during the audit: a `git checkout` and a relative-path
+heredoc were aimed at the shared primary working tree. The PostToolUse
+hook caught the write and the PreToolUse guard blocked the checkout,
+which is exactly the pair of failures CLAUDE.md's parallel-session
+section describes. Reverted; no foreign state touched.
+
 ## Acceptance
 
 - Oracles A, B and C reproduce to the cent; LP IRRs to four decimals.

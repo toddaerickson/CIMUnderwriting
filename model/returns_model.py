@@ -288,7 +288,19 @@ def build_returns_model(adjusted_ttm_noi: float, asking_price: float,
     from model.debt import build_debt_schedule, resolve_debt_terms
     from model.levered import build_levered_returns, noi_series
 
-    base_scenario = scenarios.get(ScenarioType.BASE) or any_scenario
+    # The BASE case specifically, and it RAISES rather than falling back
+    # to `any_scenario`. Falling back would size the loan off whichever
+    # scenario happened to compute first — plausibly the bull case's
+    # richer NOI — and the resulting `senior_debt`, `financing_costs` and
+    # `total_equity` are all persisted and shown. `sources_uses_ties`
+    # could not catch it either: it checks the stack's internal
+    # arithmetic, not which NOI justified the loan size.
+    base_scenario = scenarios.get(ScenarioType.BASE)
+    if not isinstance(base_scenario, dict):
+        raise ValueError(
+            "the base scenario is missing, so there is no underwriting to "
+            "size a loan against. Sizing off another scenario would price "
+            "the debt on an NOI the deal is not underwritten to.")
     debt_terms = debt_terms or resolve_debt_terms()
     # `noi_series` reads the scenario API's `noi_projection` as well as
     # the raw projection's `noi`, and RAISES when neither is present.
@@ -332,6 +344,12 @@ def build_returns_model(adjusted_ttm_noi: float, asking_price: float,
         # unlevered-looking results page with no levered lens and no
         # explanation, which is the empty-state-hiding-a-failure mode.
         if not isinstance(scen, dict):
+            logger.warning(
+                "scenario %s is not a dict (%s), so it gets no levered "
+                "lens. The results page will show two levered scenarios "
+                "where three are expected — say so rather than letting the "
+                "gap read as 'this scenario has no debt'.",
+                name, type(scen).__name__)
             continue
         levered[name] = build_levered_returns(
             scen, sources_uses=sources_uses, debt=debt,

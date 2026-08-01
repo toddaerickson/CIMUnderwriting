@@ -286,10 +286,31 @@ def fake_run(monkeypatch):
         # Built by the real function, not hand-rolled: a fixture carrying
         # a stale schema is how a display test stays green past a change
         # that broke the page.
+        from model.debt import build_debt_schedule, resolve_debt_terms
         from model.returns_model import build_sources_uses
+        _debt = build_debt_schedule(3_500_000, 250_000, resolve_debt_terms(),
+                                    hold_years=5)
         result.sources_uses = build_sources_uses(
             price=3_500_000, capex=100_000, acquisition_cost=35_000,
-            reserve=50_000, gp_coinvest_pct=0.10)
+            reserve=50_000, financing_costs=_debt["financing_costs"],
+            senior_debt=_debt["loan"], gp_coinvest_pct=0.10)
+        # The levered lens (item E3a), built by the real functions for the
+        # same reason the stack above is: a hand-rolled fixture carrying a
+        # stale schema is how a persistence test stays green past a change
+        # that broke it.
+        from analysis.valuation import project_cash_flows
+        from model.levered import build_levered_returns
+        from model.waterfall import resolve_waterfall_terms
+        _projection = project_cash_flows(
+            250_000, 3_500_000, 100_000,
+            {"yr1_noi_bump": 0.0, "stabilized_occ": 0.88,
+             "rev_cagr_yr1_3": 0.03, "rev_cagr_yr4_5": 0.03,
+             "exp_growth": 0.03, "exit_cap": 0.08},
+            hold_years=5, expense_ratio=0.40, reserve=50_000)
+        result.debt = _debt
+        result.levered = {"base": build_levered_returns(
+            _projection, sources_uses=result.sources_uses, debt=_debt,
+            waterfall_terms=resolve_waterfall_terms())}
         result.max_offer = {"max_price": 3_100_000.0, "achieved_irr": 0.10,
                             "converged": True}
         result.va_max_offer = {"max_price": 3_300_000.0, "achieved_irr": 0.10,
@@ -630,10 +651,52 @@ def test_run_payload_carries_the_capital_stack(client, operator, deals_dir,
                                                fake_run):
     deal = _run_deal(client, deals_dir)
     su = deal.runs.filter(status="done").first().result_json["sources_uses"]
-    assert su["total_uses"] == 3_685_000
+    # 3,685,000 of non-financing uses, plus the origination fee on the
+    # loan item E3a now sizes for every deal. Derived rather than
+    # hardcoded so a change to the config debt terms updates the
+    # expectation instead of failing this test for the wrong reason.
+    assert su["financing_costs"] > 0
+    assert su["total_uses"] == pytest.approx(3_685_000 + su["financing_costs"])
     assert su["total_sources"] == pytest.approx(su["total_uses"])
+    # Debt displaces equity; it does not add to uses.
+    assert su["total_equity"] == pytest.approx(
+        su["total_uses"] - su["senior_debt"])
     assert [u["key"] for u in su["uses"]] == [
         "price", "acquisition_cost", "capex", "reserve", "financing_costs"]
+
+
+@pytest.mark.django_db
+def test_run_payload_carries_the_levered_lens(client, operator, deals_dir,
+                                              fake_run):
+    """Item E3a's whole output. The first draft computed the levered lens
+    on every deal and then dropped it: `result.debt` and `result.levered`
+    were set in the engine, never added to the persisted payload, and
+    discarded when the worker returned. Both audit agents caught it
+    independently. Nothing surfaces these yet — E3b does that — but a
+    figure that is not stored with its run cannot be surfaced later
+    without recomputing it against whatever config says then, which is a
+    different number wearing this run's date."""
+    deal = _run_deal(client, deals_dir)
+    payload = deal.runs.filter(status="done").first().result_json
+
+    debt = payload["debt"]
+    assert debt["loan"] > 0
+    assert debt["binding_constraint"]
+    # A dict, not the frozen dataclass stringified by json_safe.
+    assert isinstance(debt["terms"], dict)
+    assert debt["terms"]["rate"] > 0
+
+    levered = payload["levered"]["base"]
+    assert levered["lp_net_irr"] is not None
+    assert levered["am_fee_pct"] > 0
+    assert levered["am_fee_base"] == "invested_equity"
+    assert len(levered["years"]) == 5
+    assert levered["distributions"][0] == 0
+    # The stamp travels with the number it qualifies.
+    am_row = next(r for r in levered["assumption_stamp"]
+                  if r["key"] == "am_fee_treatment")
+    assert am_row["base"] == "invested_equity"
+    assert "1.00%" in am_row["label"]
 
 
 @pytest.mark.django_db
@@ -661,12 +724,17 @@ def test_summary_tab_renders_the_capital_block(client, operator, deals_dir,
     deal = _run_deal(client, deals_dir)
     content = client.get(f"/deals/{deal.pk}/?tab=summary").content.decode()
 
+    su = deal.runs.filter(status="done").first().result_json["sources_uses"]
+
     assert "Capital" in content
     assert "Purchase Price" in content
     assert "LP Equity" in content
-    assert "$3,685,000" in content            # total uses AND total equity
-    assert "Equity Required: $3,685,000" in content
-    assert "GP 10%: $368,500" in content
+    # Rendered from the run's own stack rather than hardcoded: item E3a
+    # sizes a loan on every deal, so Total Uses now carries an
+    # origination fee and Equity is Uses LESS the loan.
+    assert f"${su['total_uses']:,.0f}" in content
+    assert f"Equity Required: ${su['total_equity']:,.0f}" in content
+    assert f"GP 10%: ${su['gp_equity']:,.0f}" in content
     # In balance, so the warning chip must NOT be on the page.
     assert "OUT OF BALANCE" not in content
 

@@ -515,6 +515,183 @@ def test_the_blocking_tie_check_passes_on_a_levered_run():
     assert result.status == checks.PASS, result.message
 
 
+# ── Repairs from the E3a audit ──────────────────────────────────────
+
+def test_each_scenario_gets_its_own_debt_dict_not_a_shared_alias():
+    """One loan is sized for the whole deal and every scenario embeds it.
+    Returning the object itself made all three the same dict, so the first
+    consumer to annotate per-scenario debt data in place would corrupt the
+    other two."""
+    from model.returns_model import build_returns_model
+    from registry import ScenarioType
+
+    model = build_returns_model(
+        adjusted_ttm_noi=600_000, asking_price=10_000_000, nrsf=60_000,
+        expense_ratio=0.40, debt_terms=ORACLE_A)
+    bear = model["levered"][ScenarioType.BEAR]["debt"]
+    bull = model["levered"][ScenarioType.BULL]["debt"]
+    assert bear is not bull
+    assert bear["annual_debt_service"] is not bull["annual_debt_service"]
+    # Same VALUES — the loan really is sized once.
+    assert bear["loan"] == bull["loan"]
+    # Mutating one leaves the other untouched.
+    bear["loan"] = -1
+    assert bull["loan"] != -1
+
+
+def test_a_debt_payload_missing_its_payoff_raises():
+    """Defaulting a missing payoff to 0.0 computes the exit as though the
+    loan were forgiven at sale, and reports an LP net IRR that is too
+    HIGH with no error anywhere. A zero VALUE is fine; a missing KEY is a
+    broken payload."""
+    projection = project_cash_flows(
+        600_000, 10_000_000, 0.0, _params(0.03, 0.0625),
+        hold_years=5, expense_ratio=0.40, costs=COSTS)
+    debt = build_debt_schedule(10_000_000, 600_000, ORACLE_A, hold_years=5)
+    su = build_sources_uses(price=10_000_000, capex=0.0,
+                            acquisition_cost=projection["acquisition_cost"],
+                            financing_costs=debt["financing_costs"],
+                            senior_debt=debt["loan"], gp_coinvest_pct=0.10)
+    broken = {k: v for k, v in debt.items() if k != "payoff_balance"}
+    with pytest.raises(ValueError, match="payoff_balance"):
+        build_levered_returns(projection, sources_uses=su, debt=broken,
+                              waterfall_terms=resolve_waterfall_terms())
+    # A zero exit fee is legitimate and must still work.
+    zeroed = {**debt, "exit_fee": 0.0}
+    assert build_levered_returns(
+        projection, sources_uses=su, debt=zeroed,
+        waterfall_terms=resolve_waterfall_terms())["lp_net_irr"] is not None
+
+
+def test_a_blank_am_fee_falls_back_to_config_instead_of_crashing():
+    """An HTML form posts "" for a cleared numeric field. Every sibling
+    resolver in this repo tests `not in (None, "")`; `is None` would make
+    E3b's form field raise on `float("")` the day it lands."""
+    projection = project_cash_flows(
+        600_000, 10_000_000, 0.0, _params(0.03, 0.0625),
+        hold_years=5, expense_ratio=0.40, costs=COSTS)
+    debt = build_debt_schedule(10_000_000, 600_000, ORACLE_A, hold_years=5)
+    su = build_sources_uses(price=10_000_000, capex=0.0,
+                            acquisition_cost=projection["acquisition_cost"],
+                            financing_costs=debt["financing_costs"],
+                            senior_debt=debt["loan"], gp_coinvest_pct=0.10)
+    lev = build_levered_returns(projection, sources_uses=su, debt=debt,
+                                waterfall_terms=resolve_waterfall_terms(),
+                                am_fee_pct="", am_fee_base="")
+    assert lev["am_fee_pct"] == cfg.AM_FEE_PCT
+    assert lev["am_fee_base"] == cfg.AM_FEE_BASE
+
+
+def test_sizing_raises_when_the_base_scenario_is_missing():
+    """The loan is sized off the BASE case. Falling back to whichever
+    scenario computed first could price the debt on the bull case's
+    richer NOI, and `sources_uses_ties` cannot catch that — it checks the
+    stack's internal arithmetic, not which NOI justified the loan."""
+    from model.returns_model import build_returns_model
+    from registry import ScenarioType
+
+    real = build_returns_model(
+        adjusted_ttm_noi=600_000, asking_price=10_000_000, nrsf=60_000,
+        expense_ratio=0.40, debt_terms=ORACLE_A)
+    assert isinstance(real["scenarios"][ScenarioType.BASE], dict)
+
+    import model.returns_model as rm
+
+    def _no_base(*args, **kwargs):
+        # The key REMOVED, not set to None: `_build_summary_table` does
+        # `scenarios.get(name, {})` and so tolerates an absent key while
+        # crashing on an explicit None. Absent is therefore the shape
+        # that actually reaches the debt-sizing fallback.
+        scen = dict(real["scenarios"])
+        scen.pop(ScenarioType.BASE)
+        return scen
+
+    original = rm.run_scenarios
+    rm.run_scenarios = _no_base
+    try:
+        with pytest.raises(ValueError, match="base scenario is missing"):
+            build_returns_model(
+                adjusted_ttm_noi=600_000, asking_price=10_000_000,
+                nrsf=60_000, expense_ratio=0.40, debt_terms=ORACLE_A)
+    finally:
+        rm.run_scenarios = original
+
+
+def test_the_tie_check_catches_a_stack_built_without_the_debt_modules_fee():
+    """The failure the self-referential version could not see. A caller
+    that forgets `financing_costs=debt["financing_costs"]` produces a
+    `total_uses` missing the fee AND a `financing_costs` of 0 — both wrong
+    the same way, so `uses == basis + 0` reconciled and the check PASSED
+    on a deal underfunded by the entire origination fee."""
+    from analysis import checks
+    from model.returns_model import build_returns_model
+
+    model = build_returns_model(
+        adjusted_ttm_noi=600_000, asking_price=10_000_000, nrsf=60_000,
+        expense_ratio=0.40, debt_terms=ORACLE_A)
+    debt = model["debt"]
+    assert debt["financing_costs"] > 0
+
+    base = next(s for s in model["scenarios"].values()
+                if isinstance(s, dict))
+    forgot_the_fee = build_sources_uses(
+        price=10_000_000, capex=0.0,
+        acquisition_cost=base["acquisition_cost"],
+        senior_debt=debt["loan"], gp_coinvest_pct=0.10)   # no financing_costs
+
+    # Self-consistent, and wrong: it ties to the DCF basis exactly.
+    assert forgot_the_fee["total_uses"] == pytest.approx(
+        base["total_basis"], abs=CENT)
+
+    without_debt = next(r for r in checks.run_checks(
+        checks.CheckInput(scenarios=model["scenarios"],
+                          sources_uses=forgot_the_fee),
+        only={"sources_uses_ties"}))
+    assert without_debt.status == checks.PASS      # the old blind spot
+
+    with_debt = next(r for r in checks.run_checks(
+        checks.CheckInput(scenarios=model["scenarios"],
+                          sources_uses=forgot_the_fee, debt=debt),
+        only={"sources_uses_ties"}))
+    assert with_debt.status == checks.FAIL
+    assert with_debt.severity == checks.BLOCKING
+    assert "financing costs" in with_debt.message
+
+
+def test_a_loan_maturing_inside_the_hold_reaches_the_check_register():
+    """Previously a `logger.warning` nobody reads, while the results page
+    showed a levered IRR computed as though the loan amortized past its
+    own maturity. Item E3a put a sized loan on every deal, so the
+    condition went live."""
+    from analysis import checks
+
+    short_term = DebtTerms(rate=0.065, amort_years=30, term_years=3,
+                           max_ltv=0.65, min_dscr=1.25, min_debt_yield=0.10)
+    debt = build_debt_schedule(10_000_000, 600_000, short_term, hold_years=5)
+    assert debt["matures_before_exit"] is True
+
+    result = next(r for r in checks.run_checks(
+        checks.CheckInput(debt=debt), only={"loan_matures_before_exit"}))
+    assert result.status == checks.FAIL
+    assert result.severity == checks.ADVISORY
+    assert "matures in year 3" in result.message
+    assert "5 years" in result.message
+
+    ok = build_debt_schedule(10_000_000, 600_000, ORACLE_A, hold_years=5)
+    passing = next(r for r in checks.run_checks(
+        checks.CheckInput(debt=ok), only={"loan_matures_before_exit"}))
+    assert passing.status == checks.PASS
+
+    # A deal with no debt is skipped, not passed — we did not look.
+    no_debt = build_debt_schedule(
+        10_000_000, 600_000,
+        DebtTerms(rate=0.065, amort_years=30, max_ltv=0.0, min_dscr=0.0,
+                  min_debt_yield=0.0), hold_years=5)
+    skipped = next(r for r in checks.run_checks(
+        checks.CheckInput(debt=no_debt), only={"loan_matures_before_exit"}))
+    assert skipped.status == checks.SKIPPED
+
+
 def test_the_result_is_json_safe_all_the_way_down(oracle_a):
     """These results are persisted to Postgres JSONB.
     `webapp.services.json_safe` falls back to `str(obj)`, so a frozen

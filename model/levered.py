@@ -24,6 +24,7 @@ unlevered return. The TIE moved instead —
 untouched by this item.
 """
 
+import copy
 import logging
 
 import config as cfg
@@ -154,9 +155,15 @@ def build_levered_returns(projection: dict, *, sources_uses: dict, debt: dict,
     templates and `webapp.services.json_safe` all consume dicts.
     """
     terms = waterfall_terms or resolve_waterfall_terms()
-    am_fee_pct = float(cfg.AM_FEE_PCT if am_fee_pct is None else am_fee_pct)
-    am_fee_base = _fee_base(cfg.AM_FEE_BASE if am_fee_base is None
-                            else am_fee_base)
+    # `not in (None, "")`, not `is None`: every sibling resolver in this
+    # repo uses that test because an HTML form posts "" for a cleared
+    # numeric field, and the contract is "omitted means default, never
+    # zero and never a crash". E3b adds the form field; `float("")`
+    # raising at that point would be a bug shipped a week earlier.
+    am_fee_pct = float(am_fee_pct if am_fee_pct not in (None, "")
+                       else cfg.AM_FEE_PCT)
+    am_fee_base = _fee_base(am_fee_base if am_fee_base not in (None, "")
+                            else cfg.AM_FEE_BASE)
 
     noi = noi_series(projection)
     hold_years = int(projection.get("hold_years") or len(noi))
@@ -169,9 +176,22 @@ def build_levered_returns(projection: dict, *, sources_uses: dict, debt: dict,
             f"covers {len(noi)} — the two must be built on the same "
             "hold_years or every levered cash flow is off by a year.")
 
+    # `payoff_balance` and `exit_fee` are REQUIRED keys, not defaulted.
+    # Defaulting a missing payoff to 0.0 would compute the exit year as
+    # `net_exit - 0 - exit_fee`: the model would act as if the loan were
+    # forgiven at sale and report an LP net IRR that is too HIGH, with no
+    # error anywhere. A zero VALUE is fine and common (no exit fee on
+    # bank paper); a missing KEY is a broken debt payload.
+    for key in ("payoff_balance", "exit_fee"):
+        if key not in debt:
+            raise ValueError(
+                f"debt payload has no {key!r} — it must come from "
+                "`model.debt.build_debt_schedule`. Defaulting it to zero "
+                "would silently forgive the loan at exit and overstate "
+                "every levered return.")
     net_exit = float(projection.get("net_exit_proceeds") or 0.0)
-    payoff = float(debt.get("payoff_balance") or 0.0)
-    exit_fee = float(debt.get("exit_fee") or 0.0)
+    payoff = float(debt["payoff_balance"] or 0.0)
+    exit_fee = float(debt["exit_fee"] or 0.0)
     reserve_funded = float(projection.get("reserve") or 0.0)
 
     total_equity = float(sources_uses["total_equity"])
@@ -252,10 +272,16 @@ def build_levered_returns(projection: dict, *, sources_uses: dict, debt: dict,
         # from one that merely distributed less.
         "called_capital_after_close": capital_calls_total > CASH_TOLERANCE,
         "total_equity": total_equity,
-        # `terms` is already a plain dict inside the debt payload (see
-        # `build_debt_schedule`); carrying the whole block lets the
-        # results page, memo and Excel read one object.
-        "debt": debt,
+        # A DEEP COPY, not the object itself. One loan is sized for the
+        # whole deal and every scenario's levered result embeds it, so
+        # returning the original would make
+        # `levered["bear"]["debt"]`, `["base"]["debt"]` and
+        # `["bull"]["debt"]` the same Python object. Nothing mutates it
+        # today, but the first consumer that annotates per-scenario debt
+        # data in place — a memo or Excel writer is the obvious one —
+        # would silently corrupt the other two scenarios. Three small
+        # dicts is a cheap price for making that impossible.
+        "debt": copy.deepcopy(debt),
         "waterfall": waterfall,
         "assumption_stamp": _stamp(terms, am_fee_pct, am_fee_base),
         # Lifted for consumers that want only the headline. `run_waterfall`

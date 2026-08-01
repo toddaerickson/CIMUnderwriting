@@ -774,7 +774,15 @@ def _analysis_worker(run_pk):
             resolve_debt_terms(overrides.get("debt_terms")))
         waterfall_terms = dataclasses.asdict(resolve_waterfall_terms(
             overrides.get("waterfall_terms"), capital_structure=capital))
+        # Coerced, not stamped raw: a stored override can hold the string
+        # "0.01", and the stamp is what an auditor reads to reconstruct a
+        # run. `build_levered_returns` floats it anyway, so a string here
+        # would make the record disagree with the arithmetic in type
+        # while agreeing in value — the kind of mismatch that survives
+        # until something tries to compare two runs.
         am_fee_pct = overrides.get("am_fee_pct")
+        am_fee_pct = (float(am_fee_pct) if am_fee_pct not in (None, "")
+                      else None)
         stamped = {**overrides, "hold_years": hold_years,
                    "transaction_costs": txn_costs,
                    "capital_structure": capital,
@@ -842,6 +850,20 @@ def _analysis_worker(run_pk):
             # recomputed later against whatever the deal looks like then.
             "checks": result.checks,
             "check_summary": result.check_summary,
+            # The levered lens (item E3a). Persisted HERE, with the run,
+            # rather than recomputed later: the LP net IRR belongs to the
+            # assumption set stamped above, and a figure re-derived next
+            # week against whatever config says then is a different
+            # number wearing this run's date. Both agents auditing E3a
+            # caught the first draft computing these and dropping them on
+            # the floor.
+            #
+            # E3b renders them — results page, memo section, Excel sheet.
+            # Until then they are stored and unshown, which is deliberate
+            # and is why the levered lens is not yet claimed as visible
+            # anywhere in the UI.
+            "debt": result.debt,
+            "levered": result.levered,
             # Provenance: which tier supplied each demographic field
             # (CIM/override vs Census vs default) + why enrichment
             # skipped, so a blank population is explainable from the run

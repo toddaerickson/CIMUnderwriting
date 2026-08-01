@@ -394,7 +394,7 @@ def run_analysis(result: AnalysisResult, progress: Callable = None,
     from analysis import checks as model_checks
     _check_results = model_checks.run_checks(model_checks.input_from_cim(
         cim_data, result.financial_analysis, result.physical_analysis,
-        result.scenario_results, result.sources_uses))
+        result.scenario_results, result.sources_uses, result.debt))
     result.checks = model_checks.to_dicts(_check_results)
     result.check_summary = model_checks.summarize(_check_results)
 

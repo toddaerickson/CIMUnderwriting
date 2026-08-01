@@ -121,6 +121,13 @@ class CheckInput:
     price_vs_replacement: dict | None = None
     scenarios: dict | None = None
     sources_uses: dict | None = None   # model.returns_model.build_sources_uses
+    # model.debt.build_debt_schedule (item E3a). Carried so
+    # `sources_uses_ties` can cross-validate the financing cost against
+    # the module that computed it instead of against the same dict it is
+    # already validating — see that check for why self-reference is a
+    # hole. Also lets the register report a loan that matures inside the
+    # hold, which was previously a log line nobody sees.
+    debt: dict | None = None
 
 
 @dataclass(frozen=True)
@@ -391,6 +398,17 @@ def _sources_uses_ties(inp):
     still refuses to let the capital stack and the returns model disagree.
     It now says which of the two is allowed to differ, and by precisely
     what.
+
+    **The financing term is cross-validated against the debt module, not
+    taken from the stack it is checking.** Reading it only from
+    `sources_uses` would make the check self-referential and blind to
+    exactly the bug class it exists to catch: a caller that forgot to
+    pass `financing_costs=debt["financing_costs"]` into
+    `build_sources_uses` produces a `total_uses` missing the origination
+    fee AND a `financing_costs` of 0 — both wrong the same way, so
+    `uses == basis + 0` reconciles and the check would PASS on a deal
+    underfunded by the whole fee, which shows up as an equity shortfall
+    at closing. Comparing against `inp.debt` closes that.
     """
     su = inp.sources_uses or {}
     if not su:
@@ -399,6 +417,19 @@ def _sources_uses_ties(inp):
     uses = su.get("total_uses")
     sources = su.get("total_sources")
     financing = float(su.get("financing_costs") or 0.0)
+    debt_financing = (inp.debt or {}).get("financing_costs")
+    if (debt_financing is not None
+            and abs(float(debt_financing) - financing)
+            > SOURCES_USES_TOLERANCE_ABS):
+        return (FAIL,
+                f"The capital stack reports ${financing:,.2f} of financing "
+                f"costs but the sized loan charges ${float(debt_financing):,.2f}"
+                f". The stack was built without the debt module's fee, so "
+                f"Total Uses is short by the difference and the equity "
+                f"required at closing is understated.",
+                {"sources_uses_financing_costs": financing,
+                 "debt_financing_costs": float(debt_financing),
+                 "tolerance": SOURCES_USES_TOLERANCE_ABS})
     bases = sorted({round(float(s["total_basis"]) + financing, 2)
                     for s in (inp.scenarios or {}).values()
                     if isinstance(s, dict) and s.get("total_basis") is not None})
@@ -437,6 +468,47 @@ def _sources_uses_ties(inp):
             f"${financing:,.0f})") if financing else ""
     return (PASS, f"Uses, Sources and the DCF basis all equal "
                   f"${uses:,.0f}{tail}.", values)
+
+
+def _loan_matures_before_exit(inp):
+    """The balloon comes due before the sale, and the schedule ignores it.
+
+    `model.debt.build_debt_schedule` already computes this and logs a
+    warning, but item E3a is what put a sized loan on every deal, so the
+    condition went live at the same moment. A `logger.warning` reaches a
+    server log nobody reads while the results page, memo and Excel show a
+    levered IRR computed as though the loan amortized happily past its own
+    maturity — no refinancing modelled, no exit fee, no rate reset. That
+    overstates the levered return on exactly the long-hold deals where it
+    matters, so it belongs in the register beside every other assumption
+    the analyst is expected to know about.
+
+    ADVISORY, not blocking: amortizing past maturity is a stated modelling
+    limitation, not an arithmetic error, and refusing to run the deal over
+    it would be the wrong trade.
+    """
+    debt = inp.debt or {}
+    if not debt:
+        return (SKIPPED, "No debt schedule — nothing to test for maturity.",
+                {})
+    if not debt.get("loan"):
+        return (SKIPPED, "This deal carries no debt.", {"loan": 0.0})
+    terms = debt.get("terms") or {}
+    term_years = terms.get("term_years")
+    hold_years = len(debt.get("annual_debt_service") or [])
+    values = {"term_years": term_years, "hold_years": hold_years,
+              "payoff_balance": debt.get("payoff_balance")}
+    if not term_years or not hold_years:
+        return (SKIPPED, "Loan term or hold period is unknown.", values)
+    if hold_years > term_years:
+        return (FAIL,
+                f"The loan matures in year {term_years} but the hold runs "
+                f"{hold_years} years, so the balloon is due before the sale. "
+                f"The schedule amortizes straight past maturity: no "
+                f"refinancing, rate reset or prepayment cost is modelled, "
+                f"which overstates the levered return.", values)
+    return (PASS, f"The loan's {term_years}-year term outlasts the "
+                  f"{hold_years}-year hold.", values)
 
 
 def _price_vs_replacement(inp):
@@ -491,6 +563,9 @@ CHECKS = (
               "scenario_results[*].requested_exit_cap", _exit_cap_coercion),
     CheckSpec("price_vs_replacement", "Price vs replacement cost", ADVISORY,
               "physical_analysis.price_vs_replacement", _price_vs_replacement),
+    CheckSpec("loan_matures_before_exit", "Loan term vs hold period",
+              ADVISORY, "debt.terms.term_years, debt.annual_debt_service",
+              _loan_matures_before_exit),
 )
 
 CHECK_IDS = tuple(spec.id for spec in CHECKS)
@@ -565,7 +640,8 @@ def _unit_mix_dicts(unit_mix) -> tuple:
 
 
 def input_from_cim(cim, financial_analysis=None, physical_analysis=None,
-                   scenario_results=None, sources_uses=None) -> CheckInput:
+                   scenario_results=None, sources_uses=None,
+                   debt=None) -> CheckInput:
     """Build the register's input from a CIMData plus whichever analysis
     outputs the caller has. Bands come from the ratio check the pipeline
     already computed (state-adjusted), never from a second read of raw
@@ -598,4 +674,5 @@ def input_from_cim(cim, financial_analysis=None, physical_analysis=None,
             "price_vs_replacement"),
         scenarios=scenario_results,
         sources_uses=sources_uses,
+        debt=debt,
     )
