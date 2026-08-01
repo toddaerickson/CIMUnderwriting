@@ -187,14 +187,28 @@ def test_promote_is_charged_on_the_lp_attributable_residual_only():
 
 def test_gp_rides_tier_one_pari_passu():
     """Tier-1 dollars split by co-invest share exactly, in every period —
-    that is what "pari passu" has to mean numerically."""
+    that is what "pari passu" has to mean numerically.
+
+    Both sides are asserted against absolute dollars. Backing the GP's
+    tier-1 share out of `gp_distribution` by subtracting the promote and
+    the GP's residual share is a restatement of the code being tested: it
+    collapses to `tier1 * 0.10 == tier1 * 0.10` and cannot fail. It also
+    says nothing about the LP side, where the mirror-image error lives.
+    """
     result = _run(WaterfallTerms(pref_compounding=COMPOUNDING_ANNUAL,
                                  pref_rate=0.08, promote_split=0.20,
                                  gp_coinvest_pct=0.10))
-    for row in result["periods"]:
-        gp_tier1 = row["gp_distribution"] - row["gp_promote"] - (
-            row["residual"] * 0.10)
-        assert gp_tier1 == pytest.approx(row["tier1_paid"] * 0.10, abs=CENT)
+    # Years 1-4 distribute tier 1 only, so each side is a clean 90/10.
+    assert [row["lp_distribution"] for row in result["periods"][1:-1]] == \
+        pytest.approx([45_000.0, 54_000.0, 63_000.0, 72_000.0], abs=CENT)
+    assert [row["gp_distribution"] for row in result["periods"][1:-1]] == \
+        pytest.approx([5_000.0, 6_000.0, 7_000.0, 8_000.0], abs=CENT)
+    # The sale year mixes tier 1, the residual and the promote:
+    # tier 1 1,157,672.9088 x 0.90 = 1,041,905.62; LP residual
+    # 308,094.38 less the 61,618.88 promote.
+    final = result["periods"][-1]
+    assert final["lp_distribution"] == pytest.approx(1_288_381.12, abs=CENT)
+    assert final["gp_distribution"] == pytest.approx(211_618.88, abs=CENT)
 
 
 def test_lp_returns_are_invariant_to_gp_coinvest():
@@ -257,8 +271,13 @@ def test_a_mid_stream_call_also_waits_a_period_under_a_simple_pref():
 def test_a_period_zero_distribution_is_paid_before_any_pref_exists():
     """Cash returned at close cannot be preferred return — there is none
     yet — so it reduces capital, and period 1 accrues on the smaller
-    base: 8% of 900,000 = 72,000."""
-    result = run_waterfall(1_000_000.0, [100_000.0, 0.0],
+    base: 8% of 900,000 = 72,000.
+
+    Contributions are spelled out period by period rather than using the
+    scalar shorthand, which refuses a period-0 distribution precisely
+    because it cannot tell one from a series that starts at year 1.
+    """
+    result = run_waterfall([1_000_000.0, 0.0], [100_000.0, 0.0],
                            WaterfallTerms(pref_compounding=COMPOUNDING_ANNUAL,
                                           **NO_COINVEST))
     assert result["periods"][0]["capital_returned"] == pytest.approx(
@@ -282,10 +301,41 @@ def test_a_deal_that_never_returns_capital_pays_no_promote():
     assert result["gp"]["promote"] == 0.0
     assert all(row["residual"] == 0.0 for row in result["periods"])
     assert result["tier1_current"] is False
-    assert result["unreturned_capital"] == pytest.approx(1_000_000.00,
-                                                         abs=CENT)
-    assert result["unpaid_pref"] == pytest.approx(135_183.36, abs=CENT)
+    # Every period reports the shortfall, not just the total — E3 renders
+    # this as a per-year column, and the simple branch computes it from
+    # different state than the compounded one.
+    assert [row["tier1_current"] for row in result["periods"]] == [False] * 5
+    # roc_first, so each $50,000 pays down capital and the pref piles up
+    # behind it: $1,000,000 - $200,000 returned, $1,135,183.36 - $800,000.
+    assert result["unreturned_capital"] == pytest.approx(800_000.00, abs=CENT)
+    assert result["unpaid_pref"] == pytest.approx(335_183.36, abs=CENT)
+    assert result["unreturned_capital"] + result["unpaid_pref"] == \
+        pytest.approx(1_135_183.36, abs=CENT)
     assert result["lp"]["moic"] == pytest.approx(0.20, abs=1e-9)
+
+
+def test_the_tier_one_tolerance_is_pinned_at_both_edges():
+    """`BALANCE_TOLERANCE` decides whether a deal cleared its hurdle, and
+    every other fixture either clears to exactly $0.00 or misses by more
+    than a million — so the threshold could be widened by six orders of
+    magnitude undetected. These two sit either side of it.
+
+    Against a compounded balance of $1,469,328.08 at period 5: paying
+    $1,464,428.08 leaves $4,900 outstanding (short), paying
+    $1,469,328.076 leaves $0.004 (float noise, clear).
+    """
+    terms = WaterfallTerms(pref_compounding=COMPOUNDING_ANNUAL, **NO_COINVEST)
+    balance = 1_000_000.0 * 1.08 ** 5
+    assert balance == pytest.approx(1_469_328.08, abs=CENT)
+
+    short = run_waterfall(1_000_000.0, [0.0] * 5 + [balance - 4_900.0], terms)
+    assert short["tier1_current"] is False
+    assert short["unreturned_capital"] + short["unpaid_pref"] == \
+        pytest.approx(4_900.00, abs=CENT)
+    assert short["gp"]["promote"] == 0.0
+
+    noise = run_waterfall(1_000_000.0, [0.0] * 5 + [balance - 0.004], terms)
+    assert noise["tier1_current"] is True
 
 
 def test_a_total_loss_reports_no_irr_rather_than_nan():
@@ -342,15 +392,56 @@ def test_every_dollar_distributed_reaches_the_lp_or_the_gp(terms):
 
 @pytest.mark.parametrize("terms", [ORACLE_1, ORACLE_2, ORACLE_3])
 def test_tier_one_reconciles_to_its_capital_and_pref_parts(terms):
-    """Under a compounded pref the capital/pref split is presentation
-    only — there is one balance and one claim — so the split must at
-    least reconcile to the payment and to the ending balance."""
+    """A reconciliation, not a proof — both assertions hold by
+    construction (`capital_returned` is DEFINED as `tier1 - pref_paid`).
+    Kept because it would catch a future refactor that computes the two
+    parts independently, but the split itself is pinned in absolute
+    dollars by the two tests below."""
     result = _run(terms)
     for row in result["periods"]:
         assert row["capital_returned"] + row["pref_paid"] == pytest.approx(
             row["tier1_paid"], abs=CENT)
         assert row["ending_unreturned_capital"] + row["ending_unpaid_pref"] \
             == pytest.approx(row["ending_balance"], abs=CENT)
+
+
+def test_the_compounded_split_follows_the_stated_ordering_in_dollars():
+    """The memo rows are read beside the assumption stamp, which says
+    "Return of capital first". Applying pref first under that stamp
+    printed $0.00 of capital returned for four straight years — every
+    dollar right, and unreconcilable against its own stated basis.
+
+    Absolute dollars, because the reconciliation test above is an
+    identity: oracle 1 returns capital $50k/$60k/$70k/$80k in years 1-4
+    with no pref paid, then $740,000 of remaining capital plus
+    $417,672.91 of accrued preferred return at sale.
+    """
+    result = _run(ORACLE_1)                      # compounded, roc_first
+    assert [row["capital_returned"] for row in result["periods"]] == \
+        pytest.approx([0.0, 50_000.0, 60_000.0, 70_000.0, 80_000.0,
+                       740_000.0], abs=CENT)
+    assert [row["pref_paid"] for row in result["periods"]] == \
+        pytest.approx([0.0, 0.0, 0.0, 0.0, 0.0, 417_672.91], abs=CENT)
+
+
+def test_the_compounded_split_flips_with_the_ordering_and_moves_no_dollar():
+    """Same flows, `pref_first`: the memo rows invert while every LP and
+    GP dollar stays put, which is what "presentation only" has to mean."""
+    roc = _run(ORACLE_1)
+    pref = _run(WaterfallTerms(pref_compounding=COMPOUNDING_ANNUAL,
+                               ordering=ORDERING_PREF_FIRST, **NO_COINVEST))
+    # Pref first leaves capital untouched until the sale, so the final
+    # period pays the WHOLE $1,000,000 of capital and only the
+    # $157,672.91 of pref still accrued against it — not the $417,672.91
+    # that roc_first leaves outstanding after returning capital first.
+    assert [row["pref_paid"] for row in pref["periods"]] == pytest.approx(
+        [0.0, 50_000.0, 60_000.0, 70_000.0, 80_000.0, 157_672.91], abs=CENT)
+    assert [row["capital_returned"] for row in pref["periods"]] == \
+        pytest.approx([0.0, 0.0, 0.0, 0.0, 0.0, 1_000_000.0], abs=CENT)
+    assert pref["lp"]["cash_flows"] == pytest.approx(roc["lp"]["cash_flows"],
+                                                     abs=CENT)
+    assert pref["gp"]["promote"] == pytest.approx(roc["gp"]["promote"],
+                                                  abs=CENT)
 
 
 # ── Promote paid before a later capital call ────────────────────────
@@ -361,7 +452,7 @@ def test_a_promote_survives_a_later_capital_call_and_says_so(caplog):
     period 3 re-opens tier 1 and the LP ends at 0.39x. With no clawback
     the GP keeps the promote — the correct model of the operator's fund
     terms — but a `tier1_current: False` sitting beside a positive
-    promote is not a statement, so `interim_promote` makes it one.
+    promote is not a statement, so `unrecovered_promote` makes it one.
     """
     with caplog.at_level("WARNING", logger="cim_analyst"):
         result = run_waterfall([1_000_000.0, 0.0, 0.0, 5_000_000.0, 0.0],
@@ -369,19 +460,53 @@ def test_a_promote_survives_a_later_capital_call_and_says_so(caplog):
                                WaterfallTerms())
     assert result["tier1_current"] is False
     assert result["gp"]["promote"] == pytest.approx(150_048.00, abs=CENT)
-    assert result["interim_promote"] == pytest.approx(150_048.00, abs=CENT)
+    assert result["unrecovered_promote"] == pytest.approx(150_048.00, abs=CENT)
     assert result["lp"]["moic"] == pytest.approx(0.3889, abs=0.0001)
     assert "no clawback" in caplog.text
 
 
-def test_promote_taken_at_the_final_distribution_is_not_interim(caplog):
+def test_promote_taken_at_the_final_distribution_is_not_flagged(caplog):
     """The ordinary single-asset shape: the residual arises at sale and
     no capital can be called after it, so nothing is flagged."""
     with caplog.at_level("WARNING", logger="cim_analyst"):
         result = _run(ORACLE_1)
     assert result["gp"]["promote"] > 0
-    assert result["interim_promote"] == 0.0
+    assert result["unrecovered_promote"] == 0.0
     assert "clawback" not in caplog.text
+
+
+def test_a_deal_that_takes_a_call_and_still_makes_the_lp_whole_is_not_flagged(
+        caplog):
+    """The cap is the whole point of the field. This deal pays a promote
+    in period 2, takes a $500,000 call in period 3, then re-clears tier 1
+    in full and returns the LP 1.78x. A clawback recovers only up to the
+    ending shortfall, and there is none — so an uncapped flag would put a
+    clawback caveat on the memo of a deal where nothing was owed.
+    """
+    with caplog.at_level("WARNING", logger="cim_analyst"):
+        result = run_waterfall(
+            [1_000_000.0, 0.0, 0.0, 500_000.0, 0.0, 0.0],
+            [0.0, 0.0, 2_000_000.0, 0.0, 0.0, 900_000.0],
+            WaterfallTerms(gp_coinvest_pct=0.0))
+    assert result["tier1_current"] is True
+    assert result["unreturned_capital"] == pytest.approx(0.0, abs=CENT)
+    assert result["gp"]["promote"] > 0
+    assert result["unrecovered_promote"] == 0.0
+    assert result["lp"]["moic"] == pytest.approx(1.7799, abs=0.0001)
+    assert "clawback" not in caplog.text
+
+
+def test_a_promote_in_the_same_period_as_the_last_call_is_not_flagged():
+    """The boundary of `period < last_call`. Period 2 takes the call AND
+    pays the promote, in that order — capital was called before the cash
+    went out, so nothing was promoted ahead of it. Without this fixture,
+    flipping `<` to `<=` passes the entire suite.
+    """
+    result = run_waterfall([1_000_000.0, 0.0, 500_000.0],
+                           [0.0, 0.0, 3_000_000.0], WaterfallTerms())
+    assert result["gp"]["promote"] == pytest.approx(240_048.00, abs=CENT)
+    assert result["tier1_current"] is True
+    assert result["unrecovered_promote"] == 0.0
 
 
 # ── The pari-passu shortcut, against a second implementation ────────
@@ -486,6 +611,36 @@ def test_a_single_number_means_all_equity_at_close():
                              ORACLE_1)
     assert scalar["lp"]["cash_flows"] == pytest.approx(
         explicit["lp"]["cash_flows"], abs=CENT)
+
+
+def test_the_scalar_shorthand_refuses_a_series_that_may_start_at_year_one():
+    """The shorthand takes its period count from `distributions`, so it
+    cannot notice a series that omits the period-0 slot — and that is the
+    series the rest of the pipeline hands out, since
+    `project_cash_flows` puts the negative basis at index 0 and the
+    obvious `cash_flows[1:]` is exactly hold_years long.
+
+    Measured on a 5-year, $4.7M-equity deal, the misread returns LP IRR
+    14.1563% against the correct 11.2437% and $102,308 of extra promote,
+    silently. Nothing in the values distinguishes the two readings, so
+    the ambiguous one is refused.
+    """
+    years_one_to_five = [180_000.0, 210_000.0, 240_000.0, 270_000.0,
+                         7_100_000.0]
+    with pytest.raises(ValueError, match="period 0 is the CLOSE date"):
+        run_waterfall(4_700_000.0, years_one_to_five, ORACLE_1)
+
+    correct = run_waterfall(4_700_000.0, [0.0] + years_one_to_five, ORACLE_1)
+    assert correct["lp"]["irr"] * 100 == pytest.approx(11.2437, abs=0.0001)
+
+
+def test_a_close_date_distribution_stays_expressible():
+    """Refusing the ambiguous shorthand must not make a genuine
+    close-date distribution unmodellable — spell the contributions out."""
+    result = run_waterfall([1_000_000.0, 0.0], [25_000.0, 1_200_000.0],
+                           ORACLE_1)
+    assert result["periods"][0]["capital_returned"] == pytest.approx(
+        25_000.00, abs=CENT)
 
 
 def test_mismatched_series_lengths_raise_rather_than_pad():
@@ -693,10 +848,33 @@ def test_an_unknown_override_value_still_raises():
 
 def test_gp_coinvest_comes_from_the_capital_block_not_waterfall_terms():
     """One source of truth: `model.returns_model.resolve_capital_structure`
-    reads the same scalar for the Sources & Uses stack, so the capital
-    stack and the waterfall cannot disagree about whose equity it is."""
+    reads the same scalar for the Sources & Uses stack."""
     assert "gp_coinvest_pct" not in cfg.WATERFALL_TERMS
     assert resolve_waterfall_terms().gp_coinvest_pct == cfg.GP_COINVEST_PCT
+
+
+def test_the_deals_own_coinvest_beats_the_config_default():
+    """GP co-invest is a PER-DEAL assumption — it is on the assumptions
+    page, `resolve_capital_structure` resolves it, and `engine.py` hands
+    that value to `build_sources_uses`. Seeding the waterfall from the
+    config scalar alone would print a Sources & Uses stack split 25/75
+    beside an LP net IRR computed on 10/90: two numbers on one page,
+    derived from different equity, neither flagged.
+    """
+    from model.returns_model import resolve_capital_structure
+
+    capital = resolve_capital_structure({"gp_coinvest_pct": 0.25})
+    terms = resolve_waterfall_terms(capital_structure=capital)
+    assert terms.gp_coinvest_pct == 0.25
+    # And the stack the waterfall is measured against agrees.
+    assert capital["gp_coinvest_pct"] == terms.gp_coinvest_pct
+    # An explicit override still wins over both.
+    assert resolve_waterfall_terms({"gp_coinvest_pct": 0.05},
+                                   capital_structure=capital
+                                   ).gp_coinvest_pct == 0.05
+    # A capital structure that does not name it falls back to config.
+    assert resolve_waterfall_terms(capital_structure={}).gp_coinvest_pct == \
+        cfg.GP_COINVEST_PCT
 
 
 def test_dataclass_defaults_do_not_drift_from_config():
@@ -753,8 +931,37 @@ def test_the_stamp_says_when_ordering_is_inert():
     compounded = {row["key"]: row["label"]
                   for row in assumption_stamp(ORACLE_1)}
     simple = {row["key"]: row["label"] for row in assumption_stamp(ORACLE_2)}
-    assert "no effect" in compounded["ordering"]
-    assert "no effect" not in simple["ordering"]
+    assert "presentation only" in compounded["ordering"]
+    assert "presentation only" not in simple["ordering"]
+
+
+def test_the_am_fee_row_does_not_claim_a_rate_this_module_never_charged():
+    """The fee is charged upstream by E3, and no AM-fee rate exists in
+    config. A row reading only "Above the waterfall (deal expense)" beside
+    an LP *net* IRR implies a completeness this module cannot deliver —
+    1% of committed equity, of invested capital and of asset value are all
+    live conventions with different answers."""
+    row = {r["key"]: r["label"] for r in assumption_stamp(ORACLE_1)}
+    assert "set by the caller" in row["am_fee_treatment"]
+
+
+def test_the_result_survives_the_json_encoder_that_e3_will_persist_it_with():
+    """`webapp.services.json_safe` falls back to `str(obj)` on anything
+    it does not recognise, so returning the frozen dataclass under
+    "terms" persisted it to JSONB as the string
+    "WaterfallTerms(pref_rate=0.08, ...)" — unqueryable, and any consumer
+    reading `["terms"]["pref_rate"]` got "string indices must be
+    integers". It degraded silently rather than raising.
+    """
+    import json
+
+    from webapp.services import json_safe
+
+    payload = json_safe(_run(ORACLE_1))
+    assert payload["terms"]["pref_rate"] == 0.08
+    assert payload["terms"]["promote_split"] == 0.20
+    assert WaterfallTerms(**payload["terms"]) == ORACLE_1
+    json.dumps(payload, allow_nan=False)      # Postgres JSONB rejects NaN
 
 
 # ── E2 is not wired ─────────────────────────────────────────────────

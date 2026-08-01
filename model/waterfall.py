@@ -36,10 +36,11 @@ promote already gone. The operator's fund terms have no clawback (LPA
 question 6, answered), so the GP keeps it — that is the correct model of
 the actual terms, not a defect in them. What would be a defect is
 leaving it to be inferred from a `tier1_current: False` sitting beside a
-positive promote, so the result reports `interim_promote` explicitly and
-logs it. On a single-asset deal the residual normally arises only at
-sale, after which no capital can be called; a refinance distribution
-followed by a follow-on call is the shape that opens it.
+positive promote, so the result reports `unrecovered_promote` — what a
+clawback would have recovered, capped at the shortfall the deal actually
+ends with — and logs it. On a single-asset deal the residual normally
+arises only at sale, after which no capital can be called; a refinance
+distribution followed by a follow-on call is the shape that opens it.
 
 **Nothing outside `tests/` imports this yet.** E2 ships the engine; E3
 wires it into the assumptions form, results, memo and Excel.
@@ -56,7 +57,7 @@ carries the resolved set so no LP net IRR is ever displayed without it.
 import logging
 import math
 from collections.abc import Mapping, Sized
-from dataclasses import dataclass, fields
+from dataclasses import asdict, dataclass, fields
 
 import numpy_financial as npf
 
@@ -269,7 +270,8 @@ def _coerce_bool(value):
     return bool(value)
 
 
-def resolve_waterfall_terms(overrides: dict = None) -> WaterfallTerms:
+def resolve_waterfall_terms(overrides: dict = None,
+                            capital_structure: dict = None) -> WaterfallTerms:
     """Partial override → fully resolved terms.
 
     Same contract as `model.debt.resolve_debt_terms` and
@@ -283,17 +285,29 @@ def resolve_waterfall_terms(overrides: dict = None) -> WaterfallTerms:
     a wrong basis label costs a rounding difference, a wrong pref
     convention re-prices the promote.
 
-    `gp_coinvest_pct` is seeded from `config.GP_COINVEST_PCT`, the same
-    scalar `model.returns_model.resolve_capital_structure` reads for the
-    capital stack, so the waterfall and Sources & Uses cannot disagree
-    about how much of the equity is the GP's. It is deliberately NOT a
-    key in `config.WATERFALL_TERMS`.
+    **`capital_structure` is how E3 keeps the co-invest honest, and
+    omitting it is a real defect, not a convenience.** GP co-invest is a
+    PER-DEAL assumption: `webapp.forms` puts it on the assumptions page,
+    `model.returns_model.resolve_capital_structure` resolves it, and
+    `engine.py` hands that resolved value to `build_sources_uses`. Seeding
+    only from `config.GP_COINVEST_PCT` would make a deal edited to 25%
+    print a Sources & Uses stack split 25/75 and an LP net IRR computed
+    on 10/90 — two numbers on one page, derived from different equity,
+    neither flagged. So pass the deal's resolved capital structure and
+    this reads `capital_structure["gp_coinvest_pct"]`; the config scalar
+    is the fallback for the CLI and for tests, not the normal path.
+    An explicit `gp_coinvest_pct` override still wins over both.
+
+    It is deliberately NOT a key in `config.WATERFALL_TERMS` — the
+    capital block already owns it, and a second copy diverges.
 
     Config is read at CALL time, never bound at import, so a test or a
     future settings path that rebinds it is seen.
     """
     resolved = dict(cfg.WATERFALL_TERMS)
-    resolved["gp_coinvest_pct"] = cfg.GP_COINVEST_PCT
+    coinvest = (capital_structure or {}).get("gp_coinvest_pct")
+    resolved["gp_coinvest_pct"] = (cfg.GP_COINVEST_PCT
+                                   if coinvest in (None, "") else coinvest)
     known = {f.name for f in fields(WaterfallTerms)}
 
     for key, value in (overrides or {}).items():
@@ -399,6 +413,28 @@ def _align_series(contributions, distributions):
             raise ValueError(
                 f"contributions must be a finite, non-negative number, got "
                 f"{contributions!r}")
+        # The shorthand takes its period count from `distributions`, so it
+        # cannot notice a series that starts at YEAR 1 instead of at
+        # close — and that is the series the rest of the pipeline hands
+        # out. `project_cash_flows` returns `cash_flows[0]` as the
+        # negative basis, so the obvious `cash_flows[1:]` is exactly
+        # hold_years long and lands year 1's cash at period 0, where it
+        # is distributed before any pref has accrued. Measured on a
+        # 5-year, $4.7M-equity deal: LP IRR 14.1563% against the correct
+        # 11.2437%, and $102,308 of extra promote, with nothing said.
+        #
+        # There is no way to tell the two readings apart from the values,
+        # so the shorthand refuses the ambiguous one. Cash genuinely
+        # distributed at close is rare and stays expressible — pass
+        # `contributions` as an explicit period-indexed list.
+        if dists[0] > 0:
+            raise ValueError(
+                f"distributions[0] is {dists[0]:,.2f}, but period 0 is the "
+                "CLOSE date and the scalar `contributions` shorthand cannot "
+                "tell a close-date distribution from a series that starts at "
+                "year 1. If this series starts at year 1, prepend 0.0 for "
+                "close. If cash really was distributed at close, pass "
+                "`contributions` as an explicit period-indexed list.")
     else:
         contribs = _as_amounts("contributions", contributions)
         if len(contribs) != len(dists):
@@ -450,11 +486,19 @@ def assumption_stamp(terms: WaterfallTerms) -> list:
          "value": terms.ordering,
          "label": ORDERING_LABELS[terms.ordering]
                   + ("" if terms.pref_compounding == COMPOUNDING_SIMPLE
-                     else " (no effect: the pref compounds)")},
+                     else " (presentation only: the pref compounds, so no "
+                          "dollar moves)")},
         {"key": "am_fee_treatment",
          "question": "AM fee above the waterfall or netted from LP",
          "value": terms.am_fee_treatment,
-         "label": AM_FEE_LABELS[terms.am_fee_treatment]},
+         # No rate and no base, because this module does not charge the
+         # fee and inventing a config key it never reads would be a
+         # constant that goes stale. E3 charges it upstream and must
+         # extend this row with the rate and the base it used — see the
+         # plan doc's handoff note. Saying so is better than a label that
+         # reads complete.
+         "label": AM_FEE_LABELS[terms.am_fee_treatment]
+                  + " — rate and base set by the caller, not this module"},
         {"key": "promote_basis",
          "question": "Promote on 100% of residual or LP-attributable only",
          "value": "lp_attributable",
@@ -542,9 +586,20 @@ def run_waterfall(contributions, distributions,
             # below is presentation only — it exists so the memo can
             # print a Return-of-Capital row and a Preferred-Return row,
             # and no LP or GP dollar depends on which way it falls.
+            #
+            # It still follows `ordering`, because the memo rows are read
+            # beside the assumption stamp. Applying pref first under a
+            # stated "return of capital first" printed $0.00 of capital
+            # returned for four consecutive years under a convention
+            # saying capital comes first, which an auditor cannot
+            # reconcile even though every dollar was right.
             tier1 = min(cash, balance)
-            pref_paid = min(tier1, max(0.0, balance - capital))
-            capital_returned = tier1 - pref_paid
+            if terms.ordering == ORDERING_ROC_FIRST:
+                capital_returned = min(tier1, capital)
+                pref_paid = tier1 - capital_returned
+            else:
+                pref_paid = min(tier1, max(0.0, balance - capital))
+                capital_returned = tier1 - pref_paid
             balance -= tier1
             capital = max(0.0, capital - capital_returned)
             cash -= tier1
@@ -624,21 +679,38 @@ def run_waterfall(contributions, distributions,
     gp_distributed = sum(r["gp_distribution"] for r in rows)
     ending_pref = max(0.0, balance - capital) if compounded else unpaid_pref
 
-    # Promote paid in a period that a later capital call re-opened. With
-    # no clawback the GP keeps it, so it is stated rather than left to be
-    # read off a False `tier1_current` next to a positive promote.
+    # What a clawback would have recovered and these terms do not:
+    # promote paid before a later capital call, capped at the tier-1
+    # shortfall the deal actually ends with.
+    #
+    # The cap is the whole point. Without it the flag fired on a deal
+    # that took a call, re-cleared tier 1 in full and returned the LP
+    # 1.78x — a clawback caveat on the memo of a deal where nothing was
+    # owed. A clawback only ever recovers up to the ending shortfall, so
+    # that is the honest number, and it is zero exactly when the LP is
+    # whole.
+    shortfall = max(0.0, capital) + max(0.0, ending_pref)
     last_call = max((r["period"] for r in rows
                      if r["contribution"] > 0), default=-1)
-    interim_promote = sum(r["gp_promote"] for r in rows
-                          if r["period"] < last_call)
-    if interim_promote > BALANCE_TOLERANCE:
+    promote_before_last_call = sum(r["gp_promote"] for r in rows
+                                   if r["period"] < last_call)
+    unrecovered_promote = min(promote_before_last_call, shortfall)
+    if unrecovered_promote > BALANCE_TOLERANCE:
         logger.warning(
             "$%.2f of promote was paid before capital was called in period "
-            "%s; tier 1 re-opened afterwards and these fund terms carry no "
-            "clawback, so the GP keeps it.", interim_promote, last_call)
+            "%s, and the deal ends $%.2f short of returning capital plus "
+            "preferred return. These fund terms carry no clawback, so the GP "
+            "keeps it.", unrecovered_promote, last_call, shortfall)
 
     return {
-        "terms": terms,
+        # A dict, not the frozen dataclass. `webapp.services.json_safe`
+        # falls back to `str(obj)` on anything it does not recognise, so
+        # the object persisted to JSONB as the string
+        # "WaterfallTerms(pref_rate=0.08, ...)" — unqueryable, and a
+        # consumer reading `["terms"]["pref_rate"]` got "string indices
+        # must be integers". The caller that passed `terms` in still has
+        # the object; `WaterfallTerms(**result["terms"])` rebuilds it.
+        "terms": asdict(terms),
         "periods": rows,
         "assumption_stamp": assumption_stamp(terms),
         "total_contributions": sum(contribs),
@@ -669,8 +741,9 @@ def run_waterfall(contributions, distributions,
         "tier1_current": (capital <= BALANCE_TOLERANCE
                           and ending_pref <= BALANCE_TOLERANCE),
         # Nonzero means the GP was promoted on a period that a later
-        # capital call re-opened. Not recoverable — these fund terms have
-        # no clawback — so any consumer showing the promote must show
-        # this beside it.
-        "interim_promote": interim_promote,
+        # capital call re-opened AND the deal ends short. Not
+        # recoverable — these fund terms have no clawback — so any
+        # consumer showing the promote must show this beside it. Zero
+        # when the LP ends whole, which is the common case.
+        "unrecovered_promote": unrecovered_promote,
     }

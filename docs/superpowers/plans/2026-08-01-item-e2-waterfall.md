@@ -98,11 +98,55 @@ The arithmetic is right and stays: LPA question 6 is **answered — no
 clawback**, so a GP that keeps interim promote is the operator's actual
 fund terms, not a modeling error, and clawback mechanics are explicitly
 out of scope. What was wrong was the claim and the silence. The result
-now carries `interim_promote` (promote paid in any period a later call
-re-opened) and logs a warning, so no consumer can print a promote without
-the condition attached. On a single-asset deal the residual normally
-arises only at sale, after which nothing can be called; a refinance
-distribution followed by a follow-on call is the shape that opens it.
+now carries `unrecovered_promote` and logs a warning, so no consumer can
+print a promote without the condition attached. On a single-asset deal
+the residual normally arises only at sale, after which nothing can be
+called; a refinance distribution followed by a follow-on call is the
+shape that opens it.
+
+**The flag is capped at the ending shortfall**, which the first repair
+missed and a second review pass caught: uncapped it fired on a deal that
+took a call, re-cleared tier 1 in full and returned the LP 1.78x —
+a clawback caveat on the memo of a deal where nothing was owed. A
+clawback only ever recovers up to the shortfall the deal ends with, so
+`unrecovered_promote = min(promote paid before the last call, unreturned
+capital + unpaid pref)`. It is zero exactly when the LP ends whole.
+
+**The scalar-contribution shorthand refuses an ambiguous distribution
+series.** The shorthand takes its period count from `distributions`, so
+it cannot notice a series that starts at YEAR 1 rather than at close —
+and that is the series the rest of the pipeline hands out, since
+`project_cash_flows` puts the negative basis at index 0 and the obvious
+`cash_flows[1:]` is exactly `hold_years` long. Measured on a 5-year,
+$4.7M-equity deal: LP IRR **14.1563% against the correct 11.2437%**, and
+$102,308 of extra promote, silently, because year 1's cash landed at
+period 0 and was distributed before any pref accrued. Nothing in the
+values distinguishes the two readings, so a period-0 distribution under
+the shorthand now raises and names both. A genuine close-date
+distribution stays expressible by spelling `contributions` out.
+
+**The GP co-invest comes from the deal, not from config.** The first
+draft seeded `gp_coinvest_pct` from `config.GP_COINVEST_PCT` and the
+docstring claimed the waterfall and Sources & Uses "cannot disagree".
+They can: co-invest is a per-deal assumption — it is on the assumptions
+page, `resolve_capital_structure` resolves it, and `engine.py:288` hands
+that resolved value to `build_sources_uses`. A deal edited to 25% would
+have printed a stack split 25/75 beside an LP net IRR computed on 10/90.
+`resolve_waterfall_terms` now takes `capital_structure=` and seeds from
+it; config is the fallback for the CLI and tests, and an explicit
+override still wins over both.
+
+**The compounded capital/pref memo split follows `ordering`.** It moves
+no dollar, but the memo rows are read beside the assumption stamp:
+applying pref first under a stamp reading "Return of capital first"
+printed $0.00 of capital returned for four consecutive years, which an
+auditor cannot reconcile even though every figure was right.
+
+**`terms` is returned as a dict, not the frozen dataclass.**
+`webapp.services.json_safe` falls back to `str(obj)`, so the dataclass
+persisted to JSONB as the string `"WaterfallTerms(pref_rate=0.08, ...)"`
+— unqueryable, and `["terms"]["pref_rate"]` raised "string indices must
+be integers". It degraded silently rather than raising.
 
 **Ordering is inert under compounding, and that is tested, not asserted.**
 The design doc claims ROC-vs-pref ordering is mathematically irrelevant
@@ -205,12 +249,21 @@ Both are one line in E3. Neither is a negative distribution, and the
 current hard failure is what forces the choice to be made explicitly
 instead of defaulted into.
 
-**A second, smaller seam.** `run_waterfall` returns the frozen
-`WaterfallTerms` under `terms`, and E3 persists results through
-`webapp.services.json_safe` into Postgres JSONB. A dataclass is not
-JSON-serialisable — E3 either drops the key or converts it
-(`dataclasses.asdict`). `assumption_stamp` is already plain dicts and
-strings, so the displayed stamp needs no conversion.
+**Two smaller seams E3 owns.**
+
+`assumption_stamp`'s AM-fee row carries a treatment but no rate and no
+base, and says so in its own label. That is deliberate: this module does
+not charge the fee, and inventing a config key it never reads would be a
+constant that goes stale. But "1% of committed equity", "1% of invested
+capital" and "1% of asset value" are all live conventions with different
+LP net IRRs, so **E3 must extend that row with the rate and base it
+actually charged** — otherwise the stamp reads complete beside an LP
+*net* IRR while omitting the one input that makes it "net".
+
+`resolve_waterfall_terms(capital_structure=...)` is not optional in E3.
+Called without it the co-invest silently falls back to the config
+default while Sources & Uses uses the deal's own — see the design
+decision above.
 
 ## Files
 
