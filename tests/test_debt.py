@@ -17,6 +17,18 @@ The two conventions the design doc leaves implicit are pinned by
 `test_io_payment_is_sized_on_full_amortization_term` and by this module
 building oracle 5's cash flows directly instead of borrowing the
 pipeline's defaults (which carry item B's 1.5% disposition cost).
+
+⚑ **ORACLE 5 USES THE FORWARD EXIT-NOI CONVENTION, WHICH IS NOT THE
+PIPELINE'S.** It capitalizes YEAR 6 NOI, faithfully reproducing the
+design doc, and that is about 3% higher than what
+`analysis.valuation.project_cash_flows` produces — the projection
+capitalizes the terminal hold year's OWN (year-5) NOI. Both are
+deliberate and CLAUDE.md's design-decisions block records the split.
+This module is allowed the design doc's convention because it tests the
+debt layer in ISOLATION and never calls the canonical projection. Item
+E3a, which does wire the two together, pins the trailing convention in
+`tests/test_levered.py`. If you are here because a levered number looks
+3% off, that is this, and it is not a bug in the debt math.
 """
 
 import pytest
@@ -474,58 +486,6 @@ def test_build_debt_schedule_carries_sizing_and_schedule_together():
                                                             abs=CENT)
 
 
-# ── The seam item E3 has to widen ───────────────────────────────────
-
-def test_financing_costs_break_the_basis_tie_until_e3_extends_it():
-    """Executable notice for item E3, not a bug in E1.
-
-    `build_debt_schedule`'s docstring says E3 hands `financing_costs` to
-    `build_sources_uses`. Doing ONLY that fails the blocking
-    `sources_uses_ties` check by exactly the origination fee: the fee is a
-    use of funds, but `project_cash_flows` computes
-    `total_basis = price + capex + acquisition_cost + reserve` and has no
-    financing term. Uses still equal Sources — it is the tie to the DCF
-    basis that parts.
-
-    Asserting the delta EQUALS financing_costs (rather than merely
-    "differs") is the point: it proves the gap is exactly the fee and
-    nothing else, so E3's fix is to add one term to the basis, not to go
-    hunting. Delete this test in E3 once the projection carries it.
-    """
-    from analysis.valuation import project_cash_flows
-    from model.returns_model import build_sources_uses
-
-    params = {"yr1_noi_bump": 0.0, "stabilized_occ": 0.88,
-              "rev_cagr_yr1_3": 0.03, "rev_cagr_yr4_5": 0.03,
-              "exp_growth": 0.03, "exit_cap": 0.0625}
-    price, capex, ttm_noi = 10_000_000.0, 0.0, 600_000.0
-
-    terms = DebtTerms(rate=0.065, amort_years=25, term_years=10,
-                      max_ltv=0.65, min_dscr=1.25, min_debt_yield=0.10,
-                      orig_fee_pct=0.01)
-    debt = build_debt_schedule(price, ttm_noi, terms, hold_years=5)
-    proj = project_cash_flows(ttm_noi, price, capex, params, hold_years=5)
-    su = build_sources_uses(price, capex,
-                            acquisition_cost=proj["acquisition_cost"],
-                            reserve=proj["reserve"],
-                            financing_costs=debt["financing_costs"],
-                            senior_debt=debt["loan"])
-
-    assert debt["financing_costs"] > 0
-    # The stack still balances against itself.
-    assert su["total_uses"] == pytest.approx(su["total_sources"], abs=CENT)
-    # But not against the DCF basis — and the gap is exactly the fee.
-    assert su["total_uses"] - proj["total_basis"] == pytest.approx(
-        debt["financing_costs"], abs=CENT)
-
-    # With no financing costs the tie holds, which is why item D shipped.
-    free = build_sources_uses(price, capex,
-                              acquisition_cost=proj["acquisition_cost"],
-                              reserve=proj["reserve"],
-                              financing_costs=0.0,
-                              senior_debt=debt["loan"])
-    assert free["total_uses"] == pytest.approx(proj["total_basis"], abs=CENT)
-
 
 # ── Terms resolution ────────────────────────────────────────────────
 
@@ -760,43 +720,3 @@ def test_config_defaults_sit_inside_the_researched_market_bands():
     assert 0.04 <= cfg.DEBT_TERMS["rate"] <= 0.12
 
 
-# ── The unlevered screen cannot have moved ──────────────────────────
-
-def test_no_production_module_imports_the_debt_layer_yet():
-    """E1 ships the module; E3 wires it.
-
-    This is the proof that no published unlevered number can have changed
-    — nothing outside the tests can reach this code. Delete this test in
-    E3, when wiring it is the point.
-    """
-    import ast
-    import pathlib
-
-    root = pathlib.Path(__file__).resolve().parent.parent
-    packages = ("analysis", "model", "output", "extract", "webapp", "cimweb")
-    sources = [p for pkg in packages for p in (root / pkg).rglob("*.py")]
-    sources += list(root.glob("*.py"))
-
-    def imports_debt(tree):
-        """Real imports only — a prose mention in a comment or docstring
-        is documentation, not wiring."""
-        for node in ast.walk(tree):
-            if isinstance(node, ast.Import):
-                if any(a.name in ("model.debt", "debt") for a in node.names):
-                    return True
-            elif isinstance(node, ast.ImportFrom):
-                if node.module == "model.debt":
-                    return True
-                if node.module == "model" and any(a.name == "debt"
-                                                  for a in node.names):
-                    return True
-        return False
-
-    offenders = []
-    for path in sources:
-        if path.name == "debt.py" and path.parent.name == "model":
-            continue
-        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
-        if imports_debt(tree):
-            offenders.append(str(path.relative_to(root)))
-    assert offenders == [], f"E1 is not wired yet, but found: {offenders}"

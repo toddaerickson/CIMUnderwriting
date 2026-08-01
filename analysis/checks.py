@@ -368,14 +368,29 @@ def _exit_cap_coercion(inp):
 
 
 def _sources_uses_ties(inp):
-    """Total Uses = Total Sources = the DCF's total basis.
+    """Total Uses = Total Sources = the DCF's total basis + financing costs.
 
     Unlike every other check here, this one tests arithmetic the pipeline
     performed on itself rather than an analyst's input — so a failure is a
     bug, not a bad number, which is exactly why it carries the loud
-    severity. It is also the seam item E1 will change: the day debt and
-    financing costs stop being zero, this is what refuses to let the
-    capital stack and the returns model quietly disagree.
+    severity.
+
+    **Why the identity carries a financing term.** E1 measured that
+    handing `build_debt_schedule`'s `financing_costs` to
+    `build_sources_uses` broke this check by exactly the origination fee:
+    the fee is a use of funds, but `project_cash_flows` computes
+    `total_basis = price + capex + acquisition_cost + reserve` and has no
+    financing term. E1's handoff prescribed adding one to the projection.
+    The operator reversed that on 2026-08-01 (item E3a): an origination
+    fee inside `total_basis` makes the PRIMARY unlevered IRR screen move
+    the moment a deal names a loan, and an unlevered return charged a
+    financing fee is not an unlevered return. So the identity moved and
+    the projection did not.
+
+    The check is no weaker for it — it is still exact to the cent, and it
+    still refuses to let the capital stack and the returns model disagree.
+    It now says which of the two is allowed to differ, and by precisely
+    what.
     """
     su = inp.sources_uses or {}
     if not su:
@@ -383,11 +398,13 @@ def _sources_uses_ties(inp):
                          "reconcile.", {})
     uses = su.get("total_uses")
     sources = su.get("total_sources")
-    bases = sorted({round(float(s["total_basis"]), 2)
+    financing = float(su.get("financing_costs") or 0.0)
+    bases = sorted({round(float(s["total_basis"]) + financing, 2)
                     for s in (inp.scenarios or {}).values()
                     if isinstance(s, dict) and s.get("total_basis") is not None})
     values = {"total_uses": uses, "total_sources": sources,
-              "scenario_bases": bases,
+              "financing_costs": financing,
+              "scenario_bases_plus_financing": bases,
               "tolerance": SOURCES_USES_TOLERANCE_ABS}
     if uses is None or sources is None:
         return (SKIPPED, "Sources & Uses is missing a total.", values)
@@ -407,14 +424,19 @@ def _sources_uses_ties(inp):
         problems.append("scenarios disagree on total basis ("
                         + ", ".join(f"${b:,.2f}" for b in bases) + ")")
     elif abs(uses - bases[0]) > SOURCES_USES_TOLERANCE_ABS:
-        problems.append(f"Uses ${uses:,.2f} vs DCF basis ${bases[0]:,.2f}")
+        problems.append(
+            f"Uses ${uses:,.2f} vs DCF basis + financing costs "
+            f"${bases[0]:,.2f} (basis ${bases[0] - financing:,.2f} + "
+            f"financing ${financing:,.2f})")
     if problems:
         return (FAIL, "The capital stack does not tie to the returns model: "
                       + "; ".join(problems) + ". Every return is computed on "
                       "the DCF basis, so a stack that disagrees with it is "
                       "describing a different deal.", values)
+    tail = (f" (DCF basis ${bases[0] - financing:,.0f} + financing costs "
+            f"${financing:,.0f})") if financing else ""
     return (PASS, f"Uses, Sources and the DCF basis all equal "
-                  f"${uses:,.0f}.", values)
+                  f"${uses:,.0f}{tail}.", values)
 
 
 def _price_vs_replacement(inp):

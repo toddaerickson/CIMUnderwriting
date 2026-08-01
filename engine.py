@@ -36,6 +36,13 @@ class AnalysisResult:
     va_results: dict = field(default_factory=dict)
     # Capital stack (model.returns_model.build_sources_uses)
     sources_uses: dict = field(default_factory=dict)
+    # Levered lens (item E3a). `debt` is the one sized loan; `levered` is
+    # per-scenario equity cash flow + LP waterfall. The UNLEVERED screen
+    # above stays primary — financing costs are deliberately absent from
+    # every `total_basis`, so nothing in `scenario_results` moves when a
+    # deal carries debt.
+    debt: dict = field(default_factory=dict)
+    levered: dict = field(default_factory=dict)
     # Solver
     max_offer: dict = field(default_factory=dict)
     va_max_offer: dict = field(default_factory=dict)
@@ -136,7 +143,10 @@ def run_analysis(result: AnalysisResult, progress: Callable = None,
                   expense_line_overrides: dict = None,
                   hold_years: int = None,
                   transaction_costs: dict = None,
-                  capital_structure: dict = None) -> AnalysisResult:
+                  capital_structure: dict = None,
+                  debt_terms: dict = None,
+                  waterfall_terms: dict = None,
+                  am_fee_pct: float = None) -> AnalysisResult:
     """
     Run full analysis pipeline on an already-extracted CIMData.
 
@@ -173,6 +183,17 @@ def run_analysis(result: AnalysisResult, progress: Callable = None,
             rather than patched into config for the reason spelled out in
             config.py: a patched dict is shared mutable state across
             concurrent runs.
+        debt_terms: per-analysis override of config.DEBT_TERMS (item
+            E3a). A partial dict is merged onto the defaults. The levered
+            lens is ON by default, so None means "size the loan at the
+            config terms", not "run this deal unlevered".
+        waterfall_terms: per-analysis override of config.WATERFALL_TERMS.
+            `gp_coinvest_pct` is NOT read from here — it comes from
+            `capital_structure`, so the capital stack and the waterfall
+            cannot disagree about whose equity it is.
+        am_fee_pct: per-analysis annual management fee rate; None keeps
+            config.AM_FEE_PCT. Charged above the waterfall, on invested
+            equity measured at the start of each period.
 
     Returns:
         Updated AnalysisResult with all analysis fields populated
@@ -274,7 +295,19 @@ def run_analysis(result: AnalysisResult, progress: Callable = None,
                 f"basis. Re-enter it in dollars or restore the missing field.")
 
     if result.adjusted_noi and asking > 0:
+        from model.debt import resolve_debt_terms
         from model.returns_model import build_returns_model
+        from model.waterfall import resolve_waterfall_terms
+
+        # The waterfall's co-invest comes from the DEAL, never from
+        # config: `resolve_capital_structure` already resolved it above
+        # and `build_sources_uses` splits the equity by it. Resolved
+        # without `capital_structure=`, a deal edited to 25% would print
+        # a stack split 25/75 beside an LP net IRR computed on 10/90.
+        resolved_debt_terms = resolve_debt_terms(debt_terms)
+        resolved_waterfall_terms = resolve_waterfall_terms(
+            waterfall_terms, capital_structure=capital)
+
         model = build_returns_model(
             adjusted_ttm_noi=result.adjusted_noi,
             asking_price=asking,
@@ -287,10 +320,15 @@ def run_analysis(result: AnalysisResult, progress: Callable = None,
             reserve=reserve,
             gp_coinvest_pct=capital["gp_coinvest_pct"],
             capex_pct_of_price=capex_pct_of_price,
+            debt_terms=resolved_debt_terms,
+            waterfall_terms=resolved_waterfall_terms,
+            am_fee_pct=am_fee_pct,
         )
         result.scenario_results = model["scenarios"]
         result.sensitivity = model["sensitivity"]
         result.sources_uses = model["sources_uses"]
+        result.debt = model["debt"]
+        result.levered = model["levered"]
 
         # Step 6: Value-add
         _progress(6, 9, "Checking value-add potential...")

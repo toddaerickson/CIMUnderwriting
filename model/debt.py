@@ -33,7 +33,7 @@ reproduced to the cent in the test module.
 
 import logging
 import math
-from dataclasses import dataclass, fields
+from dataclasses import asdict, dataclass, fields
 
 import config as cfg
 
@@ -509,7 +509,17 @@ def build_debt_schedule(price: float, y1_noi: float, terms: DebtTerms, *,
     return {
         **sized,
         **schedule,
-        "terms": terms,
+        # A plain dict, not the frozen dataclass — the same fix E2 made to
+        # `run_waterfall` after finding it the hard way.
+        # `webapp.services.json_safe` falls back to `str(obj)` on anything
+        # it does not recognise, so the object persisted to JSONB as the
+        # string "DebtTerms(rate=0.0625, ...)": unqueryable, and a consumer
+        # reading `["terms"]["rate"]` got "string indices must be
+        # integers". It degraded silently rather than raising. Item E3a is
+        # what first persists this payload, so the fix lands with it.
+        # The caller that passed `terms` in still has the object;
+        # `DebtTerms(**result["terms"])` rebuilds it.
+        "terms": asdict(terms),
         "origination_fee": origination_fee,
         "exit_fee": exit_fee,
         "financing_costs": origination_fee,

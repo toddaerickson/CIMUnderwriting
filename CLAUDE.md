@@ -100,7 +100,15 @@ analysis/
   risks.py                 # Risk identification
 model/
   returns_model.py         # Unlevered DCF wrapper + sensitivity grid: Bear/Base/Bull
-  solver.py                # Bisection solver: max price for 10% IRR
+                           #   + Sources & Uses; sizes the ONE loan off the base case
+  debt.py                  # Debt layer — min-of-three sizing (LTV/DSCR/debt yield),
+                           #   monthly amortization roll-forward, origination/exit fees
+  waterfall.py             # Single-tier LP waterfall — pref accrual, promote on the
+                           #   LP-attributable residual, LP net IRR/MOIC
+  levered.py               # The seam: levered equity CF, AM fee, reserve draw vs
+                           #   capital call, then the waterfall. Assembles only —
+                           #   it sizes no loan and distributes no dollar itself.
+  solver.py                # Bisection solver: max price for 10% IRR (still unlevered)
 output/
   memo_writer.py           # Generates .docx from analysis outputs
   excel_writer.py          # Generates .xlsx returns model
@@ -152,13 +160,45 @@ output/
    can and flags gaps. Claude Code fills in missing data from PDF context.
 2. **Analyst-adjusted NOI**: Never trust CIM expenses at face value. Uses
    max(CIM expense, benchmark midpoint) for lines that appear understated.
-3. **All returns unlevered**: IRR and MOIC ignore debt. Total basis =
-   price + CapEx + acquisition closing costs; exit is net of disposition
-   costs. `analysis.valuation.project_cash_flows` is the ONE projection —
-   the scenario engine, the sensitivity grid and both solvers call it, and
-   a second copy of that loop is how they drifted last time.
+3. **The unlevered screen is primary and stays financing-free**: the
+   headline IRR and MOIC ignore debt. Total basis = price + CapEx +
+   acquisition closing costs + operating reserve; exit is net of
+   disposition costs. **Financing costs are deliberately NOT in it** —
+   an origination fee inside `total_basis` would move the primary 10%
+   IRR gate the moment a deal named a loan, and an unlevered return
+   charged a financing fee is not an unlevered return (item E3a,
+   operator's call 2026-08-01, reversing E1's handoff). The Sources &
+   Uses tie carries the term instead:
+   `Total Uses == total_basis + financing_costs`, checked to the cent by
+   `analysis.checks.sources_uses_ties`.
+   `analysis.valuation.project_cash_flows` is the ONE projection — the
+   scenario engine, the sensitivity grid and both solvers call it, and a
+   second copy of that loop is how they drifted last time.
 4. **Exit cap ≥ entry cap** in base and bear cases.
-5. **Bisection solver**: Deterministic, 20 iterations to 0.1% precision.
+5. **Exit NOI is TRAILING, not forward**: `project_cash_flows`
+   capitalizes the terminal hold year's OWN NOI (`noi_series[-1]`; year 5
+   on a 5-year hold). `docs/levered-waterfall-design.md` and its
+   reproduction in `tests/test_debt.py` (oracle 5) capitalize **year 6**,
+   which is about 3% higher. Both are deliberate and both are tested —
+   the debt module is exercised in isolation and never calls the
+   canonical projection, while `tests/test_levered.py` pins the trailing
+   convention the wiring actually uses. **If a levered figure looks ~3%
+   off against the design doc, this is why, and it is not a bug in the
+   debt math.** The underwriting judgment — a buyer at the end of year 5
+   prices on year 6's NOI, which is the institutional norm — is deferred,
+   not settled. Do not switch it silently.
+6. **Levered returns are a second lens, on by default**: every deal is
+   sized at `config.DEBT_TERMS` and carries an LP net IRR, but the
+   unlevered screen above is unaffected by it. The loan is sized ONCE off
+   the base case and carried through bear/base/bull — sizing per scenario
+   would hand the bear case a smaller loan and flatten its own downside.
+   Leverage is allowed to be dilutive and the model says so when it is.
+7. **No LP net IRR without its assumption stamp**: five LPA questions are
+   still open and each changes the number, so `model.levered` renders the
+   resolved set beside every levered figure — including the AM fee's rate
+   and base, which is what makes "net" mean anything.
+8. **Bisection solver**: Deterministic, 20 iterations to 0.1% precision.
+   Still targets the UNLEVERED IRR; item E4 retargets it to LP net.
 
 ## Manual steps flagged by the program
 - Population verification (if not in CIM)

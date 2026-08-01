@@ -23,7 +23,9 @@ from django.utils import timezone
 
 import config as cfg
 from analysis.valuation import resolve_hold_years, resolve_transaction_costs
+from model.debt import resolve_debt_terms
 from model.returns_model import resolve_capital_structure
+from model.waterfall import resolve_waterfall_terms
 from engine import (AnalysisResult, _apply_overrides, extract_pdf_data,
                     run_analysis)
 from webapp.models import Deal
@@ -760,9 +762,27 @@ def _analysis_worker(run_pk):
         # cannot disagree: file default ← global ConfigOverride delta ←
         # per-deal override, then passed down whole.
         txn_costs = resolve_run_transaction_costs(patch, overrides)
+        # Debt and waterfall terms are stamped RESOLVED, like hold_years
+        # and transaction costs, for the same reason: item E3a changed
+        # what every levered figure means, so a run that recorded nothing
+        # because it sat on the defaults would be indistinguishable from
+        # a pre-E3a run instead of self-describing. `gp_coinvest_pct` is
+        # deliberately absent from the debt/waterfall override dicts —
+        # it lives in `capital_structure`, and a second copy is the
+        # divergence the single-source-of-truth rule forbids.
+        debt_terms = dataclasses.asdict(
+            resolve_debt_terms(overrides.get("debt_terms")))
+        waterfall_terms = dataclasses.asdict(resolve_waterfall_terms(
+            overrides.get("waterfall_terms"), capital_structure=capital))
+        am_fee_pct = overrides.get("am_fee_pct")
         stamped = {**overrides, "hold_years": hold_years,
                    "transaction_costs": txn_costs,
-                   "capital_structure": capital}
+                   "capital_structure": capital,
+                   "debt_terms": debt_terms,
+                   "waterfall_terms": waterfall_terms,
+                   "am_fee_pct": (cfg.AM_FEE_PCT if am_fee_pct is None
+                                  else am_fee_pct),
+                   "am_fee_base": cfg.AM_FEE_BASE}
         # A per-deal cost supersedes the global row for THAT key, so the
         # global value must not be stamped as applied — same rule as
         # SOLVER_TARGET_IRR above, but key-level, because transaction
@@ -789,6 +809,9 @@ def _analysis_worker(run_pk):
                     hold_years=hold_years,
                     transaction_costs=txn_costs,
                     capital_structure=capital,
+                    debt_terms=overrides.get("debt_terms"),
+                    waterfall_terms=overrides.get("waterfall_terms"),
+                    am_fee_pct=am_fee_pct,
                 )
 
         meta = build_deal_meta(cim, result, deal.deal_dir,

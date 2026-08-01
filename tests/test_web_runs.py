@@ -235,7 +235,8 @@ def fake_run(monkeypatch):
     def _fake(result, progress=None, output_dir=None, custom_scenarios=None,
               custom_va_scenarios=None, solver_target_irr=None, enrich=False,
               expense_line_overrides=None, hold_years=None,
-              transaction_costs=None, capital_structure=None):
+              transaction_costs=None, capital_structure=None,
+              debt_terms=None, waterfall_terms=None, am_fee_pct=None):
         calls["cim_data"] = result.cim_data
         calls["output_dir"] = output_dir
         calls["custom_scenarios"] = custom_scenarios
@@ -243,6 +244,9 @@ def fake_run(monkeypatch):
         calls["solver_target_irr"] = solver_target_irr
         calls["enrich"] = enrich
         calls["expense_line_overrides"] = expense_line_overrides
+        calls["debt_terms"] = debt_terms
+        calls["waterfall_terms"] = waterfall_terms
+        calls["am_fee_pct"] = am_fee_pct
         if progress:
             progress(9, 9, "Generating memo & model...")
         name = result.cim_data.property_name.replace(" ", "_")
