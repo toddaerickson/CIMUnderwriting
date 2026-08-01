@@ -26,7 +26,6 @@ def solve_max_price(adjusted_ttm_noi: float,
                     transaction_costs: dict = None,
                     reserve: float = 0.0,
                     capex_pct_of_price: float = None,
-                    exit_cap: float = None,
                     market_cap: dict = None) -> dict:
     """
     Find the maximum purchase price that delivers the target IRR.
@@ -75,9 +74,9 @@ def solve_max_price(adjusted_ttm_noi: float,
     # 50 lookups to return the same number. The entry-cap coercion inside
     # project_cash_flows still moves with price; that is deliberate and is
     # what makes the objective piecewise (see the convergence note above).
-    if exit_cap is None:
-        mc = market_cap or resolve_market_cap()
-        exit_cap = resolve_exit_cap(mc["market_cap"], scenario, hold_years)["exit_cap"]
+    mc = market_cap or resolve_market_cap()
+    exit_cap = resolve_exit_cap(mc["market_cap"], scenario,
+                                hold_years)["exit_cap"]
 
     def capex_at(price: float) -> float:
         return (price * capex_pct_of_price if capex_pct_of_price

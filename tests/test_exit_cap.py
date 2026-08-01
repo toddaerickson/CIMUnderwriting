@@ -462,6 +462,49 @@ def test_the_register_carries_both_engines_at_once():
     assert set(r.values["scenarios"]) == {"base", "value-add base"}
 
 
+# ── 8. Both orchestrations resolve, and resolve the same way ─────────
+
+def test_the_cli_resolves_an_anchor_for_every_consumer():
+    """`run.py` is a SECOND orchestration — it does not call
+    `engine.run_analysis` — so it has to resolve the anchor itself. It
+    did not at first, and every CLI deal silently priced off the fallback
+    'old' band no matter what the CIM said the year built was.
+
+    Reads the source rather than driving the CLI, which wants a PDF and a
+    comp DB. What it pins is the wiring: an anchor resolved once, and no
+    consumer left reading the default.
+    """
+    import inspect
+
+    import run as cli
+
+    src = inspect.getsource(cli.stage_valuate)
+    assert "resolve_market_cap(" in src
+    # build_returns_model, run_value_add_scenarios, solve_max_price and
+    # solve_max_price_value_add. An exact count so a fifth consumer added
+    # without the anchor fails here rather than in a published memo.
+    assert src.count("market_cap=ctx.market_cap") == 4
+
+
+def test_both_orchestrations_name_the_same_consumers():
+    """engine.run_analysis and run.stage_valuate must hand the anchor to
+    the same set of engines. A consumer added to one and not the other is
+    how the web app and the CLI would start pricing a deal differently."""
+    import inspect
+
+    import engine
+    import run as cli
+
+    engine_src = inspect.getsource(engine.run_analysis)
+    cli_src = inspect.getsource(cli.stage_valuate)
+    for consumer in ("build_returns_model", "run_value_add_scenarios",
+                     "solve_max_price"):
+        assert consumer in engine_src, consumer
+        assert consumer in cli_src, consumer
+    # and neither leaves a solver to fall back to the default anchor
+    assert "market_cap" in engine_src and "market_cap" in cli_src
+
+
 def test_market_exit_cap_is_advisory_not_blocking():
     """Blocking is reserved for identities the pipeline computes on
     itself (see `_sources_uses_ties`). An anchor is an input."""
