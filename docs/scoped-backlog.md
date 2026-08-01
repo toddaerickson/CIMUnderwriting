@@ -13,6 +13,11 @@ Only the five items the operator selected are scoped here (a, b, d, e, g of the
 triage). Items c (property-tax millage), f (exit-cap comp panel) and h (CapEx
 input toggle) stay in the loose queue.
 
+Item T (transparency consolidation) joined 2026-08-01, sourced from a
+hard-coded-assumptions audit of the pipeline rather than the TSM triage. Its
+one sequencing-sensitive piece — `output/template_writer.py` — is folded into
+E3b; the rest queues behind E4/G.
+
 ## Build order
 
 Dependencies are real, not preference — B extracts the shared cash-flow
@@ -28,9 +33,12 @@ projection that D, E and G all read from.
 | E2 | Single-tier waterfall (`model/waterfall.py`) | E1 | Medium | **High-risk** |
 | E3 | Levered wiring — E3a levered seam ⚑ shipped; E3b surfaces + XLSM de-literalization | E2, D | Medium-large | **High-risk** |
 | E4 | Solver retargeted to LP net IRR | E3 | Small | **High-risk** |
+| T | Transparency consolidation (audit remediation) | E4 | Large | **High-risk** (live literals) |
 
-Sequence: **A → B → D → E1 → E2 → E3 → E4 → G**. A goes first because it is the
-cheapest and because its checks guard B's arithmetic while B changes it.
+Sequence: **A → B → D → E1 → E2 → E3 → E4 → G → T**. A goes first because it is the
+cheapest and because its checks guard B's arithmetic while B changes it. T
+queues last: it touches live literals across analysis/, model/ and output/ and
+must not collide with the capital-structure build-out it remediates.
 
 **G moved after E** (revised 2026-07-31; the table above still lists G's hard
 dependency as D, which remains true). The table's "(E preferred)" note
@@ -411,6 +419,104 @@ The build is not blocked; the distribution is.
 message length) — assert the page count, do not eyeball it. Every number on the
 page reads from the same result dict the IC memo uses; no recomputation, no
 second source of truth. Degrades cleanly when the levered layer is absent.
+
+---
+
+## T. Transparency consolidation — one assumptions register, no shadow defaults
+
+**Why.** The 2026-08-01 audit of valuation/modeling literals found roughly
+fifty hard-coded assumptions outside [config.py](../config.py). The most
+corrosive kind is not the missing key but the duplicated one: a value config
+owns that the code restates as a literal, so a user who overrides it in
+settings changes some outputs and not others — the UI claims the override
+works and the model proves otherwise. The second kind is the silent fallback
+(`or 0.90`, `or 0.80` vs `or 0.85` on the same field, `or 100_000`, `or 1`,
+market rent defaulting to in-place rent) that fabricates an input instead of
+failing — each an undisclosed assumption. The `template_writer.py` slice of
+the audit is folded into E3b; everything else lands here.
+
+**Prerequisite — the characterization safety net, first task of this item.**
+Every change below touches a live literal. Before any of them: fixture deals
+(stabilized, value-add, thin-data) run end-to-end with gates, NOI series,
+scenario IRRs, max offers, sensitivity grids and memo/excel outputs
+snapshotted. Each subsequent change must either reproduce its snapshot
+byte-for-byte (a pure literal→config move) or change it deliberately, with
+the delta enumerated in the PR. This is item B's "costs at 0 reproduce every
+oracle" discipline applied to the whole pipeline.
+
+**Scope.**
+
+1. **Category 1 — kill the duplicates.** `analysis/risks.py` NOI step-up
+   0.15 → `GATES["max_noi_step_up"]`; the population literals in
+   `analysis/market.py` and `risks.py` → `GATES["population_3mi"]`; the four
+   hard-coded 5%-of-EGR management-fee targets in `analysis/financials.py`
+   and `value_add.py` → the benchmark band; memo/excel "10% IRR"
+   recommendation threshold, labels, sensitivity colors and the VA max-offer
+   caption → `SOLVER_TARGET_IRR` / `GATES["min_irr_5yr"]`;
+   `model/value_add_model.py` imports `COERCED_SCENARIOS` instead of
+   re-declaring it. Gate names and risk strings become f-strings over the
+   config values, so labels cannot drift from the tests they describe.
+2. **`analysis/value_add.py` consolidation** — an entire assumptions layer
+   with no config home: the occupancy-target policy, spread-recovery
+   haircut, ECRI trigger/impact, ancillary thresholds, and the renovation
+   cost schedule with its age triggers become `VALUE_ADD_ASSUMPTIONS` /
+   `RENOVATION_COST` config sections (its `EXPENSE_BENCHMARKS` import sits
+   unused today). The three divergent building-age taxonomies
+   (value_add 20/15/10, physical 5/15/30, risks 25) reconcile to one
+   schedule.
+3. **Model-layer hard-codes.** Solver brackets → one `SOLVER_BOUNDS` config
+   pair used by both solvers (today static and value-add disagree: NOI/0.03
+   vs NOI/0.02); sensitivity-grid axes → `SENSITIVITY_GRID`; `registry.py`'s
+   `DEFAULT_EXPENSE_RATIO` / `EXPENSE_RATIO_CLAMP` move to config and
+   reconcile with `EXPENSE_BENCHMARKS["opex_revenue_ratio"]` — one statement
+   of the default, the clamp bounds, and their relation to the benchmark
+   band; the frozen import-time `SOLVER_TARGET_IRR` binding in
+   `model/solver.py` resolves at call time (the pattern `GP_COINVEST_PCT`
+   already uses), and the `engine.py` truthiness guard becomes `is not None`
+   so a 0.0 target is passable.
+4. **Loud fallbacks.** One `assumption_fill_log`: any fallback that fires
+   (occupancy, market rent, mgmt fee, entry cap) records (field, value used,
+   source key) and surfaces in the results UI and the memo appendix.
+   `nrsf or 1` and `ttm_noi or 100_000` are deleted — a deal without NRSF or
+   NOI fails; it is not underwritten as a 1-SF / $100k fiction. The
+   zero-rent-gap market-rent fallback gains an explicit flag: "rent ramp
+   excluded — no market-rent data."
+5. **Reconciliations, decided once in config:** "stabilized" occupancy —
+   0.85 (gate) vs 0.88 (VA target/template) vs 0.90/0.93 (value_add
+   targets) — and the mgmt-fee adjustment target (benchmark floor vs 5%).
+   E3b reads whatever keys exist; this item owns the definitions.
+6. **Memo assumptions appendix.** Every number that moved an output, its
+   value, and its provenance (config default / ConfigOverride / deal
+   override / CIM datum / fallback + flag) rendered as a memo section —
+   E2's assumption stamp extended to the whole model, and the transparency
+   requirement made auditable in one place.
+
+**Out of scope.** `output/template_writer.py` (item E3b). The Python↔XLSM
+formula-parity harness (E3b stretch). Re-underwriting any default — this
+item moves values into config and labels them; what the values *should be*
+is a separate, per-value decision. New modeling capability of any kind.
+
+**Files.** [config.py](../config.py), [registry.py](../registry.py),
+`analysis/{risks,market,value_add,financials,filters,valuation}.py`,
+`model/{solver,returns_model,value_add_model}.py`, [engine.py](../engine.py),
+[context.py](../context.py), `output/{memo_writer,excel_writer}.py`,
+[webapp/services.py](../webapp/services.py) (the cc_pct classification
+threshold), tests.
+
+**Acceptance.**
+- Characterization snapshots exist and are green before the first literal
+  moves; every later delta is enumerated and argued in its PR.
+- A grep/AST sweep finds no numeric modeling literals outside `config.py`
+  and `registry.py`'s non-valuation constants — enforced by a CI test, not
+  by inspection.
+- Override round-trip: for each formerly-duplicated key, a ConfigOverride
+  delta changes every output the audit found divergent (step-up flag,
+  population gate and labels, memo recommendation threshold, sensitivity
+  coloring).
+- Fallback drill: a fixture missing occupancy / market rent / NRSF produces
+  the fill log in the UI and the memo, and hard-fails on NRSF/NOI.
+- The memo appendix lists every assumption its own run used, with
+  provenance — an IC reviewer can audit every number in one place.
 
 ---
 
