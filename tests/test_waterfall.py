@@ -234,9 +234,21 @@ def test_lp_returns_are_invariant_to_gp_coinvest():
 # ── Accrual timing ──────────────────────────────────────────────────
 
 def test_period_zero_does_not_accrue():
-    """Capital contributed at close has been in the deal for zero days."""
+    """Capital contributed at close has been in the deal for zero days.
+
+    Asserting `pref_accrued == 0.0` alone proves nothing — at period 0
+    the balance is still zero when the accrual step runs, so it would
+    read 0.0 with or without the guard. What actually enforces the
+    convention is the STEP ORDER (accrue, then call capital), so this
+    also pins the observable consequence: the full $1,000,000 sits in
+    period 0's ending balance with not one cent of pref on top of it.
+    """
     for terms in (ORACLE_1, ORACLE_2, ORACLE_3):
-        assert _run(terms)["periods"][0]["pref_accrued"] == 0.0
+        opening = _run(terms)["periods"][0]
+        assert opening["pref_accrued"] == 0.0
+        assert opening["ending_balance"] == pytest.approx(1_000_000.00,
+                                                          abs=CENT)
+        assert opening["ending_unpaid_pref"] == pytest.approx(0.0, abs=CENT)
 
 
 def test_a_mid_stream_capital_call_starts_accruing_the_following_period():
