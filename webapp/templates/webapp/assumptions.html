@@ -272,9 +272,22 @@
             </table>
           </div>
         </details>
-        <label class="grid grid-cols-[9rem_1fr] items-center gap-x-2 text-xs text-slate-600 max-w-xs"><span>Solver Target IRR (%)</span>
-          {{ solver_field }}
-        </label>
+        <div class="mt-2 pt-2 border-t border-slate-100">
+          <div class="text-xs font-medium text-slate-700 mb-1">Timing &amp; Transaction Costs</div>
+          <div class="grid gap-x-4 gap-y-1.5 grid-cols-[repeat(auto-fit,minmax(min(16rem,100%),1fr))]">
+            <label class="grid grid-cols-[10rem_1fr] items-center gap-x-2 text-xs text-slate-600"><span>Hold Period (yrs)</span>
+              {{ hold_years_field }}
+            </label>
+            {% for f in txn_cost_fields %}
+            <label class="grid grid-cols-[10rem_1fr] items-center gap-x-2 text-xs text-slate-600"><span>{{ f.label }}</span>
+              {{ f.field }}
+            </label>
+            {% endfor %}
+            <label class="grid grid-cols-[10rem_1fr] items-center gap-x-2 text-xs text-slate-600"><span>Solver Target IRR (%)</span>
+              {{ solver_field }}
+            </label>
+          </div>
+        </div>
       </div>
     </details>
 

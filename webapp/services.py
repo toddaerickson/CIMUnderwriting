@@ -196,7 +196,7 @@ def json_safe(obj):
 # safe by construction.)
 _PATCHED_DICTS = ("GATES", "EXPENSE_BENCHMARKS", "REPLACEMENT_COST",
                   "SCENARIO_DEFAULTS", "VALUE_ADD_SCENARIOS",
-                  "VALUE_ADD_TRIGGERS")
+                  "VALUE_ADD_TRIGGERS", "TRANSACTION_COSTS")
 _ORIG_CONFIG = {n: copy.deepcopy(getattr(cfg, n)) for n in _PATCHED_DICTS}
 _ANALYSIS_LOCK = threading.Lock()
 
@@ -687,10 +687,27 @@ def _analysis_worker(run_pk):
         # never used. The winner is already recorded under "assumptions".
         if overrides.get("solver_target_irr"):
             applied.pop("SOLVER_TARGET_IRR", None)
+        # Timing and round-trip costs are stamped with their RESOLVED
+        # values, not as deltas. Item B changed every published IRR, so a
+        # run recording nothing because it sat on the defaults would be
+        # indistinguishable from a pre-item-B run rather than
+        # self-describing. Deltas elsewhere; the truth here.
+        from analysis.valuation import (resolve_hold_years,
+                                        resolve_transaction_costs)
+        hold_years = resolve_hold_years(overrides.get("hold_years"))
+        # Resolved here, not inside the engine, so the stamp and the run
+        # cannot disagree: file default ← global ConfigOverride delta ←
+        # per-deal override, then passed down whole.
+        txn_costs = resolve_transaction_costs({
+            **patch.get("TRANSACTION_COSTS", {}),
+            **(overrides.get("transaction_costs") or {}),
+        })
+        stamped = {**overrides, "hold_years": hold_years,
+                   "transaction_costs": txn_costs}
         AnalysisRun.objects.filter(pk=run_pk).update(
             applied_overrides=json_safe(
                 {"config": applied, "config_skipped": skipped,
-                 "assumptions": overrides}))
+                 "assumptions": stamped}))
 
         with _ANALYSIS_LOCK:
             with _patched_config(patch):
@@ -702,6 +719,8 @@ def _analysis_worker(run_pk):
                     enrich=True,
                     expense_line_overrides=overrides.get(
                         "expense_line_overrides"),
+                    hold_years=hold_years,
+                    transaction_costs=txn_costs,
                 )
 
         meta = build_deal_meta(cim, result, deal.deal_dir,

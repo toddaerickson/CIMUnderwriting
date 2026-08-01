@@ -471,6 +471,45 @@ def test_save_rc_and_solver_deltas(client, operator, deals_dir, fake_extract):
 
 
 @pytest.mark.django_db
+def test_save_hold_period_and_transaction_cost_deltas(client, operator,
+                                                      deals_dir, fake_extract):
+    """Item B's three scalars round-trip through the assumptions form.
+    Percentages follow the module's whole-number-in / decimal-stored
+    convention; hold_years is a plain integer and must not be scaled."""
+    deal = _extracted_deal(client, deals_dir, fake_extract)
+    _post_assumptions(client, deal, {"hold_years": "7",
+                                     "acquisition_closing_pct": "2.5",
+                                     "disposition_cost_pct": "3"})
+    deal.refresh_from_db()
+    o = deal.assumption_overrides
+    assert o["hold_years"] == 7
+    assert o["transaction_costs"] == {"acquisition_closing_pct": 0.025,
+                                      "disposition_cost_pct": 0.03}
+
+
+@pytest.mark.django_db
+def test_defaults_are_not_saved_as_deltas(client, operator, deals_dir,
+                                          fake_extract):
+    """Deltas only — a form posted at the defaults stores no override."""
+    deal = _extracted_deal(client, deals_dir, fake_extract)
+    _post_assumptions(client, deal)
+    deal.refresh_from_db()
+    o = deal.assumption_overrides
+    assert "hold_years" not in o
+    assert "transaction_costs" not in o
+
+
+@pytest.mark.django_db
+def test_hold_period_outside_range_is_rejected_by_the_form(client, operator,
+                                                           deals_dir,
+                                                           fake_extract):
+    deal = _extracted_deal(client, deals_dir, fake_extract)
+    _post_assumptions(client, deal, {"hold_years": "25"})
+    deal.refresh_from_db()
+    assert "hold_years" not in (deal.assumption_overrides or {})
+
+
+@pytest.mark.django_db
 def test_saved_values_render_on_next_get(client, operator, deals_dir, fake_extract):
     deal = _extracted_deal(client, deals_dir, fake_extract)
     _post_assumptions(client, deal, {"physical_occupancy": "85"})

@@ -54,6 +54,8 @@ def generate_template(
     max_offer: dict = None,
     output_dir: str = ".",
     property_name: str = "",
+    hold_years: int = None,
+    transaction_costs: dict = None,
 ) -> str:
     """
     Copy the XLSM template and populate input cells with CIM data.
@@ -65,10 +67,18 @@ def generate_template(
         max_offer: dict with max price solver results
         output_dir: directory to write the output file
         property_name: display name for the property
+        hold_years: hold period; drives the template's sale month (D182)
+        transaction_costs: override of config.TRANSACTION_COSTS; the
+            disposition percentage drives the template's cost of sale
+            (K182), which was hardcoded at 3.5%
 
     Returns:
         Path to the generated .xlsm file
     """
+    from analysis.valuation import (resolve_hold_years,
+                                    resolve_transaction_costs)
+    hold_years = resolve_hold_years(hold_years)
+    costs = resolve_transaction_costs(transaction_costs)
     if not os.path.exists(TEMPLATE_PATH):
         raise FileNotFoundError(f"Template not found: {TEMPLATE_PATH}")
 
@@ -85,7 +95,7 @@ def generate_template(
     ws_summary = wb["Summary"]
 
     # Populate sections
-    _write_property_description(ws, cim_data)
+    _write_property_description(ws, cim_data, hold_years)
     _write_investment_cf(ws, cim_data)
     _write_financing_defaults(ws)
     _write_growth_rates(ws)
@@ -95,7 +105,7 @@ def generate_template(
     _write_vacancy(ws, cim_data)
     _write_opex(ws, cim_data, financial_analysis)
     _write_capex(ws, cim_data)
-    _write_reversion(ws, cim_data, financial_analysis)
+    _write_reversion(ws, cim_data, financial_analysis, costs)
     _write_waterfall(ws)
     _write_summary_notes(ws_summary, cim_data)
 
@@ -108,7 +118,7 @@ def generate_template(
 
 # ── Property Description (rows 7-18) ─────────────────────────────────
 
-def _write_property_description(ws, cim_data):
+def _write_property_description(ws, cim_data, hold_years: int):
     """Fill property description section."""
     name = cim_data.property_name or ""
     ws["F8"] = name
@@ -136,8 +146,8 @@ def _write_property_description(ws, cim_data):
         start = datetime(today.year, today.month + 1, 1)
     ws["F17"] = start
 
-    # Sale month: 60 (5-year hold)
-    ws["D182"] = 60
+    # Sale month — the hold period as the template expresses it.
+    ws["D182"] = hold_years * 12
 
 
 # ── Investment Cash Flows (rows 20-47) ───────────────────────────────
@@ -356,7 +366,7 @@ def _write_capex(ws, cim_data):
 
 # ── Reversion / Sale Assumptions ─────────────────────────────────────
 
-def _write_reversion(ws, cim_data, financial_analysis: dict):
+def _write_reversion(ws, cim_data, financial_analysis: dict, costs: dict):
     """Set cap rate and sale assumptions."""
     noi = financial_analysis.get("adjusted_ttm_noi", {}).get("analyst_adjusted_noi")
     price = cim_data.asking_price
@@ -369,7 +379,14 @@ def _write_reversion(ws, cim_data, financial_analysis: dict):
 
     ws["K180"] = round(entry_cap, 4)     # Market cap rate today
     # K181 is formula = K180 + 0.005 (terminal cap = entry + 50bps)
-    ws["K182"] = 0.035                   # Selling costs
+    #
+    # K182 is the template's cost of sale — the cell our disposition
+    # assumption belongs in. (The scoped backlog pointed at F254 in the
+    # waterfall block instead; that is the GP disposition FEE, part of the
+    # promote structure, correctly left at 0 because we model no GP fees.
+    # Writing the broker cost there would leave this 3.5% still charging
+    # and double-count the sale.)
+    ws["K182"] = round(costs["disposition_cost_pct"], 4)
 
 
 # ── Distribution Waterfall (rows 251-261) ────────────────────────────

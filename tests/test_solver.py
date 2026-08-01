@@ -31,8 +31,14 @@ def test_solver_capex_reduces_price():
     assert with_capex["max_price"] < no_capex["max_price"]
 
 
-def test_solver_total_basis_includes_capex():
-    """Total basis = max_price + capex."""
+def test_solver_total_basis_includes_capex_and_closing_costs():
+    """Total basis = max_price + capex + acquisition closing costs.
+
+    Closing costs joined this identity in item B; before that the basis
+    was price + capex and every solved IRR was overstated by their
+    omission. `tests/test_transaction_costs.py` owns the cost oracles."""
     capex = 100_000
     result = solve_max_price(adjusted_ttm_noi=300_000, capex=capex)
-    assert abs(result["total_basis"] - (result["max_price"] + capex)) < 1
+    expected = result["max_price"] + capex + result["acquisition_cost"]
+    assert abs(result["total_basis"] - expected) < 1
+    assert result["acquisition_cost"] > 0

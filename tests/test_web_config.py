@@ -281,7 +281,8 @@ def test_worker_applies_global_overrides_and_stamps_run(deals_dir, monkeypatch):
 
     def _fake(result, progress=None, output_dir=None, custom_scenarios=None,
               custom_va_scenarios=None, solver_target_irr=None, enrich=False,
-              expense_line_overrides=None):
+              expense_line_overrides=None, hold_years=None,
+              transaction_costs=None):
         from analysis.filters import GATES
         seen["min_irr_during_run"] = GATES["min_irr_5yr"]
         seen["solver_target_irr"] = solver_target_irr
@@ -330,7 +331,8 @@ def test_worker_stamps_global_solver_without_per_deal_override(deals_dir,
 
     def _fake(result, progress=None, output_dir=None, custom_scenarios=None,
               custom_va_scenarios=None, solver_target_irr=None, enrich=False,
-              expense_line_overrides=None):
+              expense_line_overrides=None, hold_years=None,
+              transaction_costs=None):
         seen["solver_target_irr"] = solver_target_irr
         result.gate_results = []
         result.gate_summary = {"passed": 0, "failed": 0, "tbd": 0, "total": 0,
@@ -345,6 +347,76 @@ def test_worker_stamps_global_solver_without_per_deal_override(deals_dir,
 
     assert seen["solver_target_irr"] == 0.12
     assert run.applied_overrides["config"] == {"SOLVER_TARGET_IRR": 0.12}
+
+
+def _capture_run_kwargs(monkeypatch, seen):
+    def _fake(result, progress=None, output_dir=None, custom_scenarios=None,
+              custom_va_scenarios=None, solver_target_irr=None, enrich=False,
+              expense_line_overrides=None, hold_years=None,
+              transaction_costs=None):
+        seen["hold_years"] = hold_years
+        seen["transaction_costs"] = transaction_costs
+        result.gate_results = []
+        result.gate_summary = {"passed": 0, "failed": 0, "tbd": 0, "total": 0,
+                               "recommendation": "PURSUE",
+                               "failed_gates": [], "tbd_gates": []}
+        return result
+
+    monkeypatch.setattr("webapp.services.run_analysis", _fake)
+
+
+@pytest.mark.django_db
+def test_hold_and_costs_are_stamped_even_at_the_defaults(deals_dir,
+                                                         monkeypatch):
+    """Item B changed every published IRR, so a run that sat on the
+    defaults must still SAY what it used. Deltas everywhere else; the
+    resolved values here — otherwise an old run is indistinguishable from
+    a new one rather than self-describing."""
+    from config import DEFAULT_HOLD_YEARS, TRANSACTION_COSTS
+    from tests.test_web_runs import _make_extracted_deal, _start_run
+
+    seen = {}
+    _capture_run_kwargs(monkeypatch, seen)
+    run = _start_run(_make_extracted_deal(deals_dir))
+
+    stamped = run.applied_overrides["assumptions"]
+    assert stamped["hold_years"] == DEFAULT_HOLD_YEARS
+    assert stamped["transaction_costs"] == dict(TRANSACTION_COSTS)
+    # and the engine was handed exactly what was stamped
+    assert seen["hold_years"] == stamped["hold_years"]
+    assert seen["transaction_costs"] == stamped["transaction_costs"]
+
+
+@pytest.mark.django_db
+def test_per_deal_costs_beat_the_global_override_row(deals_dir, monkeypatch):
+    """Precedence: config.py default ← global ConfigOverride ← per-deal.
+    Both cost keys are exercised — one overridden globally and then again
+    per-deal, one overridden globally only."""
+    import datetime as dt
+
+    from tests.test_web_runs import _make_extracted_deal, _start_run
+    from webapp.models import ConfigOverride
+
+    ConfigOverride.objects.create(key="TRANSACTION_COSTS.acquisition_closing_pct",
+                                  value=0.02, effective_date=dt.date(2026, 1, 1))
+    ConfigOverride.objects.create(key="TRANSACTION_COSTS.disposition_cost_pct",
+                                  value=0.03, effective_date=dt.date(2026, 1, 1))
+    seen = {}
+    _capture_run_kwargs(monkeypatch, seen)
+
+    deal = _make_extracted_deal(deals_dir)
+    deal.assumption_overrides = {
+        "hold_years": 8,
+        "transaction_costs": {"acquisition_closing_pct": 0.045},
+    }
+    deal.save()
+    run = _start_run(deal)
+
+    assert seen["hold_years"] == 8
+    assert seen["transaction_costs"] == {"acquisition_closing_pct": 0.045,
+                                         "disposition_cost_pct": 0.03}
+    assert (run.applied_overrides["assumptions"]["transaction_costs"]
+            == seen["transaction_costs"])
 
 
 @pytest.mark.django_db

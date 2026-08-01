@@ -254,6 +254,9 @@ def deal_assumptions(request, pk):
         "rc_soft": [form["rc_soft_cost_pct_low"], form["rc_soft_cost_pct_high"],
                     form["rc_dev_profit_pct_low"], form["rc_dev_profit_pct_high"]],
         "solver_field": form["solver_target_irr"],
+        "hold_years_field": form["hold_years"],
+        "txn_cost_fields": [{"label": label, "field": form[name]}
+                            for name, label in f.TXN_COST_LABELS],
     }
     ctx.update(strip_ctx)
     return render(request, "webapp/assumptions.html", ctx, status=status)

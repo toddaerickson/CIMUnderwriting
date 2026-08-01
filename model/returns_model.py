@@ -1,18 +1,22 @@
 """
-5-year unlevered DCF model — Bear / Base / Bull.
+Unlevered DCF model — Bear / Base / Bull over a variable hold period.
 
 This module wraps the valuation scenario engine and provides
-structured output for the Excel writer.
+structured output for the Excel writer. The projection itself lives in
+`analysis.valuation.project_cash_flows` — the sensitivity grid below used
+to carry its own copy of that loop.
 """
 
-from analysis.valuation import run_scenarios
+from analysis.valuation import project_cash_flows, run_scenarios
 from registry import ScenarioType
 
 
 def build_returns_model(adjusted_ttm_noi: float, asking_price: float,
                         nrsf: float, capex: float = 0,
                         custom_scenarios: dict = None,
-                        expense_ratio: float = None) -> dict:
+                        expense_ratio: float = None,
+                        hold_years: int = None,
+                        transaction_costs: dict = None) -> dict:
     """
     Build complete returns model for all three scenarios.
 
@@ -28,11 +32,18 @@ def build_returns_model(adjusted_ttm_noi: float, asking_price: float,
         capex=capex,
         custom_scenarios=custom_scenarios,
         expense_ratio=expense_ratio,
+        hold_years=hold_years,
+        transaction_costs=transaction_costs,
     )
 
     summary = _build_summary_table(scenarios)
-    sensitivity = _build_sensitivity(adjusted_ttm_noi, asking_price, capex, nrsf,
-                                     expense_ratio=expense_ratio)
+    sensitivity = _build_sensitivity(
+        adjusted_ttm_noi, asking_price, capex, nrsf,
+        expense_ratio=expense_ratio,
+        custom_scenarios=custom_scenarios,
+        hold_years=hold_years,
+        transaction_costs=transaction_costs,
+    )
 
     return {
         "scenarios": scenarios,
@@ -54,6 +65,9 @@ def _build_summary_table(scenarios: dict) -> list[dict]:
             "entry_cap": s.get("entry_cap"),
             "exit_cap": s.get("exit_cap"),
             "exit_value": s.get("exit_value"),
+            "acquisition_cost": s.get("acquisition_cost"),
+            "disposition_cost": s.get("disposition_cost"),
+            "hold_years": s.get("hold_years"),
             "yr1_noi": s["noi_projection"][0] if s.get("noi_projection") else None,
             "yr5_noi": s["noi_projection"][-1] if s.get("noi_projection") else None,
         })
@@ -62,17 +76,30 @@ def _build_summary_table(scenarios: dict) -> list[dict]:
 
 def _build_sensitivity(ttm_noi: float, base_price: float,
                        capex: float, nrsf: float,
-                       expense_ratio: float = None) -> dict:
+                       expense_ratio: float = None,
+                       custom_scenarios: dict = None,
+                       hold_years: int = None,
+                       transaction_costs: dict = None) -> dict:
     """
     Build IRR sensitivity table.
 
     Rows: purchase price ±10% in 2.5% steps
     Cols: exit cap ±100bps in 25bps steps
+
+    The exit cap is swept WITHOUT the entry-cap floor the base scenario
+    applies. Coercing here would silently raise every cell below the entry
+    cap to it, flattening the left of the grid and destroying the axis the
+    table exists to show.
     """
-    import numpy_financial as npf
     from config import SCENARIO_DEFAULTS
 
-    base_params = SCENARIO_DEFAULTS[ScenarioType.BASE]
+    # Per-deal scenario overrides drive the grid too. They did not before:
+    # the grid always read SCENARIO_DEFAULTS, so its centre cell disagreed
+    # with the headline base IRR the moment an analyst edited a scenario.
+    # A partial dict falls back rather than raising — a KeyError here would
+    # take down the whole run for a cosmetic table.
+    defaults = custom_scenarios or SCENARIO_DEFAULTS
+    base_params = defaults.get(ScenarioType.BASE) or SCENARIO_DEFAULTS[ScenarioType.BASE]
 
     # Price steps: -10% to +10% in 2.5% increments
     price_steps = [-0.10, -0.075, -0.05, -0.025, 0.0, 0.025, 0.05, 0.075, 0.10]
@@ -85,17 +112,21 @@ def _build_sensitivity(ttm_noi: float, base_price: float,
     exit_caps = [base_exit_cap + o for o in cap_offsets]
     cap_labels = [f"{c:.2%}" for c in exit_caps]
 
-    # Build IRR grid
-    grid = []
-    for price in prices:
-        row = []
-        for exit_cap in exit_caps:
-            irr = _compute_irr_for_sensitivity(
-                ttm_noi, price, capex, base_params, exit_cap,
+    grid = [
+        [
+            project_cash_flows(
+                ttm_noi=ttm_noi, price=price, capex=capex,
+                params=base_params,
+                hold_years=hold_years,
                 expense_ratio=expense_ratio,
-            )
-            row.append(irr)
-        grid.append(row)
+                costs=transaction_costs,
+                coerce_exit_cap=False,
+                exit_cap_override=exit_cap,
+            )["irr"] if (price + capex) > 0 else None
+            for exit_cap in exit_caps
+        ]
+        for price in prices
+    ]
 
     return {
         "price_labels": price_labels,
@@ -106,49 +137,3 @@ def _build_sensitivity(ttm_noi: float, base_price: float,
         "base_price": base_price,
         "base_exit_cap": base_exit_cap,
     }
-
-
-def _compute_irr_for_sensitivity(ttm_noi: float, price: float,
-                                 capex: float, params: dict,
-                                 exit_cap: float,
-                                 expense_ratio: float = None) -> float | None:
-    """Compute IRR for a single price/exit cap combination."""
-    import numpy_financial as npf
-
-    total_basis = price + capex
-    if total_basis <= 0:
-        return None
-
-    yr1_noi = ttm_noi * (1 + params["yr1_noi_bump"])
-    from registry import clamp_expense_ratio
-    est_expense_ratio = clamp_expense_ratio(expense_ratio)
-    yr1_revenue = yr1_noi / (1 - est_expense_ratio)
-    yr1_expenses = yr1_revenue * est_expense_ratio
-
-    rev = yr1_revenue
-    exp = yr1_expenses
-    noi_series = [yr1_noi]
-
-    for yr in range(2, 6):
-        rev_g = params["rev_cagr_yr1_3"] if yr <= 3 else params["rev_cagr_yr4_5"]
-        rev = rev * (1 + rev_g)
-        exp = exp * (1 + params["exp_growth"])
-        noi_series.append(rev - exp)
-
-    yr5_noi = noi_series[-1]
-    exit_value = yr5_noi / exit_cap if exit_cap > 0 else 0
-
-    cash_flows = [-total_basis]
-    for i, noi in enumerate(noi_series):
-        if i == len(noi_series) - 1:
-            cash_flows.append(noi + exit_value)
-        else:
-            cash_flows.append(noi)
-
-    try:
-        irr = npf.irr(cash_flows)
-        if irr is None or irr != irr:
-            return None
-        return irr
-    except (ValueError, FloatingPointError):
-        return None

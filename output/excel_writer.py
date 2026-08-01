@@ -142,19 +142,28 @@ def _build_inputs_tab(ws, cim_data, fin):
 
 
 def _build_scenario_tab(ws, scen_name: str, scen: dict, cim_data):
-    """Build a single scenario tab with 5-year P&L."""
+    """Build a single scenario tab with the hold-period P&L."""
+    noi_proj = scen.get("noi_projection", [])
+    years = len(noi_proj) or scen.get("hold_years") or 5
+
     ws.column_dimensions["A"].width = 28
-    for i in range(2, 9):
+    for i in range(2, 2 + max(years, 7)):
         ws.column_dimensions[get_column_letter(i)].width = 16
 
     row = 1
-    row = _write_section_header(ws, row, f"{scen_name.title()} Case — 5-Year Unlevered Returns", cols=7)
+    row = _write_section_header(
+        ws, row,
+        f"{scen_name.title()} Case — {years}-Year Unlevered Returns",
+        cols=max(years + 2, 7))
 
-    # Key metrics
+    # Key metrics. Basis is cost-inclusive: the acquisition line below is
+    # already inside Total Basis, shown so the build-up is traceable.
     metrics = [
         ("Total Basis", scen.get("total_basis"), CURRENCY_FULL),
         ("Asking Price", scen.get("asking_price"), CURRENCY_FULL),
         ("CapEx", scen.get("capex"), CURRENCY_FULL),
+        ("Acquisition Closing Costs", scen.get("acquisition_cost"), CURRENCY_FULL),
+        ("Hold Period (yrs)", years, None),
         ("Entry Cap Rate", scen.get("entry_cap"), PCT_FORMAT),
         ("Exit Cap Rate", scen.get("exit_cap"), PCT_FORMAT),
     ]
@@ -164,10 +173,8 @@ def _build_scenario_tab(ws, scen_name: str, scen: dict, cim_data):
     row += 1
 
     # Year headers
-    noi_proj = scen.get("noi_projection", [])
     rev_proj = scen.get("revenue_projection", [])
     exp_proj = scen.get("expense_projection", [])
-    years = min(len(noi_proj), 5)
 
     ws.cell(row=row, column=1, value="").font = BOLD_FONT
     for yr in range(years):
@@ -213,17 +220,19 @@ def _build_scenario_tab(ws, scen_name: str, scen: dict, cim_data):
     # Exit & Returns
     row = _write_section_header(ws, row, "Exit & Returns", cols=2)
     exit_items = [
-        ("Year 5 NOI", noi_proj[-1] if noi_proj else None, CURRENCY_FULL),
+        (f"Year {years} NOI", noi_proj[-1] if noi_proj else None, CURRENCY_FULL),
         ("Exit Cap Rate", scen.get("exit_cap"), PCT_FORMAT),
-        ("Exit Value", scen.get("exit_value"), CURRENCY_FULL),
+        ("Exit Value (gross)", scen.get("exit_value"), CURRENCY_FULL),
+        ("Disposition Costs", scen.get("disposition_cost"), CURRENCY_FULL),
+        ("Net Sale Proceeds", scen.get("net_exit_proceeds"), CURRENCY_FULL),
     ]
     for label, val, fmt in exit_items:
         row = _write_input_row(ws, row, label, val, fmt)
 
     row += 1
     return_items = [
-        ("5-Year Unlevered IRR", scen.get("irr"), PCT_FORMAT),
-        ("5-Year MOIC", scen.get("moic"), MULTIPLE_FORMAT),
+        (f"{years}-Year Unlevered IRR", scen.get("irr"), PCT_FORMAT),
+        (f"{years}-Year MOIC", scen.get("moic"), MULTIPLE_FORMAT),
         ("Year 1 Yield on Cost", scen.get("yield_on_cost"), PCT_FORMAT),
     ]
     for label, val, fmt in return_items:
@@ -343,6 +352,7 @@ def _build_max_offer_tab(ws, max_offer: dict, cim_data):
         ("Maximum Purchase Price", max_offer.get("max_price"), CURRENCY_FULL),
         ("Implied Entry Cap Rate", max_offer.get("implied_entry_cap"), PCT_FORMAT),
         ("CapEx Budget", max_offer.get("capex"), CURRENCY_FULL),
+        ("Acquisition Closing Costs", max_offer.get("acquisition_cost"), CURRENCY_FULL),
         ("Total Basis at Max Price", max_offer.get("total_basis"), CURRENCY_FULL),
         ("Achieved IRR", max_offer.get("achieved_irr"), PCT_FORMAT),
     ]
@@ -395,11 +405,14 @@ def _build_value_add_tab(ws, va_results: dict, va_max_offer: dict, cim_data):
 
     # Key assumptions
     base = va_results.get(ScenarioType.BASE, {})
+    va_hold = base.get("hold_years") or len(base.get("annual_noi") or []) or 5
     row = _write_section_header(ws, row, "Deal Overview", cols=4)
     overview = [
         ("Asking Price", base.get("asking_price"), CURRENCY_FULL),
         ("CapEx", base.get("capex"), CURRENCY_FULL),
+        ("Acquisition Closing Costs", base.get("acquisition_cost"), CURRENCY_FULL),
         ("Total Basis", base.get("total_basis"), CURRENCY_FULL),
+        ("Hold Period (yrs)", va_hold, None),
         ("Current Occupancy", base.get("current_occupancy"), PCT_FORMAT),
         ("In-Place Rent/SF/Mo", base.get("in_place_rent_psf"), '$#,##0.00'),
         ("Market Rent/SF/Mo", base.get("market_rent_psf"), '$#,##0.00'),
@@ -425,10 +438,12 @@ def _build_value_add_tab(ws, va_results: dict, va_max_offer: dict, cim_data):
         ("Stabilized NOI", "stabilized_noi", CURRENCY_FULL),
         ("Entry Cap Rate", "entry_cap", PCT_FORMAT),
         ("Exit Cap Rate", "exit_cap", PCT_FORMAT),
-        ("Exit Value", "exit_value", CURRENCY_FULL),
+        ("Exit Value (gross)", "exit_value", CURRENCY_FULL),
+        ("Disposition Costs", "disposition_cost", CURRENCY_FULL),
+        ("Net Sale Proceeds", "net_exit_proceeds", CURRENCY_FULL),
         ("", None, None),
-        ("5-Year Unlevered IRR", "irr", PCT_FORMAT),
-        ("5-Year MOIC", "moic", MULTIPLE_FORMAT),
+        (f"{va_hold}-Year Unlevered IRR", "irr", PCT_FORMAT),
+        (f"{va_hold}-Year MOIC", "moic", MULTIPLE_FORMAT),
         ("Stabilized Yield/Cost", "yield_on_cost", PCT_FORMAT),
         ("Development Spread", "development_spread", PCT_FORMAT),
     ]

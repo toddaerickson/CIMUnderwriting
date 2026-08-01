@@ -8,7 +8,8 @@ Convergence to 0.1% IRR precision in ~20 iterations.
 Includes both static DCF solver and value-add solver.
 """
 
-import numpy_financial as npf
+from analysis.valuation import (COERCED_SCENARIOS, project_cash_flows,
+                                resolve_transaction_costs)
 from config import (SCENARIO_DEFAULTS, SOLVER_TARGET_IRR, SOLVER_TOLERANCE,
                     SOLVER_MAX_ITERATIONS, VALUE_ADD_SCENARIOS)
 from registry import ScenarioType
@@ -19,26 +20,37 @@ def solve_max_price(adjusted_ttm_noi: float,
                     target_irr: float = SOLVER_TARGET_IRR,
                     scenario: str = "base",
                     custom_params: dict = None,
-                    expense_ratio: float = None) -> dict:
+                    expense_ratio: float = None,
+                    hold_years: int = None,
+                    transaction_costs: dict = None) -> dict:
     """
     Find the maximum purchase price that delivers the target IRR.
+
+    Acquisition closing costs scale with the price being solved for, so
+    they are computed INSIDE the target function rather than added to the
+    answer afterwards. Bisection stays valid: IRR is still monotone
+    decreasing in price once costs are proportional to it.
 
     Args:
         adjusted_ttm_noi: analyst-adjusted TTM NOI
         capex: estimated capital expenditure
-        target_irr: target 5-year unlevered IRR (default 10%)
+        target_irr: target unlevered IRR over the hold (default 10%)
         scenario: which scenario params to use
         custom_params: optional override of scenario params
         expense_ratio: actual OpEx/Revenue ratio from financial analysis
+        hold_years: hold period in years (default config.DEFAULT_HOLD_YEARS)
+        transaction_costs: override of config.TRANSACTION_COSTS
 
     Returns:
         - max_price: maximum purchase price
         - implied_entry_cap: TTM NOI / max_price
         - achieved_irr: actual IRR at max_price (should be ≈ target)
+        - total_basis: max_price + capex + acquisition closing costs
         - iterations: number of bisection iterations
         - converged: bool
     """
     params = custom_params or SCENARIO_DEFAULTS.get(scenario, SCENARIO_DEFAULTS[ScenarioType.BASE])
+    costs = resolve_transaction_costs(transaction_costs)
 
     # Bounds
     # Low: very cheap → high IRR
@@ -55,8 +67,11 @@ def solve_max_price(adjusted_ttm_noi: float,
         iterations = i + 1
         mid = (low + high) / 2
 
-        irr = _compute_irr_at_price(adjusted_ttm_noi, mid, capex, params,
-                                    expense_ratio=expense_ratio)
+        irr = project_cash_flows(
+            ttm_noi=adjusted_ttm_noi, price=mid, capex=capex, params=params,
+            hold_years=hold_years, expense_ratio=expense_ratio, costs=costs,
+            coerce_exit_cap=scenario in COERCED_SCENARIOS,
+        )["irr"] if (mid + capex) > 0 else None
 
         if irr is None:
             # IRR computation failed — narrow the range
@@ -80,6 +95,8 @@ def solve_max_price(adjusted_ttm_noi: float,
         best_irr = irr
 
     implied_cap = adjusted_ttm_noi / best_price if best_price and best_price > 0 else None
+    acquisition_cost = (best_price * costs["acquisition_closing_pct"]
+                        if best_price else None)
 
     return {
         "max_price": best_price,
@@ -89,75 +106,31 @@ def solve_max_price(adjusted_ttm_noi: float,
         "iterations": iterations,
         "converged": converged,
         "capex": capex,
-        "total_basis": (best_price + capex) if best_price else None,
+        "acquisition_cost": acquisition_cost,
+        "transaction_costs": costs,
+        "total_basis": (best_price + capex + acquisition_cost)
+                       if best_price else None,
     }
-
-
-def _compute_irr_at_price(ttm_noi: float, price: float,
-                          capex: float, params: dict,
-                          expense_ratio: float = None) -> float | None:
-    """Compute 5-year unlevered IRR at a given purchase price."""
-    total_basis = price + capex
-    if total_basis <= 0:
-        return None
-
-    yr1_noi = ttm_noi * (1 + params["yr1_noi_bump"])
-
-    # Build 5-year NOI projection — use actual expense ratio when available
-    from registry import clamp_expense_ratio
-    est_expense_ratio = clamp_expense_ratio(expense_ratio)
-    yr1_revenue = yr1_noi / (1 - est_expense_ratio)
-    yr1_expenses = yr1_revenue * est_expense_ratio
-
-    rev = yr1_revenue
-    exp = yr1_expenses
-    noi_series = [yr1_noi]
-
-    for yr in range(2, 6):
-        rev_growth = params["rev_cagr_yr1_3"] if yr <= 3 else params["rev_cagr_yr4_5"]
-        rev = rev * (1 + rev_growth)
-        exp = exp * (1 + params["exp_growth"])
-        noi_series.append(rev - exp)
-
-    yr5_noi = noi_series[-1]
-    exit_cap = params["exit_cap"]
-    exit_value = yr5_noi / exit_cap if exit_cap > 0 else 0
-
-    # Entry cap check — enforce exit cap ≥ entry cap for base/bear
-    entry_cap = ttm_noi / price if price > 0 else 0
-    if exit_cap < entry_cap:
-        exit_cap = entry_cap
-        exit_value = yr5_noi / exit_cap if exit_cap > 0 else 0
-
-    cash_flows = [-total_basis]
-    for i, noi in enumerate(noi_series):
-        if i == len(noi_series) - 1:
-            cash_flows.append(noi + exit_value)
-        else:
-            cash_flows.append(noi)
-
-    try:
-        irr = npf.irr(cash_flows)
-        if irr is None or irr != irr:  # NaN check
-            return None
-        return irr
-    except (ValueError, FloatingPointError):
-        return None
 
 
 def solve_max_price_value_add(cim_data, financial_analysis: dict,
                                capex: float = 0,
                                target_irr: float = SOLVER_TARGET_IRR,
-                               scenario: str = "base") -> dict:
+                               scenario: str = "base",
+                               hold_years: int = None,
+                               transaction_costs: dict = None) -> dict:
     """
     Find the maximum purchase price for target IRR using the value-add model.
 
     Same bisection approach as solve_max_price, but uses the VA monthly
-    cash flow engine instead of the static DCF.
+    cash flow engine instead of the static DCF. Both solvers carry the
+    same hold period and transaction costs — a VA max offer computed
+    gross of costs beside a static one computed net is not comparable.
     """
     from model.value_add_model import compute_va_irr_at_price
 
     params = VALUE_ADD_SCENARIOS.get(scenario, VALUE_ADD_SCENARIOS[ScenarioType.BASE])
+    costs = resolve_transaction_costs(transaction_costs)
 
     # Estimate NOI for bounds — use adjusted or CIM
     adj_noi = financial_analysis.get("adjusted_ttm_noi", {}).get("analyst_adjusted_noi")
@@ -175,7 +148,9 @@ def solve_max_price_value_add(cim_data, financial_analysis: dict,
         iterations = i + 1
         mid = (low + high) / 2
 
-        irr = compute_va_irr_at_price(cim_data, financial_analysis, mid, capex, params)
+        irr = compute_va_irr_at_price(cim_data, financial_analysis, mid, capex,
+                                      params, hold_years=hold_years,
+                                      costs=costs)
 
         if irr is None:
             high = mid
@@ -196,6 +171,8 @@ def solve_max_price_value_add(cim_data, financial_analysis: dict,
         best_irr = irr
 
     implied_cap = ttm_noi / best_price if best_price and best_price > 0 else None
+    va_acquisition_cost = (best_price * costs["acquisition_closing_pct"]
+                           if best_price else None)
 
     return {
         "max_price": best_price,
@@ -205,6 +182,9 @@ def solve_max_price_value_add(cim_data, financial_analysis: dict,
         "iterations": iterations,
         "converged": converged,
         "capex": capex,
-        "total_basis": (best_price + capex) if best_price else None,
+        "acquisition_cost": va_acquisition_cost,
+        "transaction_costs": costs,
+        "total_basis": (best_price + capex + va_acquisition_cost)
+                       if best_price else None,
         "model_type": "value_add",
     }

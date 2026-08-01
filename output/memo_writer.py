@@ -489,11 +489,20 @@ def _add_section_6(doc, scenario_results, max_offer):
                 table.rows[0].cells[i + 1].text = f"Yr {i + 1}"
                 table.rows[1].cells[i + 1].text = _fmt_currency(noi)
 
+        hold = s.get("hold_years") or len(noi_proj) or 5
         doc.add_paragraph(f"Entry Cap: {_fmt_pct(s.get('entry_cap'))}")
         doc.add_paragraph(f"Exit Cap: {_fmt_pct(s.get('exit_cap'))}")
-        doc.add_paragraph(f"Exit Value: {_fmt_currency(s.get('exit_value'))}")
-        doc.add_paragraph(f"5-Year IRR: {_fmt_pct(s.get('irr'))}")
-        doc.add_paragraph(f"5-Year MOIC: {s.get('moic', 0):.2f}x" if s.get("moic") else "MOIC: N/A")
+        doc.add_paragraph(f"Exit Value (gross): {_fmt_currency(s.get('exit_value'))}")
+        # Costs are stated, not folded silently into the return: an IRR
+        # quoted net of costs the reader can't see is not auditable.
+        doc.add_paragraph(
+            f"Acquisition Closing Costs: {_fmt_currency(s.get('acquisition_cost'))}")
+        doc.add_paragraph(
+            f"Disposition Costs: {_fmt_currency(s.get('disposition_cost'))}")
+        doc.add_paragraph(
+            f"Net Sale Proceeds: {_fmt_currency(s.get('net_exit_proceeds'))}")
+        doc.add_paragraph(f"{hold}-Year IRR (net of costs): {_fmt_pct(s.get('irr'))}")
+        doc.add_paragraph(f"{hold}-Year MOIC: {s.get('moic', 0):.2f}x" if s.get("moic") else "MOIC: N/A")
         doc.add_paragraph(f"Yield on Cost: {_fmt_pct(s.get('yield_on_cost'))}")
 
     # Max offer
@@ -564,9 +573,9 @@ def _add_section_7(doc, value_add, va_results=None, va_max_offer=None):
              lambda v: _fmt_currency(v)),
             ("Stabilized Yield/Cost", "yield_on_cost",
              lambda v: _fmt_pct(v)),
-            ("5-Year IRR", "irr",
+            ("Unlevered IRR (net of costs)", "irr",
              lambda v: _fmt_pct(v)),
-            ("5-Year MOIC", "moic",
+            ("MOIC", "moic",
              lambda v: f"{v:.2f}x" if v else "N/A"),
             ("Development Spread", "development_spread",
              lambda v: f"{v*100:.0f} bps" if v else "N/A"),
