@@ -236,7 +236,7 @@ def fake_run(monkeypatch):
               custom_va_scenarios=None, solver_target_irr=None, enrich=False,
               expense_line_overrides=None, hold_years=None,
               transaction_costs=None, capital_structure=None,
-              market_cap_rate=None):
+              market_cap_rate=None, market_cap=None):
         calls["cim_data"] = result.cim_data
         calls["output_dir"] = output_dir
         calls["custom_scenarios"] = custom_scenarios

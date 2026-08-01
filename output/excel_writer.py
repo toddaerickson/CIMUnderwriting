@@ -15,6 +15,7 @@ Tabs:
 import os
 
 import config as cfg
+from analysis.valuation import describe_market_cap
 from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side, numbers
 from registry import ScenarioType
@@ -226,9 +227,13 @@ def _write_exit_cap_derivation(ws, row, scenario_results):
     for label, val, fmt in (
             ("Asset Class", detail.get("asset_class"), None),
             ("Age Band", band, None),
-            ("Market Cap Rate", detail.get("market_cap"), PCT_FORMAT),
-            ("Market Cap Source", detail.get("source"), None),
-            ("Market Cap As Of", detail.get("as_of"), None)):
+            ("Market Cap Rate", detail.get("market_cap"), CAP_FORMAT),
+            ("Market Cap Source", describe_market_cap(detail), None),
+            # The table rate is reported even when an analyst overrode it,
+            # and the as-of dates THAT, not the applied rate — labelled so
+            # an override cannot read as carrying a table vintage.
+            ("Table Market Cap", detail.get("table_market_cap"), CAP_FORMAT),
+            ("Table As Of", detail.get("as_of"), None)):
         row = _write_input_row(ws, row, label, val, fmt)
 
     row += 1
@@ -282,7 +287,10 @@ def _build_scenario_tab(ws, scen_name: str, scen: dict, cim_data):
         ("Acquisition Closing Costs", scen.get("acquisition_cost"), CURRENCY_FULL),
         ("Hold Period (yrs)", years, None),
         ("Entry Cap Rate", scen.get("entry_cap"), PCT_FORMAT),
-        ("Exit Cap Rate", scen.get("exit_cap"), PCT_FORMAT),
+        # CAP_FORMAT, not PCT_FORMAT: the Exit & Returns block below prints
+        # this same value to three places, and one sheet showing "6.6%" here
+        # and "6.625%" there reads as two different caps.
+        ("Exit Cap Rate", scen.get("exit_cap"), CAP_FORMAT),
     ]
     for label, val, fmt in metrics:
         row = _write_input_row(ws, row, label, val, fmt)

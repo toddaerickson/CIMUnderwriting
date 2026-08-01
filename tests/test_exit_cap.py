@@ -505,6 +505,97 @@ def test_both_orchestrations_name_the_same_consumers():
     assert "market_cap" in engine_src and "market_cap" in cli_src
 
 
+# ── 9. Provenance survives the trip through the engine ───────────────
+
+def test_a_resolved_anchor_survives_the_engine_with_its_source(
+        mock_cim_data, tmp_path, monkeypatch):
+    """REGRESSION (review finding, PR #31) — do not delete.
+
+    webapp.services must resolve the anchor BEFORE taking the analysis
+    lock, off the pristine table, so it hands the engine an already
+    resolved dict. It used to hand over just the RATE, which re-entered
+    `resolve_market_cap`'s "an explicit market_cap always wins" branch —
+    that branch cannot tell a typed rate from a resolved one, so every web
+    run was stamped `source: "analyst"`.
+
+    The damage was not cosmetic: `_market_exit_cap` gates its
+    unknown-vintage finding on `source == "table"`, so the finding could
+    never fire on the primary interface — silently passing the exact case
+    the check was built to catch. Nothing caught it because the web tests
+    monkeypatch `run_analysis` out, so this drives the real one.
+    """
+    monkeypatch.setattr("data.comp_db.COMP_DB_PATH", str(tmp_path / "c.db"))
+    from engine import AnalysisResult, run_analysis
+
+    mock_cim_data.year_built = None                 # unknown-vintage case
+    resolved = resolve_market_cap("Self Storage", None)
+    assert resolved["source"] == "table" and resolved["age_band_known"] is False
+
+    result = AnalysisResult(pdf_path=str(tmp_path / "none.pdf"))
+    result.cim_data = mock_cim_data
+    run_analysis(result, output_dir=str(tmp_path), market_cap=resolved)
+
+    assert result.market_cap["source"] == "table"
+    assert result.market_cap["age_band_known"] is False
+    # and the check register can therefore still raise the finding
+    finding = next(c for c in result.checks if c["id"] == "market_exit_cap")
+    assert finding["status"] == C.FAIL
+    assert "year built is unknown" in finding["message"]
+
+
+def test_the_rate_only_path_is_still_an_analyst_override(
+        mock_cim_data, tmp_path, monkeypatch):
+    """The other half of the seam: `market_cap_rate` MEANS "the analyst
+    typed this". That is why handing it a resolved table rate was wrong,
+    and why the dict parameter exists."""
+    monkeypatch.setattr("data.comp_db.COMP_DB_PATH", str(tmp_path / "c.db"))
+    from engine import AnalysisResult, run_analysis
+
+    result = AnalysisResult(pdf_path=str(tmp_path / "none.pdf"))
+    result.cim_data = mock_cim_data
+    run_analysis(result, output_dir=str(tmp_path), market_cap_rate=0.0499)
+
+    assert result.market_cap["market_cap"] == 0.0499
+    assert result.market_cap["source"] == "analyst"
+
+
+def test_the_web_worker_hands_the_engine_the_resolved_dict():
+    """The seam above, pinned at the call site: webapp.services resolves
+    once and passes `market_cap=`, never `market_cap_rate=<resolved>`."""
+    import inspect
+
+    from webapp import services
+
+    src = inspect.getsource(services._analysis_worker)
+    assert "market_cap=market_cap," in src
+    assert "market_cap_rate=" not in src
+
+
+def test_an_analyst_override_says_what_it_overrode():
+    """`as_of` dates the TABLE. Printed unconditionally it claimed a table
+    vintage for a number with no table basis."""
+    from analysis.valuation import describe_market_cap
+
+    table = resolve_market_cap("Self Storage", 2015,
+                               as_of=datetime.date(2026, 1, 1))
+    assert describe_market_cap(table) == f"table as of {cfg.MARKET_CAP_AS_OF}"
+
+    typed = resolve_market_cap("Self Storage", 2015, market_cap=0.0501,
+                               as_of=datetime.date(2026, 1, 1))
+    txt = describe_market_cap(typed)
+    assert txt.startswith("analyst-entered")
+    assert "overriding" in txt
+    # the table rate it displaced is named, and the as-of is attached to
+    # THAT rather than presented as the applied rate's vintage
+    assert "6.250%" in txt
+    assert "table rate as of" in txt
+
+    # no table cell to compare against → no invented provenance
+    bare = resolve_market_cap(None, None, market_cap=0.06,
+                              base={"Self Storage": {}})
+    assert describe_market_cap(bare) == "analyst-entered"
+
+
 def test_market_exit_cap_is_advisory_not_blocking():
     """Blocking is reserved for identities the pipeline computes on
     itself (see `_sources_uses_ties`). An anchor is an input."""

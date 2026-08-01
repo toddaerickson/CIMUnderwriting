@@ -830,10 +830,10 @@ def _exit_cap_derivation(scen: dict) -> str:
     band = d.get("age_band") or "—"
     if d.get("age_band_known") is False:
         band += ", year built unknown"
+    from analysis.valuation import describe_market_cap
     txt = (f"= {_fmt_cap(d['market_cap'])} market cap "
-           f"({d.get('asset_class') or 'asset'}, {band}"
-           + (f", {d['source']} source" if d.get("source") else "")
-           + (f", as of {d['as_of']}" if d.get("as_of") else "") + ")"
+           f"({d.get('asset_class') or 'asset'}, {band}, "
+           f"{describe_market_cap(d)})"
            f" {d.get('scenario_spread_bps', 0):+g} bp scenario spread"
            f" {d.get('drift_total_bps', 0):+g} bp obsolescence drift"
            f" ({d.get('drift_bps_per_year')} bp/yr × "

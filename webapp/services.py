@@ -837,7 +837,10 @@ def _analysis_worker(run_pk):
                     hold_years=hold_years,
                     transaction_costs=txn_costs,
                     capital_structure=capital,
-                    market_cap_rate=market_cap["market_cap"],
+                    # The resolved DICT, not its rate: the rate alone would
+                    # look like an analyst override to resolve_market_cap
+                    # and relabel every table lookup as analyst-entered.
+                    market_cap=market_cap,
                 )
 
         meta = build_deal_meta(cim, result, deal.deal_dir,

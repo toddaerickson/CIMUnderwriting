@@ -298,7 +298,7 @@ def test_worker_applies_global_overrides_and_stamps_run(deals_dir, monkeypatch):
               custom_va_scenarios=None, solver_target_irr=None, enrich=False,
               expense_line_overrides=None, hold_years=None,
               transaction_costs=None, capital_structure=None,
-              market_cap_rate=None):
+              market_cap_rate=None, market_cap=None):
         from analysis.filters import GATES
         seen["min_irr_during_run"] = GATES["min_irr_5yr"]
         seen["solver_target_irr"] = solver_target_irr
@@ -349,7 +349,7 @@ def test_worker_stamps_global_solver_without_per_deal_override(deals_dir,
               custom_va_scenarios=None, solver_target_irr=None, enrich=False,
               expense_line_overrides=None, hold_years=None,
               transaction_costs=None, capital_structure=None,
-              market_cap_rate=None):
+              market_cap_rate=None, market_cap=None):
         seen["solver_target_irr"] = solver_target_irr
         result.gate_results = []
         result.gate_summary = {"passed": 0, "failed": 0, "tbd": 0, "total": 0,
@@ -371,10 +371,11 @@ def _capture_run_kwargs(monkeypatch, seen):
               custom_va_scenarios=None, solver_target_irr=None, enrich=False,
               expense_line_overrides=None, hold_years=None,
               transaction_costs=None, capital_structure=None,
-              market_cap_rate=None):
+              market_cap_rate=None, market_cap=None):
         seen["hold_years"] = hold_years
         seen["transaction_costs"] = transaction_costs
         seen["market_cap_rate"] = market_cap_rate
+        seen["market_cap"] = market_cap
         seen["custom_scenarios"] = custom_scenarios
         result.gate_results = []
         result.gate_summary = {"passed": 0, "failed": 0, "tbd": 0, "total": 0,
@@ -411,7 +412,12 @@ def test_hold_and_costs_are_stamped_even_at_the_defaults(deals_dir,
     assert stamped["market_cap"]["market_cap"] == \
         cfg.MARKET_CAP_RATES[stamped["market_cap"]["asset_class"]][
             stamped["market_cap"]["age_band"]]
-    assert seen["market_cap_rate"] == stamped["market_cap"]["market_cap"]
+    # The engine is handed the resolved DICT, not its rate. Passing the
+    # rate re-entered resolve_market_cap's analyst-override branch and
+    # relabelled every table lookup as analyst-entered, which silently
+    # disabled the unknown-vintage check (review finding, PR #31).
+    assert seen["market_cap"] == stamped["market_cap"]
+    assert seen["market_cap_rate"] is None
     assert stamped["ignored_assumptions"] == {}
 
 

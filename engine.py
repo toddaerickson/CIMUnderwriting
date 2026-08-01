@@ -141,7 +141,8 @@ def run_analysis(result: AnalysisResult, progress: Callable = None,
                   hold_years: int = None,
                   transaction_costs: dict = None,
                   capital_structure: dict = None,
-                  market_cap_rate: float = None) -> AnalysisResult:
+                  market_cap_rate: float = None,
+                  market_cap: dict = None) -> AnalysisResult:
     """
     Run full analysis pipeline on an already-extracted CIMData.
 
@@ -178,6 +179,16 @@ def run_analysis(result: AnalysisResult, progress: Callable = None,
             rather than patched into config for the reason spelled out in
             config.py: a patched dict is shared mutable state across
             concurrent runs.
+        market_cap_rate: the analyst's market cap off the assumptions
+            form, as a decimal, or None to look the asset's class and age
+            band up in config.MARKET_CAP_RATES. Every exit cap in the run
+            derives from whichever it is.
+        market_cap: an ALREADY-RESOLVED anchor dict from
+            `analysis.valuation.resolve_market_cap`, used as-is. For a
+            caller that had to resolve before entering the analysis lock;
+            passing its rate through `market_cap_rate` instead would
+            re-enter the resolver's analyst-override branch and relabel a
+            table lookup as analyst-entered. Wins over `market_cap_rate`.
 
     Returns:
         Updated AnalysisResult with all analysis fields populated
@@ -282,12 +293,22 @@ def run_analysis(result: AnalysisResult, progress: Callable = None,
                 f"basis. Re-enter it in dollars or restore the missing field.")
 
     # The exit cap is derived from the asset, so the market anchor is
-    # resolved ONCE here — same discipline as CapEx and the reserve above.
-    # Every consumer gets the same dict, which is what keeps the memo, the
-    # .xlsx, the .xlsm, the sensitivity grid and both solvers on one cap.
-    market_cap = resolve_market_cap(
-        detect_asset_type(cim_data), cim_data.year_built,
-        market_cap=market_cap_rate)
+    # resolved ONCE — same discipline as CapEx and the reserve above. Every
+    # consumer gets the same dict, which is what keeps the memo, the .xlsx,
+    # the .xlsm, the sensitivity grid and both solvers on one cap.
+    #
+    # A caller that already resolved it passes the DICT, not the rate.
+    # webapp.services does: it must resolve before taking the analysis lock
+    # (off the pristine table), and re-resolving here from its rate would
+    # look like an analyst override to `resolve_market_cap`, whose "an
+    # explicit market_cap always wins" branch cannot tell a typed rate from
+    # a resolved one. That stamped `source: "analyst"` on every web run and
+    # silently disabled the unknown-vintage finding in the check register,
+    # which is gated on `source == "table"` (review finding, PR #31).
+    if not market_cap:
+        market_cap = resolve_market_cap(
+            detect_asset_type(cim_data), cim_data.year_built,
+            market_cap=market_cap_rate)
     result.market_cap = market_cap
 
     if result.adjusted_noi and asking > 0:

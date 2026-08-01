@@ -108,6 +108,30 @@ def resolve_market_cap(asset_type: str = None, year_built=None, *,
             "table_market_cap": table_rate, "as_of": MARKET_CAP_AS_OF}
 
 
+def describe_market_cap(detail: dict) -> str:
+    """Where an anchor came from, in words — "table as of 2026-Q3", or
+    "analyst-entered, overriding the 6.250% table rate as of 2026-Q3".
+
+    One phrasing, used by the check register, the memo and the Excel
+    derivation block. `as_of` dates the TABLE, and it is returned on both
+    branches because `table_market_cap` is reported on both; printing it
+    unconditionally beside the applied rate claimed a table vintage for an
+    analyst's number that had no table basis (review finding, PR #31).
+    Three copies of this sentence is how that gets fixed in one place and
+    stays wrong in the other two.
+    """
+    d = detail or {}
+    as_of = f" as of {d['as_of']}" if d.get("as_of") else ""
+    if d.get("source") == "table":
+        return f"table{as_of}"
+    source = d.get("source") or "unknown"
+    table_rate = d.get("table_market_cap")
+    if table_rate is None:
+        return f"{source}-entered"
+    return (f"{source}-entered, overriding the {float(table_rate):.3%} "
+            f"table rate{as_of}")
+
+
 def resolve_exit_cap(market_cap: float, scenario, hold_years: int = None, *,
                      spread_bps: float = None, drift_bps: float = None) -> dict:
     """Exit cap for one scenario, with its components.

@@ -22,6 +22,7 @@ in; see webapp.forms.check_input_from_cleaned.
 
 from dataclasses import dataclass, field, asdict
 
+from analysis.valuation import describe_market_cap
 from config import EXPENSE_BENCHMARKS
 
 # ── Severities & statuses ───────────────────────────────────────────
@@ -474,9 +475,7 @@ def _market_exit_cap(inp):
         anchor_txt = (f"{mc.get('asset_class') or 'Asset'} in the "
                       f"{mc.get('age_band') or '—'} band anchors at "
                       f"{_cap(mc['market_cap'])} "
-                      f"({mc.get('source') or 'unknown'} source"
-                      + (f", table as of {mc['as_of']}" if mc.get("as_of")
-                         else "") + "). ")
+                      f"({describe_market_cap(mc)}). ")
     if problems:
         return (FAIL, anchor_txt + "The exit cap derivation needs confirming: "
                 + "; ".join(problems) + ".", values)
