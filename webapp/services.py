@@ -869,8 +869,20 @@ def _analysis_worker(run_pk):
                     # look like an analyst override to resolve_market_cap
                     # and relabel every table lookup as analyst-entered.
                     market_cap=market_cap,
-                    debt_terms=overrides.get("debt_terms"),
-                    waterfall_terms=overrides.get("waterfall_terms"),
+                    # The RESOLVED dicts, not the raw overrides — the same
+                    # rule hold_years, transaction_costs, capital_structure
+                    # and market_cap already follow, and for the same
+                    # reason: stamping one value while handing the engine
+                    # something it must resolve a second time makes
+                    # "the stamp equals what ran" depend on the two
+                    # resolutions agreeing. They agree today only because
+                    # DEBT_TERMS and WATERFALL_TERMS are deliberately out
+                    # of _PATCHED_DICTS, so nothing can change between the
+                    # two calls. That is an unstated cross-file fact, and
+                    # E3b is exactly the item that could invalidate it.
+                    # Both resolvers are idempotent on their own output.
+                    debt_terms=debt_terms,
+                    waterfall_terms=waterfall_terms,
                     am_fee_pct=am_fee_pct,
                 )
 

@@ -720,3 +720,67 @@ def test_config_defaults_sit_inside_the_researched_market_bands():
     assert 0.04 <= cfg.DEBT_TERMS["rate"] <= 0.12
 
 
+
+
+# ── The two override gaps E1's review deferred to item E3a ──────────
+# E1 left both unfixed on purpose: nothing outside `tests/` could reach
+# `resolve_debt_terms` with caller-supplied data, so neither was live.
+# Item E3a adds the first real override call sites —
+# `engine.run_analysis(debt_terms=...)` and the stored per-deal override
+# read in `webapp.services` — so they are live now and fixed here.
+
+def test_a_percent_where_a_decimal_belongs_raises_instead_of_pricing_it():
+    """`rate=6.5` meaning 6.5% used to construct cleanly as 650%/yr.
+
+    Measured before the fix: a $6.5M loan priced at $3,520,833.33/mo
+    against a correct $43,888.47/mo — about 80x, silently, in the payment
+    that feeds every levered return in the model. `min_dscr` is
+    deliberately NOT guarded: it is a coverage RATIO and 1.25x is the
+    market term this repo underwrites to.
+    """
+    with pytest.raises(ValueError, match="DECIMAL fractions"):
+        resolve_debt_terms({"rate": 6.5})
+    with pytest.raises(ValueError, match="DECIMAL fractions"):
+        DebtTerms(rate=6.5)
+    for field, bad in (("max_ltv", 65), ("min_debt_yield", 10),
+                       ("orig_fee_pct", 1.5), ("exit_fee_pct", 50),
+                       ("index_rate", 4.25), ("spread", 2.25)):
+        with pytest.raises(ValueError, match="DECIMAL fractions"):
+            resolve_debt_terms({field: bad})
+
+    # A coverage ratio above 1.0 is the normal case and must still build.
+    assert resolve_debt_terms({"min_dscr": 1.25}).min_dscr == 1.25
+    # And the real terms are untouched.
+    assert resolve_debt_terms({"rate": 0.065}).all_in_rate() == 0.065
+
+
+def test_an_infinite_integer_override_raises_this_modules_error():
+    """`int(float('inf'))` raises OverflowError, not the clean ValueError
+    every other bad term here produces — so an infinite override escaped
+    the error contract, and `DebtTerms.__post_init__`'s own finiteness
+    check never ran because the coercion blew up first."""
+    for bad in (float("inf"), float("-inf"), float("nan")):
+        with pytest.raises(ValueError, match="finite number"):
+            resolve_debt_terms({"amort_years": bad})
+        with pytest.raises(ValueError, match="finite number"):
+            resolve_debt_terms({"io_months": bad})
+        with pytest.raises(ValueError, match="finite number"):
+            resolve_debt_terms({"term_years": bad})
+
+
+def test_resolving_an_already_resolved_dict_changes_nothing():
+    """`webapp.services` stamps the RESOLVED debt terms and hands the same
+    dict to the engine, which resolves once more. That only keeps "the
+    stamp equals what ran" true if resolving is idempotent — and the
+    floating-rate mode switch is the part that could break it, since
+    supplying `index_rate`/`spread` without `rate` CLEARS the seeded fixed
+    rate. Feeding the resolved dict back names all three, so the branch
+    has to reach the same answer a second time."""
+    import dataclasses
+
+    for override in (None, {"rate": 0.07},
+                     {"index_rate": 0.0425, "spread": 0.0225},
+                     {"io_months": 24, "max_ltv": 0.70}):
+        once = resolve_debt_terms(override)
+        twice = resolve_debt_terms(dataclasses.asdict(once))
+        assert once == twice, override

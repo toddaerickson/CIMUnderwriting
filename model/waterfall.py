@@ -42,10 +42,11 @@ ends with — and logs it. On a single-asset deal the residual normally
 arises only at sale, after which no capital can be called; a refinance
 distribution followed by a follow-on call is the shape that opens it.
 
-**Nothing outside `tests/` imports this yet.** E2 ships the engine; E3
-wires it into the assumptions form, results, memo and Excel.
-`tests/test_waterfall.py` asserts that, which is the proof no published
-unlevered number moved.
+**Wired by item E3a.** While E2 shipped, nothing outside `tests/`
+imported this module and an AST test asserted so — the proof no published
+unlevered number had moved. `model.levered` now builds the contribution
+and distribution series and calls `run_waterfall`, so that guard is
+retired. E3b carries the results page, memo and Excel surfaces.
 
 Numeric authority: `docs/levered-waterfall-design.md` oracles 1-3,
 reproduced to the cent in the test module. Five LPA questions are still

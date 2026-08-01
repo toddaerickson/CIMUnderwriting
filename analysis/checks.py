@@ -634,14 +634,23 @@ def _loan_matures_before_exit(inp):
                 {})
     if not debt.get("loan"):
         return (SKIPPED, "This deal carries no debt.", {"loan": 0.0})
+    # READ the flag `build_debt_schedule` already published; do not
+    # re-derive it. An earlier draft recomputed it from
+    # `len(annual_debt_service)` and `terms["term_years"]`, which is a
+    # SECOND copy of the same comparison sitting one function below
+    # `_sources_uses_ties` — the check this same item had to repair for
+    # precisely that defect. The two cannot disagree today, which is
+    # exactly what makes the drift invisible when one of them changes.
+    matures = debt.get("matures_before_exit")
     terms = debt.get("terms") or {}
     term_years = terms.get("term_years")
-    hold_years = len(debt.get("annual_debt_service") or [])
+    hold_years = debt.get("hold_years")
     values = {"term_years": term_years, "hold_years": hold_years,
+              "matures_before_exit": matures,
               "payoff_balance": debt.get("payoff_balance")}
-    if not term_years or not hold_years:
+    if matures is None or not term_years or not hold_years:
         return (SKIPPED, "Loan term or hold period is unknown.", values)
-    if hold_years > term_years:
+    if matures:
         return (FAIL,
                 f"The loan matures in year {term_years} but the hold runs "
                 f"{hold_years} years, so the balloon is due before the sale. "
