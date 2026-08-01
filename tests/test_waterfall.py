@@ -353,6 +353,37 @@ def test_tier_one_reconciles_to_its_capital_and_pref_parts(terms):
             == pytest.approx(row["ending_balance"], abs=CENT)
 
 
+# ── Promote paid before a later capital call ────────────────────────
+
+def test_a_promote_survives_a_later_capital_call_and_says_so(caplog):
+    """The limit of "no promote until tier 1 is current". A residual
+    distribution in period 2 pays the GP $150,048; a $5,000,000 call in
+    period 3 re-opens tier 1 and the LP ends at 0.39x. With no clawback
+    the GP keeps the promote — the correct model of the operator's fund
+    terms — but a `tier1_current: False` sitting beside a positive
+    promote is not a statement, so `interim_promote` makes it one.
+    """
+    with caplog.at_level("WARNING", logger="cim_analyst"):
+        result = run_waterfall([1_000_000.0, 0.0, 0.0, 5_000_000.0, 0.0],
+                               [0.0, 0.0, 2_000_000.0, 0.0, 500_000.0],
+                               WaterfallTerms())
+    assert result["tier1_current"] is False
+    assert result["gp"]["promote"] == pytest.approx(150_048.00, abs=CENT)
+    assert result["interim_promote"] == pytest.approx(150_048.00, abs=CENT)
+    assert result["lp"]["moic"] == pytest.approx(0.3889, abs=0.0001)
+    assert "no clawback" in caplog.text
+
+
+def test_promote_taken_at_the_final_distribution_is_not_interim(caplog):
+    """The ordinary single-asset shape: the residual arises at sale and
+    no capital can be called after it, so nothing is flagged."""
+    with caplog.at_level("WARNING", logger="cim_analyst"):
+        result = _run(ORACLE_1)
+    assert result["gp"]["promote"] > 0
+    assert result["interim_promote"] == 0.0
+    assert "clawback" not in caplog.text
+
+
 # ── The pari-passu shortcut, against a second implementation ────────
 
 def _two_separate_accounts(contribs, dists, terms):
@@ -470,6 +501,47 @@ def test_distributions_must_be_a_sequence():
         run_waterfall(CONTRIBUTION, 1_500_000.0, ORACLE_1)
 
 
+@pytest.mark.parametrize("series,why", [
+    ("123", "a string iterates to THREE periods of $1, $2 and $3"),
+    ({1: "a", 2: "b"}, "a dict iterates its KEYS, so these become $1 and $2"),
+    (b"12", "bytes iterate to ints"),
+])
+def test_things_that_iterate_but_are_not_cash_flow_series_are_refused(series,
+                                                                     why):
+    """Each of these used to be read as a valid series and produce a
+    confident wrong answer rather than an error. `why` documents the
+    silent reading that was happening."""
+    with pytest.raises(TypeError, match="period-indexed sequence"):
+        run_waterfall(CONTRIBUTION, series, ORACLE_1)
+
+
+def test_a_generator_is_refused_because_it_has_no_length_to_align():
+    """Consumed by the first pass, and unmeasurable against the other
+    series — so the length check that stops a misaligned pair could not
+    run at all."""
+    with pytest.raises(TypeError, match="period-indexed sequence"):
+        run_waterfall(CONTRIBUTION, (x for x in [0.0, 50_000.0]), ORACLE_1)
+
+
+def test_a_missing_period_is_refused_rather_than_read_as_zero():
+    """`float(None or 0.0)` is 0.0. A missing period in a cash-flow
+    series is missing data, and calling it "distributed nothing" is a
+    swallowed error — the more so next to a NaN in the same slot, which
+    does raise."""
+    with pytest.raises(ValueError, match="missing data"):
+        run_waterfall(CONTRIBUTION, [0.0, None, 50_000.0], ORACLE_1)
+    with pytest.raises(ValueError, match="missing data"):
+        run_waterfall([1_000_000.0, ""], [0.0, 50_000.0], ORACLE_1)
+
+
+def test_a_boolean_does_not_fund_a_deal():
+    """bool is a subclass of int, so True would fund $1 of equity."""
+    with pytest.raises(ValueError, match="bool is a subclass"):
+        run_waterfall(True, [0.0, 50_000.0], ORACLE_1)
+    with pytest.raises(ValueError, match="must be a number"):
+        run_waterfall([True, False], [0.0, 50_000.0], ORACLE_1)
+
+
 def test_an_empty_distribution_series_raises():
     with pytest.raises(ValueError, match="nothing to distribute"):
         run_waterfall(CONTRIBUTION, [], ORACLE_1)
@@ -533,13 +605,57 @@ def test_out_of_range_rates_and_splits_are_rejected():
         WaterfallTerms(gp_coinvest_pct=1.0)
 
 
+def test_a_whole_number_percent_pref_is_rejected_like_the_split_fields():
+    """This codebase displays percentages as whole numbers and stores
+    them as decimals, so `pref_rate=8` meaning 8% is the live mistake.
+    Unbounded it accrued $8,000,000 of preferred return on $1,000,000 of
+    capital in year one and said nothing — while `promote_split=20` on
+    the same form correctly raised."""
+    with pytest.raises(ValueError, match="0.08, not 8"):
+        WaterfallTerms(pref_rate=8)
+    with pytest.raises(ValueError, match="0.08, not 8"):
+        WaterfallTerms(pref_rate=1.0)
+    assert WaterfallTerms(pref_rate=0.08).pref_rate == 0.08
+
+
+def test_a_numeric_field_given_as_a_string_is_coerced_not_deferred():
+    """It used to construct fine and then fail inside `assumption_stamp`
+    with "Unknown format code '%' for object of type 'str'" — an error
+    naming neither the field nor the caller."""
+    terms = WaterfallTerms(pref_rate="0.08", promote_split="0.20")
+    assert isinstance(terms.pref_rate, float)
+    assert terms.pref_rate == 0.08
+    assert run_waterfall(CONTRIBUTION, DISTRIBUTIONS, terms)["gp"]["promote"]
+    with pytest.raises(ValueError, match="must be a number"):
+        WaterfallTerms(pref_rate="eight percent")
+
+
+def test_a_boolean_is_not_a_rate():
+    """bool is a subclass of int, so True would be a 100% pref."""
+    with pytest.raises(ValueError, match="bool is a subclass"):
+        WaterfallTerms(pref_rate=True)
+    with pytest.raises(ValueError, match="bool is a subclass"):
+        WaterfallTerms(gp_coinvest_pct=False)
+
+
 def test_nan_terms_are_rejected():
     with pytest.raises(ValueError, match="finite"):
         WaterfallTerms(pref_rate=float("nan"))
     with pytest.raises(ValueError, match="finite"):
         WaterfallTerms(promote_split=float("inf"))
-    with pytest.raises(ValueError, match="finite"):
+    with pytest.raises(ValueError, match="must be a number"):
         WaterfallTerms(gp_coinvest_pct=None)
+
+
+def test_a_stringified_false_does_not_switch_on_the_catch_up():
+    """`bool("False")` is True, which would fail the run with "a GP
+    catch-up tier is not supported" on terms that asked for none."""
+    assert resolve_waterfall_terms({"catch_up": "False"}).catch_up is False
+    assert resolve_waterfall_terms({"catch_up": "0"}).catch_up is False
+    with pytest.raises(NotImplementedError, match="catch-up"):
+        resolve_waterfall_terms({"catch_up": "true"})
+    with pytest.raises(ValueError, match="must be a boolean"):
+        resolve_waterfall_terms({"catch_up": "maybe"})
 
 
 # ── Resolution from config ──────────────────────────────────────────
@@ -585,13 +701,27 @@ def test_gp_coinvest_comes_from_the_capital_block_not_waterfall_terms():
 
 def test_dataclass_defaults_do_not_drift_from_config():
     """CLAUDE.md allows a static fallback only when the no-drift
-    invariant is CI-guarded; this is that guard."""
+    invariant is CI-guarded; this is that guard.
+
+    It checks the key SETS as well as the values. Comparing only the
+    keys present in both is drift-blind in the direction that matters:
+    delete or rename `pref_rate` in config and the mirrored dataclass
+    default silently becomes the only source of truth, which is exactly
+    the divergence the rule exists to prevent — and it would pass a
+    value-only comparison.
+    """
     import dataclasses
 
     defaults = {f.name: f.default for f in dataclasses.fields(WaterfallTerms)}
+    expected_keys = set(defaults) - {"gp_coinvest_pct"}   # see the test below
+    assert set(cfg.WATERFALL_TERMS) == expected_keys, (
+        "config.WATERFALL_TERMS and WaterfallTerms describe different term "
+        f"sets — config only: {sorted(set(cfg.WATERFALL_TERMS) - expected_keys)}, "
+        f"dataclass only: {sorted(expected_keys - set(cfg.WATERFALL_TERMS))}")
+
     drifted = {key: (defaults[key], value)
                for key, value in cfg.WATERFALL_TERMS.items()
-               if key in defaults and defaults[key] != value}
+               if defaults[key] != value}
     assert drifted == {}, (
         "WaterfallTerms defaults drifted from config.WATERFALL_TERMS "
         f"(field default, config value): {drifted}")

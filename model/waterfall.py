@@ -26,9 +26,20 @@ wrong:
    starts earning next period.
 3. **Distribute** — tier 1 (return of capital and preferred return, GP
    and LP pari passu) until it is current, then the residual, on which
-   the GP earns its promote. Paying no promote until tier 1 is current
-   in every period is what removes the need for a clawback structurally
-   rather than contractually.
+   the GP earns its promote. No promote is paid in any period where
+   tier 1 is not current, so every promoted dollar follows a full
+   return of capital and preferred return *as of that period*.
+
+**That is not the same as a clawback, and the difference is reported.**
+Capital called AFTER a promote has been paid re-opens tier 1 with the
+promote already gone. The operator's fund terms have no clawback (LPA
+question 6, answered), so the GP keeps it — that is the correct model of
+the actual terms, not a defect in them. What would be a defect is
+leaving it to be inferred from a `tier1_current: False` sitting beside a
+positive promote, so the result reports `interim_promote` explicitly and
+logs it. On a single-asset deal the residual normally arises only at
+sale, after which no capital can be called; a refinance distribution
+followed by a follow-on call is the shape that opens it.
 
 **Nothing outside `tests/` imports this yet.** E2 ships the engine; E3
 wires it into the assumptions form, results, memo and Excel.
@@ -44,6 +55,7 @@ carries the resolved set so no LP net IRR is ever displayed without it.
 
 import logging
 import math
+from collections.abc import Mapping, Sized
 from dataclasses import dataclass, fields
 
 import numpy_financial as npf
@@ -127,6 +139,18 @@ class WaterfallTerms:
     def __post_init__(self):
         """Reject terms that have no meaning before they reach the math.
 
+        The numeric fields are COERCED to float here, not merely checked.
+        A frozen dataclass built directly — `WaterfallTerms(pref_rate=
+        "0.08")` — otherwise carries a string past every guard and then
+        fails much later with "Unknown format code '%' for object of type
+        'str'", an error naming neither the field nor the caller.
+        `resolve_waterfall_terms` already coerces; direct construction is
+        the path E3's tests and the CLI will take.
+
+        Booleans are rejected rather than coerced. `bool` is a subclass
+        of `int`, so `pref_rate=True` would otherwise sail through as a
+        100% preferred return.
+
         NaN is rejected explicitly, for the reason `DebtTerms` records:
         every comparison against NaN is False, so it walks past a
         range guard untouched and then poisons the arithmetic WITHOUT
@@ -136,16 +160,38 @@ class WaterfallTerms:
         """
         for name in _FLOAT_FIELDS:
             value = getattr(self, name)
-            if value is None or not math.isfinite(float(value)):
+            if isinstance(value, bool):
+                raise ValueError(
+                    f"{name} must be a number, got {value!r} — bool is a "
+                    "subclass of int, so True would be read as 1.0.")
+            try:
+                value = float(value)
+            except (TypeError, ValueError):
+                raise ValueError(
+                    f"{name} must be a number, got {value!r}") from None
+            if not math.isfinite(value):
                 raise ValueError(
                     f"{name} must be a finite number, got {value!r} — NaN "
                     "passes every ordinary guard and then produces a "
                     "confident wrong answer instead of an error.")
+            object.__setattr__(self, name, value)
+        for name in _STR_FIELDS:
+            object.__setattr__(self, name, str(getattr(self, name)))
 
-        if float(self.pref_rate) < 0:
+        # The bound is the same [0, 1) as the two split fields, and it is
+        # here for the same reason they have one: this codebase displays
+        # percentages as whole numbers and stores them as decimals
+        # (webapp.forms owns that boundary), so `pref_rate=8` meaning 8%
+        # is the live mistake. Unbounded, it accrued $8,000,000 of
+        # preferred return on $1,000,000 of capital in year one and said
+        # nothing, while `promote_split=20` on the same form correctly
+        # raised.
+        if not 0.0 <= self.pref_rate < 1.0:
             raise ValueError(
-                f"pref_rate cannot be negative, got {self.pref_rate!r} — a "
-                "negative preferred return pays the LP for waiting.")
+                f"pref_rate must be in [0, 1), got {self.pref_rate!r} — "
+                "rates are DECIMAL fractions here (0.08, not 8). A "
+                "negative preferred return pays the LP for waiting; a "
+                "whole-number percent accrues a hundredfold.")
         if not 0.0 <= float(self.promote_split) < 1.0:
             raise ValueError(
                 f"promote_split must be in [0, 1), got "
@@ -202,6 +248,27 @@ class WaterfallTerms:
                 "leakage, and the promote applies to the residual only.")
 
 
+_FALSEY_STRINGS = {"", "0", "false", "no", "off"}
+_TRUTHY_STRINGS = {"1", "true", "yes", "on"}
+
+
+def _coerce_bool(value):
+    """A stored override or a form field arrives as a string, and
+    `bool("False")` is True — which would fail a run with "a GP catch-up
+    tier is not supported" on terms that explicitly asked for none.
+    """
+    if isinstance(value, str):
+        text = value.strip().lower()
+        if text in _FALSEY_STRINGS:
+            return False
+        if text in _TRUTHY_STRINGS:
+            return True
+        raise ValueError(
+            f"catch_up must be a boolean, got {value!r} — bool() would read "
+            "any non-empty string as True.")
+    return bool(value)
+
+
 def resolve_waterfall_terms(overrides: dict = None) -> WaterfallTerms:
     """Partial override → fully resolved terms.
 
@@ -250,8 +317,59 @@ def resolve_waterfall_terms(overrides: dict = None) -> WaterfallTerms:
         if resolved.get(key) is not None:
             resolved[key] = str(resolved[key])
     if "catch_up" in resolved:
-        resolved["catch_up"] = bool(resolved["catch_up"])
+        resolved["catch_up"] = _coerce_bool(resolved["catch_up"])
     return WaterfallTerms(**resolved)
+
+
+def _as_amounts(label, series):
+    """One period-indexed money series → a list of floats.
+
+    Strict about what counts as a series, because the loose reading is
+    silently wrong rather than loudly wrong: `"123"` iterates to THREE
+    periods of $1, $2 and $3, and a dict iterates its KEYS, so
+    `{1: "a", 2: "b"}` becomes distributions of $1 and $2. Neither
+    raises anything on its own. A generator is refused too — it has no
+    length to check the two series against each other with, and it is
+    consumed by the first pass.
+
+    `None` and `""` entries are refused rather than read as zero. A
+    missing period in a cash-flow series is missing data, and quietly
+    calling it "distributed nothing" is the swallowed error this
+    codebase's rules forbid — especially beside a NaN in the same slot,
+    which does raise.
+    """
+    if isinstance(series, (str, bytes, Mapping)) or not isinstance(series,
+                                                                   Sized):
+        raise TypeError(
+            f"{label} must be a period-indexed sequence of numbers (index 0 "
+            f"= close), got {type(series).__name__}: {series!r}")
+
+    amounts = []
+    for period, value in enumerate(series):
+        if isinstance(value, bool) or value is None or isinstance(
+                value, (str, bytes)):
+            raise ValueError(
+                f"{label}[{period}] must be a number, got {value!r} — a "
+                "missing period is missing data, not a zero.")
+        try:
+            amount = float(value)
+        except (TypeError, ValueError):
+            raise ValueError(
+                f"{label}[{period}] must be a number, got {value!r}") from None
+        if not math.isfinite(amount):
+            raise ValueError(
+                f"{label}[{period}] must be a finite number, got {value!r} — "
+                "a NaN here produces a NaN promote reported as a number.")
+        if amount < 0:
+            raise ValueError(
+                f"{label}[{period}] cannot be negative, got {value!r}. A "
+                "negative distribution is a capital call and a negative "
+                "contribution is a distribution; netting them silently "
+                "corrupts the accrual base. See the plan doc's E3 handoff "
+                "note: a debt-service shortfall is a reserve draw or a "
+                "capital call, not a negative distribution.")
+        amounts.append(amount)
+    return amounts
 
 
 def _align_series(contributions, distributions):
@@ -265,40 +383,30 @@ def _align_series(contributions, distributions):
     year 1's cash to period 0 and silently delete a year of preferred
     return.
     """
-    if isinstance(distributions, (int, float)) or distributions is None:
-        raise TypeError(
-            "distributions must be a period-indexed sequence (index 0 = "
-            f"close), got {distributions!r}")
-    dists = [float(d or 0.0) for d in distributions]
+    dists = _as_amounts("distributions", distributions)
     if not dists:
         raise ValueError("distributions is empty — there is nothing to "
                          "distribute and no period to distribute it in.")
 
+    if isinstance(contributions, bool):
+        raise ValueError(
+            f"contributions must be a number or a sequence, got "
+            f"{contributions!r} — bool is a subclass of int, so True would "
+            "fund the deal with $1.")
     if isinstance(contributions, (int, float)):
         contribs = [float(contributions)] + [0.0] * (len(dists) - 1)
+        if not math.isfinite(contribs[0]) or contribs[0] < 0:
+            raise ValueError(
+                f"contributions must be a finite, non-negative number, got "
+                f"{contributions!r}")
     else:
-        contribs = [float(c or 0.0) for c in contributions]
+        contribs = _as_amounts("contributions", contributions)
         if len(contribs) != len(dists):
             raise ValueError(
                 f"contributions has {len(contribs)} periods and "
                 f"distributions has {len(dists)} — they are period-indexed "
                 "and must align. Pass a single number for contributions if "
                 "all equity is funded at close.")
-
-    for label, series in (("contributions", contribs),
-                          ("distributions", dists)):
-        for period, value in enumerate(series):
-            if not math.isfinite(value):
-                raise ValueError(
-                    f"{label}[{period}] must be a finite number, got "
-                    f"{value!r} — a NaN here produces a NaN promote "
-                    "reported as a number.")
-            if value < 0:
-                raise ValueError(
-                    f"{label}[{period}] cannot be negative, got {value!r}. A "
-                    "negative distribution is a capital call and a negative "
-                    "contribution is a distribution; netting them silently "
-                    "corrupts the accrual base.")
     return contribs, dists
 
 
@@ -463,8 +571,10 @@ def run_waterfall(contributions, distributions,
                              and unpaid_pref <= BALANCE_TOLERANCE)
 
         # 4. Residual, and the promote on the LP's share of it. No
-        #    promote is paid in any period where tier 1 is not current,
-        #    which is what removes the need for a clawback structurally.
+        #    promote is paid in any period where tier 1 is not current.
+        #    A later capital call re-opens tier 1 and the promote is not
+        #    recovered — no clawback, per the fund terms — which
+        #    `interim_promote` reports rather than hides.
         residual = cash
         if residual > BALANCE_TOLERANCE and not tier1_current:
             # Unreachable: tier 1 is paid with min(), so cash survives
@@ -514,6 +624,19 @@ def run_waterfall(contributions, distributions,
     gp_distributed = sum(r["gp_distribution"] for r in rows)
     ending_pref = max(0.0, balance - capital) if compounded else unpaid_pref
 
+    # Promote paid in a period that a later capital call re-opened. With
+    # no clawback the GP keeps it, so it is stated rather than left to be
+    # read off a False `tier1_current` next to a positive promote.
+    last_call = max((r["period"] for r in rows
+                     if r["contribution"] > 0), default=-1)
+    interim_promote = sum(r["gp_promote"] for r in rows
+                          if r["period"] < last_call)
+    if interim_promote > BALANCE_TOLERANCE:
+        logger.warning(
+            "$%.2f of promote was paid before capital was called in period "
+            "%s; tier 1 re-opened afterwards and these fund terms carry no "
+            "clawback, so the GP keeps it.", interim_promote, last_call)
+
     return {
         "terms": terms,
         "periods": rows,
@@ -545,4 +668,9 @@ def run_waterfall(contributions, distributions,
         "unpaid_pref": ending_pref,
         "tier1_current": (capital <= BALANCE_TOLERANCE
                           and ending_pref <= BALANCE_TOLERANCE),
+        # Nonzero means the GP was promoted on a period that a later
+        # capital call re-opened. Not recoverable — these fund terms have
+        # no clawback — so any consumer showing the promote must show
+        # this beside it.
+        "interim_promote": interim_promote,
     }

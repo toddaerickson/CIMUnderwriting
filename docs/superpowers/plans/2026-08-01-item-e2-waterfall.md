@@ -84,6 +84,26 @@ promote on 100% of the residual pays the GP a promote on its own
 co-invest capital — the design doc lists it as a pitfall and the scope
 contract's stamp table names it open question 5.
 
+**A promote paid before a later capital call is kept, and reported.**
+Found by the review, reproduced before repairing: contribute $1,000,000,
+distribute $2,000,000 in period 2 (which clears tier 1 and pays the GP
+$150,048), then call $5,000,000 in period 3. Tier 1 re-opens, the LP ends
+at 0.39x MOIC and −89.6% IRR, and the GP still has the promote. The first
+draft's docstring claimed the per-period gate "removes the need for a
+clawback structurally", which overstates it — the gate guarantees only
+that each promoted dollar followed a full return of capital and pref *as
+of that period*.
+
+The arithmetic is right and stays: LPA question 6 is **answered — no
+clawback**, so a GP that keeps interim promote is the operator's actual
+fund terms, not a modeling error, and clawback mechanics are explicitly
+out of scope. What was wrong was the claim and the silence. The result
+now carries `interim_promote` (promote paid in any period a later call
+re-opened) and logs a warning, so no consumer can print a promote without
+the condition attached. On a single-asset deal the residual normally
+arises only at sale, after which nothing can be called; a refinance
+distribution followed by a follow-on call is the shape that opens it.
+
 **Ordering is inert under compounding, and that is tested, not asserted.**
 The design doc claims ROC-vs-pref ordering is mathematically irrelevant
 once the pref compounds, because there is one balance rather than two
@@ -151,6 +171,46 @@ layer and would need unpacking at every consumer.
 `project_cash_flows`: `webapp.services.json_safe` exists because
 `json.dumps(nan)` is invalid JSON that Postgres JSONB rejects, and E3
 persists these results.
+
+## Handoff to E3: a debt-service shortfall is not a negative distribution
+
+E1's plan recorded the integration trap its own review found before E3
+could walk into it. This is E2's equivalent, and it is the reason
+`run_waterfall` rejects a negative distribution instead of accepting one.
+
+E3 will build the distribution series from levered cash flow — NOI less
+annual debt service, with the exit year adding net sale proceeds less the
+loan payoff. **That series can be negative in a year**, and it is exactly
+the years a levered deal is most interesting: a partial-IO loan rolling to
+its amortizing payment, or a value-add year 1 where in-place NOI does not
+yet cover a loan sized on stabilized NOI. `_align_series` raises on it
+rather than netting it, because a negative distribution silently netted
+against the pref accrual pays the LP a *reduced* preferred return for the
+privilege of the deal losing money.
+
+There are two correct treatments and E3 must choose per period, not once:
+
+1. **Draw the operating reserve.** Item D funds a reserve at close, puts
+   it in `total_basis`, and deliberately does not release it at exit. A
+   shortfall covered from that reserve is not a waterfall event at all —
+   the distribution for the period is 0, and the money was already
+   contributed at close.
+2. **Call capital**, once the reserve is exhausted. That is a
+   `contributions[t]` entry, which this module already supports and
+   `test_a_mid_stream_capital_call_starts_accruing_the_following_period`
+   already pins: the call joins the accrual base and starts earning pref
+   the *following* period.
+
+Both are one line in E3. Neither is a negative distribution, and the
+current hard failure is what forces the choice to be made explicitly
+instead of defaulted into.
+
+**A second, smaller seam.** `run_waterfall` returns the frozen
+`WaterfallTerms` under `terms`, and E3 persists results through
+`webapp.services.json_safe` into Postgres JSONB. A dataclass is not
+JSON-serialisable — E3 either drops the key or converts it
+(`dataclasses.asdict`). `assumption_stamp` is already plain dicts and
+strings, so the displayed stamp needs no conversion.
 
 ## Files
 
