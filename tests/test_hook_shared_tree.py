@@ -213,6 +213,63 @@ def test_guard_solo_mode_still_opens_the_gate(repo):
     assert run_guard(f"git -C {repo} commit -m x", repo, repo) is None
 
 
+# ── Working-tree writers the subcommand list missed ──────────────────
+# `pull` reached main unguarded: it is fetch + merge/rebase, so it rewrites the
+# shared tree, but only `merge` and `rebase` were listed. `rm`/`mv`/`bisect` are
+# the same failure mode — they write the tree without naming a listed subcommand.
+
+def test_guard_denies_pull_in_the_primary_tree(repo):
+    assert run_guard(f"git -C {repo} pull --ff-only origin main", repo, repo) == "deny"
+
+
+def test_guard_denies_pull_with_no_explicit_target(repo):
+    assert run_guard("git pull", repo, repo) == "deny"
+
+
+def test_guard_allows_pull_inside_a_worktree(repo, tmp_path):
+    wt = tmp_path / "wt"
+    git(repo, "worktree", "add", "-q", str(wt), "-b", "feature")
+    assert run_guard(f"git -C {wt} pull --ff-only origin main", wt, repo) is None
+
+
+def test_guard_allows_pull_help(repo):
+    assert run_guard(f"git -C {repo} pull --help", repo, repo) is None
+
+
+def test_guard_denies_rm_and_mv_in_the_primary_tree(repo):
+    assert run_guard(f"git -C {repo} rm config.py", repo, repo) == "deny"
+    assert run_guard(f"git -C {repo} mv config.py other.py", repo, repo) == "deny"
+
+
+def test_guard_allows_rm_cached_and_dry_runs(repo):
+    # --cached unstages but leaves the file on disk — index-only, like `restore --staged`
+    assert run_guard(f"git -C {repo} rm --cached config.py", repo, repo) is None
+    assert run_guard(f"git -C {repo} rm -n config.py", repo, repo) is None
+    assert run_guard(f"git -C {repo} mv --dry-run config.py other.py", repo, repo) is None
+
+
+def test_guard_denies_bisect_checkouts_but_allows_reading_the_log(repo):
+    assert run_guard(f"git -C {repo} bisect start", repo, repo) == "deny"
+    assert run_guard(f"git -C {repo} bisect log", repo, repo) is None
+
+
+def test_guard_still_allows_plain_fetch(repo):
+    # fetch only moves remote-tracking refs; blocking it would break syncing
+    assert run_guard(f"git -C {repo} fetch origin --prune", repo, repo) is None
+
+
+def test_pull_deny_reason_points_at_solo_mode_not_just_a_worktree(repo):
+    payload = json.dumps({"tool_name": "Bash", "cwd": str(repo),
+                          "tool_input": {"command": f"git -C {repo} pull"}})
+    e = {**os.environ, "CLAUDE_PROJECT_DIR": str(repo)}
+    e.pop("CIM_SOLO", None)
+    p = subprocess.run([sys.executable, GUARD], input=payload,
+                       capture_output=True, text=True, env=e, timeout=30)
+    reason = json.loads(p.stdout)["hookSpecificOutput"]["permissionDecisionReason"]
+    assert "CIM_SOLO" in reason
+    assert "worktree does not sync" in reason
+
+
 def test_guard_still_denies_a_file_edit_in_the_primary_tree(repo):
     payload = json.dumps({"tool_name": "Write",
                           "tool_input": {"file_path": str(repo / "config.py")},

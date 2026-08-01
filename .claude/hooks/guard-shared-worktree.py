@@ -3,9 +3,9 @@
 working tree of THIS project's shared clone.
 
 Multiple concurrent Claude sessions share this one clone. A session that mutates the
-PRIMARY working tree — edits a repo file, or runs a git branch/commit/reset/checkout
-there — can collide with another session that switches the primary clone's branch out
-from under it (the failure this guard exists to prevent; see CLAUDE.md rule
+PRIMARY working tree — edits a repo file, or runs a git branch/commit/reset/checkout/
+pull there — can collide with another session that switches the primary clone's branch
+out from under it (the failure this guard exists to prevent; see CLAUDE.md rule
 "Simultaneous sessions").
 
 This guard DENIES file mutations (Edit/Write/MultiEdit/NotebookEdit) and git-mutating
@@ -32,7 +32,13 @@ version):
     launder a later primary mutation, and `-c k=v -C <primary>` can't hide the target.
   * A working-tree restore (`checkout … -- <file>`, `restore <file>`) is treated as a
     mutation — it overwrites shared-tree file content. Only index-only ops
-    (`restore --staged`, bare `reset`, `reset -- <path>`) are allowed.
+    (`restore --staged`, bare `reset`, `reset -- <path>`, `rm --cached`) are allowed.
+  * The subcommand list is by WRITE EFFECT, not by familiarity. `pull` shipped
+    unguarded because only its halves (`merge`, `rebase`) were listed while the
+    compound name was not — it rewrites the tree just the same. `rm`/`mv`/`bisect`
+    were the same oversight: each writes the tree without naming a listed subcommand.
+    `fetch` stays ALLOWED — it moves remote-tracking refs only, never the working
+    tree, and it is how a session syncs without touching the shared checkout.
   * Scoped to THIS clone via $CLAUDE_PROJECT_DIR — other repos are never guarded.
   * A git mutation whose target can't be resolved (unexpanded $VAR / missing dir)
     FAILS CLOSED (deny).
@@ -198,12 +204,29 @@ def _branch_mut(args):
                for a in args)                          # delete/rename/force (not list/create)
 
 
+def _mv_mut(args):
+    if "--help" in args or "-h" in args:
+        return False
+    return not ("--dry-run" in args or "-n" in args)
+
+
+def _rm_mut(args):
+    # --cached unstages but leaves the file on disk — index-only, like `restore --staged`
+    return _mv_mut(args) and "--cached" not in args
+
+
+def _bisect_mut(args):
+    if "--help" in args or "-h" in args:
+        return False
+    return not (args and args[0] in ("log", "view", "help"))  # start/good/bad check commits out
+
+
 def _is_mutation(sub, args):
     if sub in ("commit", "merge", "rebase", "cherry-pick", "am", "revert", "apply",
                "update-ref", "update-index", "gc"):
         return True
-    if sub in ("checkout", "switch"):
-        return not ("--help" in args or "-h" in args)  # switch/checkout are always tree/ref ops
+    if sub in ("checkout", "switch", "pull"):
+        return not ("--help" in args or "-h" in args)  # tree/ref ops; pull = fetch + merge/rebase
     if sub == "restore":
         return _restore_mut(args)
     if sub == "reset":
@@ -218,6 +241,12 @@ def _is_mutation(sub, args):
         return bool(args) and args[0] in ("delete", "expire")
     if sub == "worktree":
         return bool(args) and args[0] in ("remove", "prune", "move")
+    if sub == "mv":
+        return _mv_mut(args)
+    if sub == "rm":
+        return _rm_mut(args)
+    if sub == "bisect":
+        return _bisect_mut(args)
     return False
 
 
@@ -270,8 +299,20 @@ def _env_chdir(toks):
     return i, target, un
 
 
-def _reason(target):
+def _reason(target, sub=""):
     branch = git("-C", target, "branch", "--show-current") or "(detached HEAD)"
+    # Syncing the primary tree is a legitimate errand a new worktree cannot run,
+    # so `pull` gets pointed at the solo hatch instead of the generic isolate advice.
+    if sub == "pull":
+        return (
+            f"BLOCKED: `git pull` rewrites the PRIMARY working tree of the shared clone "
+            f"(branch '{branch}') — it is fetch + merge/rebase, and a concurrent session "
+            f"reading this tree would have the files move under it (CLAUDE.md: Simultaneous "
+            f"sessions). A worktree does not sync this tree, so isolating is not the fix "
+            f"here. Either `git fetch origin --prune` (moves remote-tracking refs only, "
+            f"never the working tree — new worktrees branch from origin/main anyway), or, "
+            f"once no other session is live, re-launch with CIM_SOLO=1 and pull --ff-only."
+        )
     return (
         f"BLOCKED: this mutation targets the PRIMARY working tree of the shared clone "
         f"(branch '{branch}'). Concurrent Claude sessions share it; mutating here risks a "
@@ -320,7 +361,7 @@ def _eval_bash(cmd, session_cwd, project_clone):
         if target is None:
             return UNRESOLVED
         if _target_guarded(target, project_clone):
-            return _reason(target)
+            return _reason(target, sub)
     return None
 
 
