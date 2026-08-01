@@ -28,6 +28,27 @@ never remove, weaken, or bypass them:
   linked worktrees, foreign dirty state, and whether solo mode is on.
 - **PreToolUse** `.claude/hooks/guard-shared-worktree.py` — DENIES file edits
   and git mutations targeting the primary working tree of this clone.
+- **PostToolUse** `.claude/hooks/detect-primary-tree-writes.py` — REPORTS
+  writes that landed in the primary tree anyway. The PreToolUse guard only
+  inspects Bash commands whose command word is `git`, so `echo >`, `sed -i`,
+  `cp`, an interpreter fed by a heredoc, and anything a script does all pass
+  it untouched. Deciding that from a shell string is undecidable, so this
+  hook does not predict — it snapshots the primary tree and compares after
+  each Bash call, which is blind to HOW a write happened and so covers
+  vectors nobody enumerated, plus a concurrent session's branch switch.
+  **Its limits, because a safety tool you over-trust is worse than none:** it
+  detects, it does not prevent (a report means "undo this now"); it cannot
+  see gitignored paths at all, since `git status` is its only eye; and with
+  concurrent sessions it cannot tell your write from theirs. If it cannot
+  read the tree it says MONITORING DEGRADED rather than going quiet.
+- Both hooks read `.claude/hooks/_shared_tree.py` for "which tree is primary"
+  and "is solo mode on" — one definition, so they can never protect different
+  trees. `tests/test_hook_shared_tree.py` is the CI gate on that.
+
+**The mistake this catches, because it is easy to make:** `cd` does NOT
+persist between Bash calls. A relative path in a later command therefore
+resolves against the primary tree, not your worktree. Use absolute paths and
+`git -C <worktree>` in every command that writes.
 
 Working rules:
 1. Before any file-mutating work, isolate:
