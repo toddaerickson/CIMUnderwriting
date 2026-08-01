@@ -596,6 +596,29 @@ def test_an_analyst_override_says_what_it_overrode():
     assert describe_market_cap(bare) == "analyst-entered"
 
 
+def test_the_va_solver_derives_its_cap_from_the_scenario_it_is_solving():
+    """`compute_va_irr_at_price` hardcoded `name=ScenarioType.BASE` while
+    the caller picked `params` by its own scenario argument. Once `name`
+    started driving the exit-cap spread and drift — and it already drove
+    the exit ≥ entry coercion, which bull is exempt from — solving for
+    bull would have used base's cap and base's floor."""
+    from model.value_add_model import compute_va_irr_at_price
+
+    mc = resolve_market_cap(market_cap=ANCHOR)
+    kw = dict(cim_data=_FakeCIM(), financial_analysis=VA_FIN,
+              price=8_000_000, capex=0, market_cap=mc)
+    bull = compute_va_irr_at_price(
+        params=cfg.VALUE_ADD_SCENARIOS[ScenarioType.BULL],
+        scenario=ScenarioType.BULL, **kw)
+    base = compute_va_irr_at_price(
+        params=cfg.VALUE_ADD_SCENARIOS[ScenarioType.BULL],
+        scenario=ScenarioType.BASE, **kw)
+    # Same params, different scenario label → different cap → different
+    # IRR. Bull's cap is 112.5 bp tighter, so it must price higher.
+    assert bull is not None and base is not None
+    assert bull > base
+
+
 def test_market_exit_cap_is_advisory_not_blocking():
     """Blocking is reserved for identities the pipeline computes on
     itself (see `_sources_uses_ties`). An anchor is an input."""

@@ -195,7 +195,8 @@ def solve_max_price_value_add(cim_data, financial_analysis: dict,
         irr = compute_va_irr_at_price(cim_data, financial_analysis, mid,
                                       capex_at(mid), params,
                                       hold_years=hold_years, costs=costs,
-                                      reserve=reserve, market_cap=market_cap)
+                                      reserve=reserve, market_cap=market_cap,
+                                      scenario=scenario)
 
         if irr is None:
             high = mid

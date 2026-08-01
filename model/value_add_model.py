@@ -308,13 +308,21 @@ def compute_va_irr_at_price(cim_data, financial_analysis: dict,
                              hold_years: int = None,
                              costs: dict = None,
                              reserve: float = 0.0,
-                             market_cap: dict = None) -> float | None:
+                             market_cap: dict = None,
+                             scenario=ScenarioType.BASE) -> float | None:
     """
     Compute VA IRR at a given purchase price.
     Used by the bisection solver, so acquisition closing costs must be
     derived from `price` inside this call rather than added afterwards.
     `capex` arrives already resolved for this price — the solver owns the
     %-of-price basis, since only it knows which price is being tried.
+
+    `scenario` names which case is being solved. It used to be hardcoded
+    to BASE here while the caller selected `params` by its own scenario
+    argument, so solving for bull silently applied base's exit-cap spread
+    and drift AND base's exit ≥ entry coercion — which bull is exempt
+    from by design. Nothing passes a non-default scenario today; this
+    keeps that from becoming wrong the moment something does.
     """
     in_place_rent_psf = _compute_in_place_rent_psf(cim_data)
     market_rent_psf = cim_data.market_rent_psf or in_place_rent_psf
@@ -328,7 +336,7 @@ def compute_va_irr_at_price(cim_data, financial_analysis: dict,
     monthly_expenses_start = adj_expenses / 12
 
     result = _run_single_va_scenario(
-        name=ScenarioType.BASE,
+        name=scenario,
         params=params,
         nrsf=nrsf,
         in_place_rent_psf=in_place_rent_psf,

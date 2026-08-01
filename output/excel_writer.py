@@ -100,10 +100,14 @@ def generate_excel(property_name: str, cim_data, financial_analysis: dict,
 
 # ── Tab Builders ────────────────────────────────────────────────────
 
-def _dotted(d: dict, key: str):
+def _dotted(d: dict, key):
     """Read `a.b` out of a nested result dict, missing levels → None.
     Lets a comparison table name a component of `exit_cap_detail` without
-    the table's rows growing a second shape."""
+    the table's rows growing a second shape. A callable key is applied to
+    the whole scenario dict, for the one row that is rendered rather than
+    read (the market-cap provenance sentence)."""
+    if callable(key):
+        return key(d)
     cur = d
     for part in str(key).split("."):
         if not isinstance(cur, dict):
@@ -568,6 +572,12 @@ def _build_value_add_tab(ws, va_results: dict, va_max_offer: dict, cim_data):
         # resolver, so the anchor printed here is the same anchor the
         # Inputs tab prints — showing it is what makes that checkable.
         ("Market Cap Rate", "exit_cap_detail.market_cap", CAP_FORMAT),
+        # Provenance here too, not just on the Inputs tab and the memo.
+        # Value-add IS the target deal profile, so this is the surface an
+        # analyst reads most — and an override that shows as a bare rate
+        # is the same missing trace the static side was fixed for.
+        ("  Market Cap Source",
+         lambda s: describe_market_cap(s.get("exit_cap_detail") or {}), None),
         ("  Scenario Spread (bp)",
          "exit_cap_detail.scenario_spread_bps", '#,##0.0'),
         ("  Obsolescence Drift (bp)",
