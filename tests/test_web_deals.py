@@ -568,7 +568,8 @@ def test_a_rate_without_its_denominator_is_rejected():
     it, so the form refuses the combination while they are still here."""
     form = _capital_form(capex_estimate=0.50, capex_basis="per_sf")
     assert not form.is_valid()
-    assert "NRSF is blank" in str(form.errors["capex_basis"])
+    assert "NRSF is blank" in str(form.non_field_errors())
+    assert form.cleaned_data["capex_basis"] == "per_sf"   # not detached
 
     ok = _capital_form(capex_estimate=0.50, capex_basis="per_sf", nrsf=50_000)
     assert ok.is_valid(), ok.errors
@@ -598,7 +599,12 @@ def test_changing_a_unit_costs_one_confirmation():
     form = _capital_form(capex_estimate=2, capex_basis="amount",
                          capex_unit_stamp="pct_price")
     assert not form.is_valid()
-    assert "will now be read as $ total" in str(form.errors["capex_basis"])
+    assert "will now be read as $ total" in str(form.non_field_errors())
+    # The basis must SURVIVE the error. add_error(field, ...) would delete
+    # it from cleaned_data, and the live preview — which proceeds on an
+    # invalid form by design — would then read the OLD basis back out of
+    # build_overrides' default (re-review finding).
+    assert form.cleaned_data["capex_basis"] == "amount"
 
     # The template stamps the CURRENT selection, so the restated save goes
     # through — the refusal is one round trip, not a trap.
@@ -618,5 +624,27 @@ def test_the_reserve_carries_the_same_unit_guard():
                          operating_reserve_basis="per_sf",
                          reserve_unit_stamp="amount")
     assert not form.is_valid()
-    assert "operating reserve" in str(form.errors["operating_reserve_basis"])
+    assert "operating reserve" in str(form.non_field_errors())
+    assert form.cleaned_data["operating_reserve_basis"] == "per_sf"
 
+
+
+@pytest.mark.django_db
+def test_the_live_preview_keeps_the_new_basis_while_a_confirmation_is_open():
+    """assumptions_preview proceeds on an invalid form by design. If the
+    basis error detached capex_basis from cleaned_data, build_overrides
+    would silently fall back to the config default and the preview would
+    compute for the OLD unit — during exactly the interaction the guard
+    exists to cover (re-review finding)."""
+    from django.http import QueryDict
+    from webapp.forms import AssumptionsForm, build_overrides
+    from webapp.models import Deal
+
+    deal = Deal.objects.create(deal_id="prev", property_name="Prev",
+                               cim_json={"nrsf": 50_000.0})
+    post = QueryDict("nrsf=50000&capex_estimate=0.75&capex_basis=per_sf"
+                     "&capex_unit_stamp=amount")
+    form = AssumptionsForm(post)
+    assert not form.is_valid()          # confirmation is outstanding
+    out = build_overrides(form.cleaned_data, post, deal)
+    assert out["capital_structure"]["capex_basis"] == "per_sf"

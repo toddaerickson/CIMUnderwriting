@@ -331,6 +331,23 @@ class AssumptionsForm(forms.Form):
         else:
             cleaned["ttm_noi"] = round(rev - exp, 2)
 
+    def _basis_error(self, message: str):
+        """Record a basis problem WITHOUT detaching the basis from
+        cleaned_data.
+
+        `add_error(field, ...)` deletes that field from `cleaned_data` —
+        Django's documented behavior. The live preview is what gets hurt:
+        `assumptions_preview` proceeds on an invalid form BY DESIGN (it
+        shows a state rather than blocking) and reads `cleaned_data`
+        straight through `build_overrides`, whose basis lookup then falls
+        back to the config default. Flagging a basis would therefore
+        silently revert the preview to the OLD basis, during exactly the
+        change-the-basis interaction these two checks exist to guard
+        (re-review finding). A non-field error is just as visible — the
+        page renders `{{ form.errors }}` whole — and detaches nothing.
+        """
+        self.add_error(None, forms.ValidationError(message))
+
     def _validate_capital_bases(self, cleaned):
         """A rate needs its denominator.
 
@@ -347,12 +364,12 @@ class AssumptionsForm(forms.Form):
                 continue
             driver_field, driver_label = BASIS_DRIVER_FIELDS[basis]
             if not cleaned.get(driver_field):
-                self.add_error(basis_field, forms.ValidationError(
+                self._basis_error(
                     f"{label.capitalize()} is entered as "
                     f"{BASIS_LABELS[basis]}, but {driver_label} is blank — "
                     f"there is nothing to multiply by. Enter {driver_label}, "
                     f"or switch the basis back to "
-                    f"{BASIS_LABELS[BASIS_AMOUNT]}."))
+                    f"{BASIS_LABELS[BASIS_AMOUNT]}.")
 
     def _confirm_changed_units(self, cleaned):
         """Refuse the first save after a unit change, so the number gets
@@ -376,13 +393,13 @@ class AssumptionsForm(forms.Form):
             basis = cleaned.get(basis_field)
             if not stamp or not basis or stamp == basis:
                 continue
-            self.add_error(basis_field, forms.ValidationError(
+            self._basis_error(
                 f"The unit for {label} changed from "
                 f"{BASIS_LABELS.get(stamp, stamp)} to "
                 f"{BASIS_LABELS.get(basis, basis)}. The figure beside it "
                 f"will now be read as {BASIS_LABELS.get(basis, basis)} — "
                 f"check it is stated in that unit, then save again to "
-                f"confirm."))
+                f"confirm.")
 
     def clean(self):
         """Run the model error-check register over the submitted values.
