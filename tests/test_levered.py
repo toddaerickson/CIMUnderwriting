@@ -42,26 +42,31 @@ BP = 1e-6             # IRRs to four decimal places, as a rate
 COSTS = {"acquisition_closing_pct": 0.01, "disposition_cost_pct": 0.01}
 
 
-def _params(growth, exit_cap):
+def _params(growth):
     """A scenario parameter dict whose NOI grows at exactly `growth`.
 
     Revenue and expenses grow at the same rate, so the NOI margin holds
     and the series is `y1 * (1 + growth) ** k` — which is what the
     oracles were derived on. Both growth bands carry the same rate so a
     hold longer than three years does not change convention mid-stream.
+
+    The exit cap is NOT in here. PR #31 made it an argument derived from
+    a market anchor rather than a scenario parameter; these oracles pin
+    it explicitly so the levered arithmetic is tested against a fixed
+    exit, not against whatever the market table says this week.
     """
     return {"yr1_noi_bump": 0.0, "stabilized_occ": 0.88,
             "rev_cagr_yr1_3": growth, "rev_cagr_yr4_5": growth,
-            "exp_growth": growth, "exit_cap": exit_cap}
+            "exp_growth": growth}
 
 
 def _build(*, price, y1_noi, growth, exit_cap, terms, hold_years=5,
            reserve=0.0, gp_coinvest_pct=0.10, am_fee_pct=0.01):
     """Assemble one levered deal end to end, the way the engine does."""
     projection = project_cash_flows(
-        y1_noi, price, 0.0, _params(growth, exit_cap),
+        y1_noi, price, 0.0, _params(growth),
         hold_years=hold_years, expense_ratio=0.40, costs=COSTS,
-        reserve=reserve)
+        reserve=reserve, exit_cap=exit_cap)
     debt = build_debt_schedule(price, projection["noi"][0], terms,
                                hold_years=hold_years)
     sources_uses = build_sources_uses(
@@ -337,8 +342,8 @@ def test_debt_does_not_touch_the_unlevered_projection():
     not the deal carries a loan. E1's handoff prescribed the opposite;
     the tie moved instead of the projection."""
     unlevered = project_cash_flows(
-        600_000, 10_000_000, 0.0, _params(0.03, 0.0625),
-        hold_years=5, expense_ratio=0.40, costs=COSTS)
+        600_000, 10_000_000, 0.0, _params(0.03),
+        hold_years=5, expense_ratio=0.40, costs=COSTS, exit_cap=0.0625)
     projection, debt, _, _ = _build(price=10_000_000, y1_noi=600_000,
                                     growth=0.03, exit_cap=0.0625,
                                     terms=ORACLE_A)
@@ -411,8 +416,8 @@ def test_an_unsupported_am_fee_base_raises_rather_than_defaulting():
     a real convention and roughly 2.4x the equity base on this fixture,
     so defaulting it would be a quiet 2.4x error in the fee."""
     projection = project_cash_flows(
-        600_000, 10_000_000, 0.0, _params(0.03, 0.0625),
-        hold_years=5, expense_ratio=0.40, costs=COSTS)
+        600_000, 10_000_000, 0.0, _params(0.03),
+        hold_years=5, expense_ratio=0.40, costs=COSTS, exit_cap=0.0625)
     debt = build_debt_schedule(10_000_000, 600_000, ORACLE_A, hold_years=5)
     su = build_sources_uses(price=10_000_000, capex=0.0,
                             acquisition_cost=projection["acquisition_cost"],
@@ -545,8 +550,8 @@ def test_a_debt_payload_missing_its_payoff_raises():
     HIGH with no error anywhere. A zero VALUE is fine; a missing KEY is a
     broken payload."""
     projection = project_cash_flows(
-        600_000, 10_000_000, 0.0, _params(0.03, 0.0625),
-        hold_years=5, expense_ratio=0.40, costs=COSTS)
+        600_000, 10_000_000, 0.0, _params(0.03),
+        hold_years=5, expense_ratio=0.40, costs=COSTS, exit_cap=0.0625)
     debt = build_debt_schedule(10_000_000, 600_000, ORACLE_A, hold_years=5)
     su = build_sources_uses(price=10_000_000, capex=0.0,
                             acquisition_cost=projection["acquisition_cost"],
@@ -568,8 +573,8 @@ def test_a_blank_am_fee_falls_back_to_config_instead_of_crashing():
     resolver in this repo tests `not in (None, "")`; `is None` would make
     E3b's form field raise on `float("")` the day it lands."""
     projection = project_cash_flows(
-        600_000, 10_000_000, 0.0, _params(0.03, 0.0625),
-        hold_years=5, expense_ratio=0.40, costs=COSTS)
+        600_000, 10_000_000, 0.0, _params(0.03),
+        hold_years=5, expense_ratio=0.40, costs=COSTS, exit_cap=0.0625)
     debt = build_debt_schedule(10_000_000, 600_000, ORACLE_A, hold_years=5)
     su = build_sources_uses(price=10_000_000, capex=0.0,
                             acquisition_cost=projection["acquisition_cost"],

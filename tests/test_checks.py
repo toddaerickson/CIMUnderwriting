@@ -296,7 +296,9 @@ def test_exit_cap_coercion_surfaces_the_silent_raise():
              scenarios={"base": {"exit_cap": 0.085, "exit_cap_coerced": True,
                                  "requested_exit_cap": 0.065}})
     assert r.status == C.FAIL
-    assert "6.5%" in r.message and "8.5%" in r.message
+    # Three decimals, not one: the obsolescence drift is 5-10 bp/yr, so a
+    # cap printed at 6.5% would round the derived term away.
+    assert "6.500%" in r.message and "8.500%" in r.message
     assert r.values["base"]["requested_exit_cap"] == 0.065
 
 

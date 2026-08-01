@@ -36,6 +36,10 @@ class AnalysisResult:
     va_results: dict = field(default_factory=dict)
     # Capital stack (model.returns_model.build_sources_uses)
     sources_uses: dict = field(default_factory=dict)
+    # The market cap this run priced the exit off, with its class, age band
+    # and source. Every published exit cap derives from it, so it is carried
+    # on the result rather than re-derived by each writer.
+    market_cap: dict = field(default_factory=dict)
     # Levered lens (item E3a). `debt` is the one sized loan; `levered` is
     # per-scenario equity cash flow + LP waterfall. The UNLEVERED screen
     # above stays primary — financing costs are deliberately absent from
@@ -144,6 +148,8 @@ def run_analysis(result: AnalysisResult, progress: Callable = None,
                   hold_years: int = None,
                   transaction_costs: dict = None,
                   capital_structure: dict = None,
+                  market_cap_rate: float = None,
+                  market_cap: dict = None,
                   debt_terms: dict = None,
                   waterfall_terms: dict = None,
                   am_fee_pct: float = None) -> AnalysisResult:
@@ -183,6 +189,16 @@ def run_analysis(result: AnalysisResult, progress: Callable = None,
             rather than patched into config for the reason spelled out in
             config.py: a patched dict is shared mutable state across
             concurrent runs.
+        market_cap_rate: the analyst's market cap off the assumptions
+            form, as a decimal, or None to look the asset's class and age
+            band up in config.MARKET_CAP_RATES. Every exit cap in the run
+            derives from whichever it is.
+        market_cap: an ALREADY-RESOLVED anchor dict from
+            `analysis.valuation.resolve_market_cap`, used as-is. For a
+            caller that had to resolve before entering the analysis lock;
+            passing its rate through `market_cap_rate` instead would
+            re-enter the resolver's analyst-override branch and relabel a
+            table lookup as analyst-entered. Wins over `market_cap_rate`.
         debt_terms: per-analysis override of config.DEBT_TERMS (item
             E3a). A partial dict is merged onto the defaults. The levered
             lens is ON by default, so None means "size the loan at the
@@ -219,6 +235,9 @@ def run_analysis(result: AnalysisResult, progress: Callable = None,
                     result.errors.append(msg)
         except Exception as e:
             result.errors.append(f"Enrichment failed: {e}")
+
+    from analysis.valuation import resolve_market_cap
+    from registry import detect_asset_type
 
     # Step 1: Financial analysis
     _progress(1, 9, "Analyzing financials...")
@@ -294,6 +313,25 @@ def run_analysis(result: AnalysisResult, progress: Callable = None,
                 f"price) is missing from this deal, so it is NOT in the "
                 f"basis. Re-enter it in dollars or restore the missing field.")
 
+    # The exit cap is derived from the asset, so the market anchor is
+    # resolved ONCE — same discipline as CapEx and the reserve above. Every
+    # consumer gets the same dict, which is what keeps the memo, the .xlsx,
+    # the .xlsm, the sensitivity grid and both solvers on one cap.
+    #
+    # A caller that already resolved it passes the DICT, not the rate.
+    # webapp.services does: it must resolve before taking the analysis lock
+    # (off the pristine table), and re-resolving here from its rate would
+    # look like an analyst override to `resolve_market_cap`, whose "an
+    # explicit market_cap always wins" branch cannot tell a typed rate from
+    # a resolved one. That stamped `source: "analyst"` on every web run and
+    # silently disabled the unknown-vintage finding in the check register,
+    # which is gated on `source == "table"` (review finding, PR #31).
+    if not market_cap:
+        market_cap = resolve_market_cap(
+            detect_asset_type(cim_data), cim_data.year_built,
+            market_cap=market_cap_rate)
+    result.market_cap = market_cap
+
     if result.adjusted_noi and asking > 0:
         from model.debt import resolve_debt_terms
         from model.returns_model import build_returns_model
@@ -320,6 +358,7 @@ def run_analysis(result: AnalysisResult, progress: Callable = None,
             reserve=reserve,
             gp_coinvest_pct=capital["gp_coinvest_pct"],
             capex_pct_of_price=capex_pct_of_price,
+            market_cap=market_cap,
             debt_terms=resolved_debt_terms,
             waterfall_terms=resolved_waterfall_terms,
             am_fee_pct=am_fee_pct,
@@ -343,6 +382,7 @@ def run_analysis(result: AnalysisResult, progress: Callable = None,
                 hold_years=hold_years,
                 transaction_costs=transaction_costs,
                 reserve=reserve,
+                market_cap=market_cap,
             )
 
         # Step 7: Max price solver
@@ -351,7 +391,8 @@ def run_analysis(result: AnalysisResult, progress: Callable = None,
         solver_kwargs = {"hold_years": hold_years,
                          "transaction_costs": transaction_costs,
                          "reserve": reserve,
-                         "capex_pct_of_price": capex_pct_of_price}
+                         "capex_pct_of_price": capex_pct_of_price,
+                         "market_cap": market_cap}
         if solver_target_irr:
             solver_kwargs["target_irr"] = solver_target_irr
         result.max_offer = solve_max_price(
@@ -394,7 +435,9 @@ def run_analysis(result: AnalysisResult, progress: Callable = None,
     from analysis import checks as model_checks
     _check_results = model_checks.run_checks(model_checks.input_from_cim(
         cim_data, result.financial_analysis, result.physical_analysis,
-        result.scenario_results, result.sources_uses, result.debt))
+        result.scenario_results, result.sources_uses,
+        va_results=result.va_results, market_cap=result.market_cap,
+        debt=result.debt))
     result.checks = model_checks.to_dicts(_check_results)
     result.check_summary = model_checks.summarize(_check_results)
 

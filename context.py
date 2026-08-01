@@ -42,6 +42,11 @@ class AnalysisContext:
     risk_analysis: dict = field(default_factory=dict)
 
     # ── Valuation ─────────────────────────────────────────────────
+    # The market cap this run priced the exit off, with its class, age band
+    # and source. Resolved ONCE and handed to every consumer — the CLI is a
+    # separate orchestration from engine.run_analysis, so it has to keep
+    # the same discipline or the two paths price the same deal differently.
+    market_cap: dict = field(default_factory=dict)
     scenario_results: dict = field(default_factory=dict)
     sensitivity: dict = field(default_factory=dict)
     sources_uses: dict = field(default_factory=dict)

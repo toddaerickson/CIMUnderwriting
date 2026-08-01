@@ -236,6 +236,7 @@ def fake_run(monkeypatch):
               custom_va_scenarios=None, solver_target_irr=None, enrich=False,
               expense_line_overrides=None, hold_years=None,
               transaction_costs=None, capital_structure=None,
+              market_cap_rate=None, market_cap=None,
               debt_terms=None, waterfall_terms=None, am_fee_pct=None):
         calls["cim_data"] = result.cim_data
         calls["output_dir"] = output_dir
@@ -301,12 +302,16 @@ def fake_run(monkeypatch):
         from analysis.valuation import project_cash_flows
         from model.levered import build_levered_returns
         from model.waterfall import resolve_waterfall_terms
+        # `exit_cap` is an argument, not a scenario parameter (PR #31): it
+        # is derived from a market anchor. Pinned here so this fixture's
+        # levered figures do not move with the market table.
         _projection = project_cash_flows(
             250_000, 3_500_000, 100_000,
             {"yr1_noi_bump": 0.0, "stabilized_occ": 0.88,
              "rev_cagr_yr1_3": 0.03, "rev_cagr_yr4_5": 0.03,
-             "exp_growth": 0.03, "exit_cap": 0.08},
-            hold_years=5, expense_ratio=0.40, reserve=50_000)
+             "exp_growth": 0.03},
+            hold_years=5, expense_ratio=0.40, reserve=50_000,
+            exit_cap=0.08)
         result.debt = _debt
         result.levered = {"base": build_levered_returns(
             _projection, sources_uses=result.sources_uses, debt=_debt,

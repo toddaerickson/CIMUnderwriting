@@ -256,6 +256,7 @@ def deal_assumptions(request, pk):
                     form["rc_dev_profit_pct_low"], form["rc_dev_profit_pct_high"]],
         "solver_field": form["solver_target_irr"],
         "hold_years_field": form["hold_years"],
+        "market_cap_field": form["market_cap_rate"],
         "txn_cost_fields": [{"label": label, "field": form[name]}
                             for name, label in f.TXN_COST_LABELS],
         "reserve_field": form["operating_reserve"],

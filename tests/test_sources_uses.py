@@ -23,7 +23,8 @@ import numpy_financial as npf
 import pytest
 
 from analysis import checks
-from analysis.valuation import project_cash_flows, run_scenarios
+from analysis.valuation import (project_cash_flows, resolve_exit_cap,
+                                resolve_market_cap, run_scenarios)
 from model.debt import DebtTerms
 from model.returns_model import (BASIS_AMOUNT, BASIS_PCT_PRICE, BASIS_PER_SF,
                                  BASIS_PER_UNIT, build_returns_model,
@@ -36,16 +37,28 @@ NO_COSTS = {"acquisition_closing_pct": 0.0, "disposition_cost_pct": 0.0}
 FLAT_PARAMS = {
     "yr1_noi_bump": 0.0, "stabilized_occ": 0.88,
     "rev_cagr_yr1_3": 0.0, "rev_cagr_yr4_5": 0.0,
-    "exp_growth": 0.0, "exit_cap": 0.10,
+    "exp_growth": 0.0,
 }
+#: The flat case buys and sells at a 10 cap. It is now passed as an
+#: argument rather than carried in the params dict: the exit cap is
+#: derived from a market anchor and is no longer a scenario parameter.
+FLAT_EXIT_CAP = 0.10
 FLAT_NOI = 1_000_000
 FLAT_PRICE = 10_000_000
+
+#: The solver round-trip tests re-run the solved price forward through the
+#: projection, so both sides must price the exit identically. Pinning the
+#: anchor here is what makes that an equality rather than a coincidence of
+#: both happening to read the same config table.
+PINNED_ANCHOR = resolve_market_cap(market_cap=0.0625)
+PINNED_BASE_EXIT_CAP = resolve_exit_cap(
+    PINNED_ANCHOR["market_cap"], ScenarioType.BASE)["exit_cap"]
 
 
 def flat(**kw):
     args = dict(ttm_noi=FLAT_NOI, price=FLAT_PRICE, capex=0,
                 params=FLAT_PARAMS, hold_years=5, expense_ratio=0.50,
-                costs=NO_COSTS)
+                costs=NO_COSTS, exit_cap=FLAT_EXIT_CAP)
     args.update(kw)
     return project_cash_flows(**args)
 
@@ -289,11 +302,13 @@ def test_solved_price_with_a_reserve_reproduces_the_target_irr():
     import config as cfg
 
     solved = solve_max_price(adjusted_ttm_noi=300_000, capex=0,
-                             expense_ratio=0.42, reserve=200_000)
+                             expense_ratio=0.42, reserve=200_000,
+                             market_cap=PINNED_ANCHOR)
     forward = project_cash_flows(
         ttm_noi=300_000, price=solved["max_price"], capex=0,
         params=cfg.SCENARIO_DEFAULTS[ScenarioType.BASE],
-        expense_ratio=0.42, reserve=200_000)
+        expense_ratio=0.42, reserve=200_000,
+        exit_cap=PINNED_BASE_EXIT_CAP)
     assert forward["irr"] == pytest.approx(solved["target_irr"], abs=0.001)
     assert solved["total_basis"] == pytest.approx(forward["total_basis"])
 
@@ -306,16 +321,19 @@ def test_pct_of_price_capex_scales_inside_the_bisection():
 
     pct = 0.05
     solved = solve_max_price(adjusted_ttm_noi=300_000, capex=0,
-                             expense_ratio=0.42, capex_pct_of_price=pct)
+                             expense_ratio=0.42, capex_pct_of_price=pct,
+                             market_cap=PINNED_ANCHOR)
     assert solved["capex"] == pytest.approx(solved["max_price"] * pct)
     forward = project_cash_flows(
         ttm_noi=300_000, price=solved["max_price"],
         capex=solved["max_price"] * pct,
-        params=cfg.SCENARIO_DEFAULTS[ScenarioType.BASE], expense_ratio=0.42)
+        params=cfg.SCENARIO_DEFAULTS[ScenarioType.BASE], expense_ratio=0.42,
+        exit_cap=PINNED_BASE_EXIT_CAP)
     assert forward["irr"] == pytest.approx(solved["target_irr"], abs=0.001)
     # And it is a different answer from freezing CapEx at the asking price.
     frozen = solve_max_price(adjusted_ttm_noi=300_000,
-                             capex=4_000_000 * pct, expense_ratio=0.42)
+                             capex=4_000_000 * pct, expense_ratio=0.42,
+                             market_cap=PINNED_ANCHOR)
     assert solved["max_price"] != pytest.approx(frozen["max_price"], abs=1.0)
 
 

@@ -17,9 +17,13 @@ reintroduce a second loop.
 import logging
 
 import numpy_financial as npf
-from config import (DEFAULT_HOLD_YEARS, HOLD_YEARS_RANGE, SCENARIO_DEFAULTS,
+from config import (DEFAULT_HOLD_YEARS, EXIT_CAP_DRIFT_BPS,
+                    EXIT_CAP_SCENARIO_SPREAD_BPS, HOLD_YEARS_RANGE,
+                    MARKET_CAP_AS_OF, MARKET_CAP_RATES,
+                    MARKET_CAP_UNKNOWN_AGE_BAND, SCENARIO_DEFAULTS,
                     TRANSACTION_COSTS)
-from registry import ScenarioType, clamp_expense_ratio
+from registry import (DEFAULT_ASSET_TYPE, ScenarioType, age_band,
+                      clamp_expense_ratio)
 
 logger = logging.getLogger("cim_analyst")
 
@@ -65,6 +69,100 @@ def resolve_hold_years(hold_years: int = None) -> int:
     return years
 
 
+def resolve_market_cap(asset_type: str = None, year_built=None, *,
+                       market_cap: float = None, as_of=None,
+                       base: dict = None) -> dict:
+    """The market cap for this asset's class and age band.
+
+    An explicit `market_cap` (the analyst's, off the assumptions form)
+    always wins; the table only supplies the starting point. Returns the
+    band and the source alongside the rate so the caller can say WHY it
+    landed where it did — this number drives every exit value, so a bare
+    float would not be traceable.
+
+    `base` is the pristine MARKET_CAP_RATES snapshot, for the same reason
+    resolve_transaction_costs takes one: the table is in
+    webapp.services._PATCHED_DICTS and the live dict carries another
+    deal's values for as long as that deal holds the analysis lock.
+    """
+    table = MARKET_CAP_RATES if base is None else base
+    band = age_band(year_built, as_of)
+    resolved_band = band or MARKET_CAP_UNKNOWN_AGE_BAND
+    asset_class = asset_type if asset_type in table else DEFAULT_ASSET_TYPE
+    table_rate = table.get(asset_class, {}).get(resolved_band)
+
+    if market_cap is not None:
+        return {"market_cap": float(market_cap), "source": "analyst",
+                "asset_class": asset_class, "age_band": resolved_band,
+                "age_band_known": band is not None,
+                "table_market_cap": table_rate, "as_of": MARKET_CAP_AS_OF}
+    if table_rate is None:
+        # Neither an analyst figure nor a table cell. Refuse rather than
+        # invent one: every exit value in the run depends on it.
+        raise ValueError(
+            f"no market cap for class {asset_class!r} band {resolved_band!r}; "
+            "enter one on the assumptions form")
+    return {"market_cap": float(table_rate), "source": "table",
+            "asset_class": asset_class, "age_band": resolved_band,
+            "age_band_known": band is not None,
+            "table_market_cap": table_rate, "as_of": MARKET_CAP_AS_OF}
+
+
+def describe_market_cap(detail: dict) -> str:
+    """Where an anchor came from, in words — "table as of 2026-Q3", or
+    "analyst-entered, overriding the 6.250% table rate as of 2026-Q3".
+
+    One phrasing, used by the check register, the memo and the Excel
+    derivation block. `as_of` dates the TABLE, and it is returned on both
+    branches because `table_market_cap` is reported on both; printing it
+    unconditionally beside the applied rate claimed a table vintage for an
+    analyst's number that had no table basis (review finding, PR #31).
+    Three copies of this sentence is how that gets fixed in one place and
+    stays wrong in the other two.
+    """
+    d = detail or {}
+    as_of = f" as of {d['as_of']}" if d.get("as_of") else ""
+    if d.get("source") == "table":
+        return f"table{as_of}"
+    source = d.get("source") or "unknown"
+    table_rate = d.get("table_market_cap")
+    if table_rate is None:
+        return f"{source}-entered"
+    return (f"{source}-entered, overriding the {float(table_rate):.3%} "
+            f"table rate{as_of}")
+
+
+def resolve_exit_cap(market_cap: float, scenario, hold_years: int = None, *,
+                     spread_bps: float = None, drift_bps: float = None) -> dict:
+    """Exit cap for one scenario, with its components.
+
+        exit_cap = market_cap + scenario_spread + drift_bps * hold_years
+
+    Returns the parts, not just the total: this replaced a per-scenario
+    constant the analyst could read straight off the settings page, so a
+    derived number that cannot be decomposed would be a step backwards on
+    auditability. `analysis.checks.market_exit_cap` renders these.
+
+    The drift is per year of HOLD — the asset ages while owned. Age at
+    acquisition is already priced by the band in `resolve_market_cap`.
+    """
+    years = resolve_hold_years(hold_years)
+    spread = (EXIT_CAP_SCENARIO_SPREAD_BPS.get(scenario, 0.0)
+              if spread_bps is None else float(spread_bps))
+    drift = (EXIT_CAP_DRIFT_BPS.get(scenario, 0.0)
+             if drift_bps is None else float(drift_bps))
+    drift_total = drift * years
+    exit_cap = float(market_cap) + (spread + drift_total) / 10_000.0
+    return {
+        "exit_cap": exit_cap,
+        "market_cap": float(market_cap),
+        "scenario_spread_bps": spread,
+        "drift_bps_per_year": drift,
+        "drift_total_bps": drift_total,
+        "hold_years": years,
+    }
+
+
 def project_cash_flows(ttm_noi: float, price: float, capex: float,
                        params: dict, *,
                        hold_years: int = None,
@@ -72,6 +170,8 @@ def project_cash_flows(ttm_noi: float, price: float, capex: float,
                        costs: dict = None,
                        reserve: float = 0.0,
                        coerce_exit_cap: bool = True,
+                       exit_cap: float = None,
+                       exit_cap_detail: dict = None,
                        exit_cap_override: float = None) -> dict:
     """Canonical unlevered projection: NOI series → cash flows → IRR/MOIC.
 
@@ -107,8 +207,13 @@ def project_cash_flows(ttm_noi: float, price: float, capex: float,
             it. The sensitivity grid passes False — its whole purpose is
             an exit-cap axis, and coercing collapses every cell below the
             entry cap onto one value.
-        exit_cap_override: use this exit cap instead of `params["exit_cap"]`
-            (the sensitivity grid sweeps it)
+        exit_cap: the resolved exit cap for this scenario, from
+            `resolve_exit_cap`. Required — it used to be read off
+            `params["exit_cap"]`, a free-standing constant that priced a
+            2003 drive-up facility and a 2022 climate-controlled build
+            identically. Callers resolve it once and pass it down.
+        exit_cap_override: use this instead of `exit_cap` (the sensitivity
+            grid sweeps it)
     """
     hold_years = resolve_hold_years(hold_years)
     costs = resolve_transaction_costs(costs)
@@ -137,8 +242,14 @@ def project_cash_flows(ttm_noi: float, price: float, capex: float,
         exp_series.append(new_exp)
         noi_series.append(new_rev - new_exp)
 
-    exit_cap = (params["exit_cap"] if exit_cap_override is None
-                else exit_cap_override)
+    if exit_cap_override is not None:
+        exit_cap = exit_cap_override
+    elif exit_cap is None:
+        # No silent fallback to a constant: the whole point of the change
+        # is that an exit cap without an asset behind it is not a number
+        # anyone should publish.
+        raise ValueError("project_cash_flows needs exit_cap (see "
+                         "resolve_exit_cap) or exit_cap_override")
     requested_exit_cap = exit_cap
     entry_cap = ttm_noi / price if price > 0 else 0
     exit_noi = noi_series[-1]
@@ -180,6 +291,7 @@ def project_cash_flows(ttm_noi: float, price: float, capex: float,
         "requested_exit_cap": requested_exit_cap,
         "exit_cap": exit_cap,
         "exit_cap_coerced": exit_cap_coerced,
+        "exit_cap_detail": exit_cap_detail,
         "exit_value": exit_value,
         "disposition_cost": disposition_cost,
         "net_exit_proceeds": net_exit_proceeds,
@@ -201,7 +313,8 @@ def run_scenarios(adjusted_ttm_noi: float, asking_price: float,
                   expense_ratio: float = None,
                   hold_years: int = None,
                   transaction_costs: dict = None,
-                  reserve: float = 0.0) -> dict:
+                  reserve: float = 0.0,
+                  market_cap: dict = None) -> dict:
     """
     Run Bear / Base / Bull unlevered return scenarios.
 
@@ -229,6 +342,7 @@ def run_scenarios(adjusted_ttm_noi: float, asking_price: float,
             - yield_on_cost: Year 1 NOI / total basis
     """
     scenarios = custom_scenarios or SCENARIO_DEFAULTS
+    mc = market_cap or resolve_market_cap()
 
     return {
         name: _run_single_scenario(
@@ -242,6 +356,7 @@ def run_scenarios(adjusted_ttm_noi: float, asking_price: float,
             hold_years=hold_years,
             transaction_costs=transaction_costs,
             reserve=reserve,
+            market_cap=mc,
         )
         for name, params in scenarios.items()
     }
@@ -253,8 +368,11 @@ def _run_single_scenario(scenario_name: str, ttm_noi: float,
                          expense_ratio: float = None,
                          hold_years: int = None,
                          transaction_costs: dict = None,
-                         reserve: float = 0.0) -> dict:
+                         reserve: float = 0.0,
+                         market_cap: dict = None) -> dict:
     """Label and reshape one canonical projection for the scenario API."""
+    mc = market_cap or resolve_market_cap()
+    cap = resolve_exit_cap(mc["market_cap"], scenario_name, hold_years)
     p = project_cash_flows(
         ttm_noi=ttm_noi,
         price=asking_price,
@@ -265,6 +383,8 @@ def _run_single_scenario(scenario_name: str, ttm_noi: float,
         costs=transaction_costs,
         reserve=reserve,
         coerce_exit_cap=scenario_name in COERCED_SCENARIOS,
+        exit_cap=cap["exit_cap"],
+        exit_cap_detail={**mc, **cap},
     )
 
     return {
@@ -278,6 +398,7 @@ def _run_single_scenario(scenario_name: str, ttm_noi: float,
         "exit_cap": p["exit_cap"],
         "requested_exit_cap": p["requested_exit_cap"],
         "exit_cap_coerced": p["exit_cap_coerced"],
+        "exit_cap_detail": p["exit_cap_detail"],
         "entry_cap": p["entry_cap"],
         "exit_value": p["exit_value"],
         "disposition_cost": p["disposition_cost"],

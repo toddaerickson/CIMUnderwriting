@@ -60,30 +60,12 @@ def read_deal_meta(deal_folder: str) -> dict | None:
         return json.load(f)
 
 
-# The exact strings detect_asset_type can return — single source for the
-# settings editor's scope dropdown (guarded by a no-drift test).
-ASSET_TYPES = (
-    "Self Storage",
-    "Climate-Controlled Self Storage",
-    "Boat & RV Storage",
-)
-
-
-def detect_asset_type(cim_data) -> str:
-    """Determine asset type from CIM data fields."""
-    brv_sf = sum(filter(None, [
-        getattr(cim_data, "brv_enclosed_sf", None),
-        getattr(cim_data, "brv_covered_sf", None),
-        getattr(cim_data, "brv_open_sf", None),
-    ]))
-    if brv_sf > 0:
-        return "Boat & RV Storage"
-
-    cc_pct = getattr(cim_data, "cc_pct", None)
-    if cc_pct is not None and cc_pct > 0.5:
-        return "Climate-Controlled Self Storage"
-
-    return "Self Storage"
+# ASSET_TYPES and detect_asset_type moved to registry.py so the Django-free
+# engine can classify an asset for the exit-cap market table. Re-exported
+# here because this was their import site for the settings dropdown, the
+# deal meta and the extract worker.
+from analysis.valuation import resolve_market_cap  # noqa: E402
+from registry import ASSET_TYPES, detect_asset_type  # noqa: F401,E402
 
 
 def build_deal_meta(cim_data, result, deal_folder: str, input_files: list[str] = None) -> dict:
@@ -200,7 +182,8 @@ def json_safe(obj):
 # safe by construction.)
 _PATCHED_DICTS = ("GATES", "EXPENSE_BENCHMARKS", "REPLACEMENT_COST",
                   "SCENARIO_DEFAULTS", "VALUE_ADD_SCENARIOS",
-                  "VALUE_ADD_TRIGGERS", "TRANSACTION_COSTS")
+                  "VALUE_ADD_TRIGGERS", "TRANSACTION_COSTS",
+                  "MARKET_CAP_RATES")
 _ORIG_CONFIG = {n: copy.deepcopy(getattr(cfg, n)) for n in _PATCHED_DICTS}
 _ANALYSIS_LOCK = threading.Lock()
 
@@ -299,6 +282,14 @@ def build_config_patch(deltas: dict):
             scen = ScenarioType(parts[1])
             patch.setdefault(parts[0], {}).setdefault(scen, {})[
                 parts[2]] = float(value)
+        elif parts[0] == "MARKET_CAP_RATES":
+            # Three levels too — dict.class.band — but the middle level is
+            # a plain asset-class string, not a ScenarioType. Flattening it
+            # like a two-level key replaced the whole class row with a
+            # float, and resolve_market_cap would then read a band out of
+            # a number.
+            patch.setdefault(parts[0], {}).setdefault(parts[1], {})[
+                parts[2]] = float(value)
         else:
             patch.setdefault(parts[0], {})[parts[1]] = value
     return patch, solver_irr, skipped
@@ -322,6 +313,57 @@ def resolve_run_transaction_costs(patch: dict, overrides: dict) -> dict:
          **((overrides or {}).get("transaction_costs") or {})},
         base=_ORIG_CONFIG["TRANSACTION_COSTS"],
     )
+
+
+def resolve_run_market_cap(patch: dict, overrides: dict, cim_data) -> dict:
+    """The market cap for one run: config table ← global ConfigOverride
+    delta ← per-deal override, resolved with this asset's class and age.
+
+    Reads the pristine _ORIG_CONFIG snapshot, never the live config module,
+    for the same reason resolve_run_transaction_costs does: MARKET_CAP_RATES
+    is in _PATCHED_DICTS, so the live table carries ANOTHER deal's values
+    for as long as that deal's run holds _ANALYSIS_LOCK, and this runs
+    BEFORE the lock is acquired. Resolving off the live dict would let one
+    deal's cap table price a second deal's exit, and the stamp below would
+    report it as if it were correct.
+    """
+    table = copy.deepcopy(_ORIG_CONFIG["MARKET_CAP_RATES"])
+    _merge_patch({"MARKET_CAP_RATES": table},
+                 {"MARKET_CAP_RATES": (patch or {}).get("MARKET_CAP_RATES", {})})
+    return resolve_market_cap(
+        detect_asset_type(cim_data), getattr(cim_data, "year_built", None),
+        market_cap=(overrides or {}).get("market_cap_rate"),
+        base=table)
+
+
+#: Per-scenario keys a stored deal may still carry from before the exit cap
+#: became derived from the market anchor. The pipeline no longer reads them.
+RETIRED_SCENARIO_KEYS = ("exit_cap",)
+
+
+def retired_scenario_overrides(overrides: dict) -> dict:
+    """The stored per-scenario values this run ignored, keyed by path.
+
+    A deal saved before the exit cap became derived still has an
+    `exit_cap` in its scenario sections. Dropping a number an analyst
+    once typed without saying so is the failure mode this repo keeps
+    catching in review, so the run stamp records what it ignored — the
+    analyst can then re-enter it as a market cap if it still reflects
+    their view.
+
+    Empty for every deal saved since; the key is stamped either way, so a
+    reader can tell "nothing was ignored" from "this run predates the
+    check".
+    """
+    found = {}
+    for section in ("scenario_overrides", "va_scenario_overrides"):
+        for scen, params in ((overrides or {}).get(section) or {}).items():
+            if not isinstance(params, dict):
+                continue
+            for key in RETIRED_SCENARIO_KEYS:
+                if key in params:
+                    found[f"{section}.{scen}.{key}"] = params[key]
+    return found
 
 
 def effective_config(asset_type: str = "", on_date=None) -> dict:
@@ -762,6 +804,10 @@ def _analysis_worker(run_pk):
         # cannot disagree: file default ← global ConfigOverride delta ←
         # per-deal override, then passed down whole.
         txn_costs = resolve_run_transaction_costs(patch, overrides)
+        # Stamped with its RESOLVED value, not as a delta: this drives every
+        # published exit cap, so a run sitting on the table default must
+        # still say which cell it used and for what class and age band.
+        market_cap = resolve_run_market_cap(patch, overrides, cim)
         # Debt and waterfall terms are stamped RESOLVED, like hold_years
         # and transaction costs, for the same reason: item E3a changed
         # what every levered figure means, so a run that recorded nothing
@@ -786,11 +832,13 @@ def _analysis_worker(run_pk):
         stamped = {**overrides, "hold_years": hold_years,
                    "transaction_costs": txn_costs,
                    "capital_structure": capital,
+                   "market_cap": market_cap,
                    "debt_terms": debt_terms,
                    "waterfall_terms": waterfall_terms,
                    "am_fee_pct": (cfg.AM_FEE_PCT if am_fee_pct is None
                                   else am_fee_pct),
-                   "am_fee_base": cfg.AM_FEE_BASE}
+                   "am_fee_base": cfg.AM_FEE_BASE,
+                   "ignored_assumptions": retired_scenario_overrides(overrides)}
         # A per-deal cost supersedes the global row for THAT key, so the
         # global value must not be stamped as applied — same rule as
         # SOLVER_TARGET_IRR above, but key-level, because transaction
@@ -817,6 +865,10 @@ def _analysis_worker(run_pk):
                     hold_years=hold_years,
                     transaction_costs=txn_costs,
                     capital_structure=capital,
+                    # The resolved DICT, not its rate: the rate alone would
+                    # look like an analyst override to resolve_market_cap
+                    # and relabel every table lookup as analyst-entered.
+                    market_cap=market_cap,
                     debt_terms=overrides.get("debt_terms"),
                     waterfall_terms=overrides.get("waterfall_terms"),
                     am_fee_pct=am_fee_pct,

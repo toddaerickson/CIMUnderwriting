@@ -157,12 +157,28 @@ def stage_valuate(ctx: AnalysisContext):
         logger.info("[5/7] Skipping max price solve (insufficient data)")
         return
 
+    # The exit cap is derived from the asset, so the market anchor is
+    # resolved ONCE here and handed to every consumer below — the same
+    # discipline engine.run_analysis follows. Miss one and the memo, the
+    # .xlsx, the .xlsm and the solvers disagree about the same deal.
+    from analysis.valuation import resolve_market_cap
+    from registry import detect_asset_type
+    ctx.market_cap = resolve_market_cap(
+        detect_asset_type(ctx.cim_data),
+        getattr(ctx.cim_data, "year_built", None))
+    logger.info("  Market cap: %.3f%% (%s, %s band, %s)",
+                ctx.market_cap["market_cap"] * 100,
+                ctx.market_cap["asset_class"], ctx.market_cap["age_band"],
+                "vintage known" if ctx.market_cap["age_band_known"]
+                else "VINTAGE UNKNOWN — fallback band")
+
     model = build_returns_model(
         adjusted_ttm_noi=ctx.adjusted_noi,
         asking_price=ctx.asking_price,
         nrsf=ctx.nrsf,
         capex=ctx.capex,
         expense_ratio=ctx.expense_ratio,
+        market_cap=ctx.market_cap,
     )
     ctx.scenario_results = model["scenarios"]
     ctx.sensitivity = model["sensitivity"]
@@ -189,6 +205,7 @@ def stage_valuate(ctx: AnalysisContext):
             financial_analysis=ctx.financial_analysis,
             asking_price=ctx.asking_price,
             capex=ctx.capex,
+            market_cap=ctx.market_cap,
         )
         logger.info("  Value-Add Scenarios:")
         for name in ("bear", "base", "bull"):
@@ -208,6 +225,7 @@ def stage_valuate(ctx: AnalysisContext):
         adjusted_ttm_noi=ctx.adjusted_noi,
         capex=ctx.capex,
         expense_ratio=ctx.expense_ratio,
+        market_cap=ctx.market_cap,
     )
     mp = ctx.max_offer.get("max_price")
     if mp:
@@ -222,6 +240,7 @@ def stage_valuate(ctx: AnalysisContext):
             cim_data=ctx.cim_data,
             financial_analysis=ctx.financial_analysis,
             capex=ctx.capex,
+            market_cap=ctx.market_cap,
         )
         va_mp = ctx.va_max_offer.get("max_price")
         if va_mp:

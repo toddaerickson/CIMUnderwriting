@@ -213,6 +213,205 @@ def test_guard_solo_mode_still_opens_the_gate(repo):
     assert run_guard(f"git -C {repo} commit -m x", repo, repo) is None
 
 
+# ── Working-tree writers the subcommand list missed ──────────────────
+# `pull` reached main unguarded: it is fetch + merge/rebase, so it rewrites the
+# shared tree, but only `merge` and `rebase` were listed. `rm`/`mv`/`bisect` are
+# the same failure mode — they write the tree without naming a listed subcommand.
+
+def test_guard_denies_pull_in_the_primary_tree(repo):
+    assert run_guard(f"git -C {repo} pull --ff-only origin main", repo, repo) == "deny"
+
+
+def test_guard_denies_pull_with_no_explicit_target(repo):
+    assert run_guard("git pull", repo, repo) == "deny"
+
+
+def test_guard_allows_pull_inside_a_worktree(repo, tmp_path):
+    wt = tmp_path / "wt"
+    git(repo, "worktree", "add", "-q", str(wt), "-b", "feature")
+    assert run_guard(f"git -C {wt} pull --ff-only origin main", wt, repo) is None
+
+
+def test_guard_allows_pull_help(repo):
+    assert run_guard(f"git -C {repo} pull --help", repo, repo) is None
+
+
+def test_guard_denies_rm_and_mv_in_the_primary_tree(repo):
+    assert run_guard(f"git -C {repo} rm config.py", repo, repo) == "deny"
+    assert run_guard(f"git -C {repo} mv config.py other.py", repo, repo) == "deny"
+
+
+def test_guard_allows_rm_cached_and_dry_runs(repo):
+    # --cached unstages but leaves the file on disk — index-only, like `restore --staged`
+    assert run_guard(f"git -C {repo} rm --cached config.py", repo, repo) is None
+    assert run_guard(f"git -C {repo} rm -n config.py", repo, repo) is None
+    assert run_guard(f"git -C {repo} mv --dry-run config.py other.py", repo, repo) is None
+
+
+def test_guard_denies_bisect_checkouts_but_allows_reading_the_log(repo):
+    assert run_guard(f"git -C {repo} bisect start", repo, repo) == "deny"
+    assert run_guard(f"git -C {repo} bisect log", repo, repo) is None
+
+
+def test_guard_still_allows_plain_fetch(repo):
+    # fetch only moves remote-tracking refs; blocking it would break syncing
+    assert run_guard(f"git -C {repo} fetch origin --prune", repo, repo) is None
+
+
+def test_guard_denies_the_exotic_tree_writers(repo):
+    """Second sweep. `sparse-checkout set` deletes directories from disk and
+    `checkout-index -a -f` discards uncommitted content — both were allowed by
+    the first pass, which proves the audit, not just the old list, was the bug.
+    """
+    for cmd in ("checkout-index -a -f", "read-tree -u HEAD",
+                "merge-file a.txt b.txt c.txt", "filter-branch --all",
+                "sparse-checkout init --cone", "sparse-checkout set keep",
+                "submodule update --init", "submodule deinit --all"):
+        assert run_guard(f"git -C {repo} {cmd}", repo, repo) == "deny", cmd
+
+
+def test_guard_allows_reading_sparse_checkout_and_submodule_state(repo):
+    for cmd in ("sparse-checkout list", "submodule status", "submodule summary",
+                "checkout-index --help", "read-tree --help", "submodule --help"):
+        assert run_guard(f"git -C {repo} {cmd}", repo, repo) is None, cmd
+
+
+def test_guard_allows_bundled_short_dry_run_flags(repo):
+    # `git rm -rn` and `git mv -fn` are real no-ops; denying them denies nothing
+    assert run_guard(f"git -C {repo} rm -rn config.py", repo, repo) is None
+    assert run_guard(f"git -C {repo} mv -fn config.py other.py", repo, repo) is None
+
+
+def test_a_long_flag_that_merely_contains_n_is_not_a_dry_run(repo):
+    # `--ignore-unmatch` carries an 'n'; a naive substring test would read it as
+    # a dry run and wave a real deletion through.
+    assert run_guard(f"git -C {repo} rm --ignore-unmatch config.py",
+                     repo, repo) == "deny"
+
+
+def test_guard_allows_read_only_bisect_queries(repo):
+    for cmd in ("bisect", "bisect terms", "bisect visualize", "bisect log"):
+        assert run_guard(f"git -C {repo} {cmd}", repo, repo) is None, cmd
+
+
+def test_guard_denies_writes_that_do_not_look_like_writes(repo):
+    """Round 3. None of these name a tree-writing verb. `archive -o` overwrites
+    a tracked file; `symbolic-ref` moves the checked-out branch with no file
+    changing at all — the guard's core collision, wearing no costume; `config
+    core.worktree` redirects what the shared .git calls its working tree, and
+    `core.hooksPath` makes every later commit run code from elsewhere.
+    """
+    assert run_guard(f"git -C {repo} archive -o config.py HEAD",
+                     repo, repo) == "deny"
+    assert run_guard(f"git -C {repo} symbolic-ref HEAD refs/heads/other",
+                     repo, repo) == "deny"
+    assert run_guard(f"git -C {repo} config core.worktree /tmp/elsewhere",
+                     repo, repo) == "deny"
+    assert run_guard(f"git -C {repo} config core.hooksPath /tmp/hooks",
+                     repo, repo) == "deny"
+
+
+def test_guard_allows_reading_config_refs_and_archiving_to_stdout(repo):
+    for cmd in ("config --get user.email", "config --list", "config user.email",
+                "symbolic-ref --short HEAD", "archive HEAD",
+                "sparse-checkout check-rules"):
+        assert run_guard(f"git -C {repo} {cmd}", repo, repo) is None, cmd
+
+
+def test_an_alias_cannot_launder_a_mutation(repo):
+    """`co = checkout` is an ordinary convenience alias, not an attack, and it
+    silently disabled every rule in this file — classification stopped at the
+    literal token and never asked whether the token was a rename.
+    """
+    git(repo, "config", "alias.co", "checkout")
+    assert run_guard(f"git -C {repo} co other-branch", repo, repo) == "deny"
+    # A shell alias can run anything, so it is denied without inspection.
+    git(repo, "config", "alias.sync", "!git pull --ff-only")
+    assert run_guard(f"git -C {repo} sync", repo, repo) == "deny"
+    # A read-only alias stays allowed.
+    git(repo, "config", "alias.st", "status")
+    assert run_guard(f"git -C {repo} st", repo, repo) is None
+
+
+def test_an_alias_still_fails_closed_when_the_target_is_unresolvable(repo):
+    """The round-3 fix resolved aliases only once the target was known to be
+    guarded — and an unresolvable target is exactly when it is not known. So
+    `cd $UNSET && git co main` walked through the fail-closed path.
+    """
+    git(repo, "config", "alias.co", "checkout")
+    assert run_guard("cd $NOPE && git co main", repo, repo) == "deny"
+
+
+def test_an_alias_expansion_carrying_a_global_option_is_still_classified(repo):
+    # Expansion begins `-c user.name=…`, so naive parsing reads the subcommand
+    # as `-c`, which matches no rule. Globals must be skipped as in a real command.
+    git(repo, "config", "alias.setcfg",
+        "-c user.name=X commit --allow-empty -m y")
+    assert run_guard(f"git -C {repo} setcfg", repo, repo) == "deny"
+
+
+def test_a_long_alias_chain_does_not_run_out_of_depth_and_fail_open(repo):
+    # Real git follows an arbitrarily long chain; a fixed cap that gives up and
+    # allows turns "too deep to follow" into "safe".
+    for name, points_at in (("loopa", "loopb"), ("loopb", "loopc"),
+                            ("loopc", "loopd")):
+        git(repo, "config", f"alias.{name}", points_at)
+    git(repo, "config", "alias.loopd", "reset --hard")
+    assert run_guard(f"git -C {repo} loopa", repo, repo) == "deny"
+
+
+def test_guard_denies_rewrites_of_the_shared_clones_own_config(repo):
+    """These touch no tracked file but reconfigure the clone for every later
+    session — and `init --template` plants hooks that fire on `worktree add`,
+    the very command every deny message tells the operator to run.
+    """
+    for cmd in ("remote set-url origin https://elsewhere.example/r.git",
+                "remote add other https://elsewhere.example/r.git",
+                "remote rename origin upstream",
+                "branch --set-upstream-to=origin/main",
+                "worktree repair",
+                "init --template=/tmp/sometemplate"):
+        assert run_guard(f"git -C {repo} {cmd}", repo, repo) == "deny", cmd
+
+
+def test_guard_allows_reading_remotes(repo):
+    for cmd in ("remote", "remote -v", "remote show origin",
+                "remote get-url origin"):
+        assert run_guard(f"git -C {repo} {cmd}", repo, repo) is None, cmd
+
+
+def test_a_consumed_help_flag_is_not_help(repo):
+    """Verified against real git: `commit --allow-empty -m --help` COMMITS —
+    HEAD moves and the message is literally "--help". So only a LEADING
+    `--help` may exempt; scanning the whole arg list fails open.
+    """
+    assert run_guard(f"git -C {repo} commit --allow-empty -m --help",
+                     repo, repo) == "deny"
+    assert run_guard(f"git -C {repo} checkout -b --help", repo, repo) == "deny"
+    assert run_guard(f"git -C {repo} commit --help", repo, repo) is None
+
+
+def test_help_is_never_a_mutation(repo):
+    # `git commit --help` opens a man page. Denying it teaches the operator the
+    # guard cries wolf, which is how a real deny gets waved through later.
+    for cmd in ("commit --help", "rebase --help", "merge --help",
+                "apply --help", "gc --help", "revert --help",
+                "cherry-pick --help", "am --help"):
+        assert run_guard(f"git -C {repo} {cmd}", repo, repo) is None, cmd
+
+
+def test_pull_deny_reason_points_at_solo_mode_not_just_a_worktree(repo):
+    payload = json.dumps({"tool_name": "Bash", "cwd": str(repo),
+                          "tool_input": {"command": f"git -C {repo} pull"}})
+    e = {**os.environ, "CLAUDE_PROJECT_DIR": str(repo)}
+    e.pop("CIM_SOLO", None)
+    p = subprocess.run([sys.executable, GUARD], input=payload,
+                       capture_output=True, text=True, env=e, timeout=30)
+    reason = json.loads(p.stdout)["hookSpecificOutput"]["permissionDecisionReason"]
+    assert "CIM_SOLO" in reason
+    assert "worktree does not sync" in reason
+
+
 def test_guard_still_denies_a_file_edit_in_the_primary_tree(repo):
     payload = json.dumps({"tool_name": "Write",
                           "tool_input": {"file_path": str(repo / "config.py")},
