@@ -14,15 +14,19 @@ Usage:
                                        [--overrides overrides.csv]
 
 Design rules enforced:
-  * Additive prefix only: "[AC-ST-City] <original name>". The original name is never
-    discarded, and the prefix is filing metadata rather than identity -- webapp.services
-    strips it before duplicate detection, so renaming a CIM never orphans it from the
-    deal or comp-DB row it was ingested as.
+  * Additive prefix only: "[AC-ST-City] <original name>". The original name is kept
+    (normalised only for characters Windows rejects; ledger.csv holds it verbatim), and
+    the prefix is filing metadata rather than identity -- webapp.services strips it
+    before duplicate detection, so renaming a CIM never orphans it from the deal or
+    comp-DB row it was ingested as.
   * ABSTAIN, never guess. Low confidence -> [ZZ-ZZ-ZZ], which sorts to the bottom as a
-    work queue. Files that are not PDFs or ZIPs are left alone entirely.
-  * Casefolded collision check. Hard fail. Never overwrite.
-  * Zips are identified from the archive central directory (no decompression of the
-    whole archive, no hydration).
+    work queue. Files that are not PDFs or ZIPs are left alone entirely. apply_pairing
+    is the one inference that fills a ZZ row, and it can only ever reach REVIEW.
+  * Casefolded collision check across renames AND the files left in place. Hard fail.
+    Never overwrite.
+  * Zips are listed from the archive central directory; at most two inner PDFs are
+    decompressed to identify the data room, never the whole archive, and cloud
+    placeholders are skipped rather than hydrated.
   * Cloud-sync placeholders are detected and skipped, not hydrated -- see the platform
     guard in main(), which refuses to run off-Windows because that detection is a
     Windows-only API and would otherwise fail open and pull down every byte.
@@ -356,7 +360,7 @@ def _analyse_zip(path: Path, r: dict) -> dict:
             names = [i.filename for i in infos]
             # Read the first reasonably-sized PDF inside. This is what actually
             # identifies a data room -- path names alone almost never carry an address.
-            inner = ""
+            inner, inner_err = "", ""
             cand = [i for i in infos
                     if i.filename.lower().endswith(".pdf") and 0 < i.file_size < 40_000_000]
             cand.sort(key=lambda i: i.file_size)
@@ -366,7 +370,10 @@ def _analyse_zip(path: Path, r: dict) -> dict:
                     try:
                         tmp.write_bytes(z.read(i))
                         _, bd = pdf_text(tmp, pages=8)
-                    except Exception:
+                    except Exception as e:
+                        # Record it. A corrupt or encrypted inner PDF and a genuinely
+                        # address-free archive must not abstain with the same wording.
+                        inner_err = f"{Path(i.filename).name}: {type(e).__name__}"
                         continue
                     if len(bd) > MIN_TEXT_CHARS:
                         inner = bd
@@ -400,7 +407,8 @@ def _analyse_zip(path: Path, r: dict) -> dict:
         r["reason"] = f"{len(names)} entries; location from {src_name}"
         return r
     r["reason"] = (f"ABSTAIN: {len(names)} entries, no address in archive"
-                   + (f"; top folder '{top}'" if top else ""))
+                   + (f"; top folder '{top}'" if top else "")
+                   + (f"; inner PDF unreadable ({inner_err})" if inner_err else ""))
     return r
 
 
@@ -596,8 +604,15 @@ def build_plan(files: list, src: Path, overrides: dict, check_placeholders: bool
 
 def find_collisions(rows: list) -> list:
     """Casefolded, because NTFS is case-insensitive and a Python set() is not.
-    Rows the plan leaves alone cannot collide with themselves."""
+
+    Left-alone rows are not renamed, but their names stay occupied -- a rename onto
+    one is just as much a collision as a rename onto another rename. Seeding them
+    first is what catches that; skipping them entirely reports a clean plan and
+    leaves apply.ps1's runtime Test-Path to discover the clash one file at a time."""
     seen, collisions = {}, []
+    for r in rows:
+        if r.get("skip"):
+            seen.setdefault(r["new"].casefold(), r["old"])
     for r in rows:
         if r.get("skip"):
             continue

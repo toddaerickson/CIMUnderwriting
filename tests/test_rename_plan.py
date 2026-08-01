@@ -103,10 +103,20 @@ def test_collision_detection_is_casefolded():
     assert len(find_collisions(rows)) == 1
 
 
-def test_skipped_rows_never_collide():
-    rows = [{"old": "x.xlsx", "new": "x.xlsx", "skip": 1},
-            {"old": "x.xlsx", "new": "x.xlsx", "skip": 1}]
+def test_two_left_alone_files_never_collide():
+    """Files the plan does not touch already coexist on disk."""
+    rows = [{"old": "a.xlsx", "new": "a.xlsx", "skip": 1},
+            {"old": "b.xlsx", "new": "b.xlsx", "skip": 1}]
     assert find_collisions(rows) == []
+
+
+def test_rename_onto_a_left_alone_file_is_a_collision():
+    """A left-alone file still occupies its name. Missing this reports a clean
+    plan and leaves apply.ps1's runtime Test-Path to hit the clash instead."""
+    rows = [{"old": "[SS-TX-Kerrville] Storage OM.pdf",
+             "new": "[SS-TX-Kerrville] Storage OM.pdf", "skip": 1},
+            {"old": "Storage OM.pdf", "new": "[SS-TX-Kerrville] Storage OM.pdf"}]
+    assert len(find_collisions(rows)) == 1
 
 
 def test_apply_script_refuses_when_plan_has_collisions(tmp_path):
@@ -167,6 +177,19 @@ def test_override_renames_a_file_the_scan_abstained_on(tmp_path):
                                    "confidence": "REVIEW"}}
     rows, _, _ = build_plan([p], tmp_path, overrides, check_placeholders=False)
     assert rows[0]["new"] == "[SS-TX-Kerrville] Deal Room.zip"
+
+
+def test_unreadable_inner_pdf_is_named_not_silently_abstained(tmp_path):
+    """A corrupt or encrypted inner PDF must not abstain with the same wording as
+    an archive that genuinely carries no address."""
+    import zipfile as zf
+
+    p = tmp_path / "Deal Room.zip"
+    with zf.ZipFile(p, "w") as z:
+        z.writestr("Deal Room/OM.pdf", b"%PDF-1.4 truncated garbage")
+    r = analyse(p, check_placeholders=False)
+    assert "inner PDF unreadable" in r["reason"]
+    assert "OM.pdf" in r["reason"]
 
 
 # ── refusals ─────────────────────────────────────────────────────────
@@ -234,6 +257,71 @@ def test_bare_upload_still_matches_a_prefixed_deal():
                         input_files=["[BRV-TX-Belton] expo om.pdf"])
     hits = find_upload_duplicates("expo om.pdf")
     assert any(h["match_type"] == "deal_folder" for h in hits)
+
+
+@pytest.fixture
+def comp_db(tmp_path, monkeypatch):
+    """A throwaway comps DB, so the real data/cim_comps.db is never touched."""
+    from data.comp_db import CompDatabase
+
+    path = tmp_path / "comps.db"
+    monkeypatch.setattr("data.comp_db.COMP_DB_PATH", str(path))
+    db = CompDatabase()
+
+    def add(pdf_filename, property_name="Expo Storage"):
+        import sqlite3
+        with sqlite3.connect(path) as conn:
+            conn.execute(
+                "INSERT INTO properties (property_name, city, state, "
+                "analysis_date, pdf_filename) VALUES (?,?,?,?,?)",
+                (property_name, "Belton", "TX", "2026-07-01", pdf_filename))
+    return db, add
+
+
+@pytest.mark.django_db
+def test_comp_db_matches_a_prefixed_upload_to_a_bare_row(comp_db):
+    """The row was analysed before the rename."""
+    from webapp.services import find_upload_duplicates
+
+    _, add = comp_db
+    add("expo om.pdf")
+    hits = find_upload_duplicates("[BRV-TX-Belton] expo om.pdf")
+    assert any(h["pdf_filename"] == "expo om.pdf" for h in hits)
+
+
+@pytest.mark.django_db
+def test_comp_db_matches_a_bare_upload_to_a_prefixed_row(comp_db):
+    """And the reverse — the direction the exact-filename query cannot see, and
+    which the fuzzy property_name LIKE does not cover either, because
+    'Expo Storage' does not contain the stem 'expo om'."""
+    from webapp.services import find_upload_duplicates
+
+    _, add = comp_db
+    add("[BRV-TX-Belton] expo om.pdf")
+    hits = find_upload_duplicates("expo om.pdf")
+    assert any(h["pdf_filename"] == "[BRV-TX-Belton] expo om.pdf" for h in hits)
+
+
+@pytest.mark.django_db
+def test_comp_db_does_not_match_an_unrelated_file(comp_db):
+    from webapp.services import find_upload_duplicates
+
+    _, add = comp_db
+    add("expo om.pdf")
+    assert find_upload_duplicates("green storage om.pdf") == []
+
+
+@pytest.mark.django_db
+def test_comp_db_hit_is_not_duplicated_across_both_paths(comp_db):
+    """An exact-name row is found by find_duplicates and by the stripped sweep;
+    it must be reported once."""
+    from webapp.services import find_upload_duplicates
+
+    _, add = comp_db
+    add("expo om.pdf")
+    hits = [h for h in find_upload_duplicates("expo om.pdf")
+            if h["pdf_filename"] == "expo om.pdf" and h["match_type"] == "filename"]
+    assert len(hits) == 1
 
 
 @pytest.mark.django_db
