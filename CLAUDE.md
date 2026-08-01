@@ -86,6 +86,9 @@ webapp/                    # Django app — views, models (Deal/AnalysisRun/Conf
 extract/
   pdf_reader.py            # PDF text + table extraction (pdfplumber)
   parser.py                # Structured data extraction → CIMData dataclass
+  location.py              # City/state/ZIP extraction — cover-page-first, broker-address
+                           #   suppression, street-line trimming. Shared by parser.py and
+                           #   scripts/cims_rename_plan.py; keep it the only copy.
 analysis/
   filters.py               # Go/No-Go gate evaluation (7 gates)
   market.py                # Market & location analysis

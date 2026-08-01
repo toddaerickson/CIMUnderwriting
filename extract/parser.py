@@ -10,6 +10,8 @@ import re
 from dataclasses import dataclass, field, fields
 from typing import Optional
 
+from extract.location import best_city_state
+
 
 @dataclass
 class UnitType:
@@ -158,9 +160,10 @@ def parse_cim(raw: dict) -> CIMData:
     """
     text = raw["text"]
     tables = raw.get("tables", [])
+    pages = raw.get("pages") or []
     data = CIMData()
 
-    _parse_property_basics(text, data)
+    _parse_property_basics(text, data, pages)
     _parse_size_occupancy(text, data)
     _parse_pricing(text, data)
     _parse_demographics(text, data)
@@ -173,8 +176,12 @@ def parse_cim(raw: dict) -> CIMData:
 
 # ── Internal Parsing Functions ──────────────────────────────────────
 
-def _parse_property_basics(text: str, data: CIMData):
-    """Extract property name, address, year built, acreage."""
+def _parse_property_basics(text: str, data: CIMData, pages: list = None):
+    """Extract property name, address, year built, acreage.
+
+    `pages` is the per-page text list; the city/state lookup reads the cover page
+    first and only falls back to the body. Callers without it degrade to the
+    old whole-document behaviour rather than failing."""
 
     # Property name — often near top, try common patterns
     name_patterns = [
@@ -193,12 +200,13 @@ def _parse_property_basics(text: str, data: CIMData):
     if m:
         data.address = m.group(1).strip().rstrip(",")
 
-    # City, State
-    city_state_pat = r"([A-Z][a-z]+(?:\s[A-Z][a-z]+)*),\s*([A-Z]{2})\s+\d{5}"
-    m = re.search(city_state_pat, text)
-    if m:
-        data.city = m.group(1).strip()
-        data.state = m.group(2).strip()
+    # City, State — see extract/location.py. The whole-document regex this
+    # replaced returned the broker's disclaimer-page address as often as the
+    # property's, could not match an ALL-CAPS cover ("MAXWELL, TX"), and let the
+    # street line run into the city ("East Pikes Peak Avenue Colorado Springs").
+    city, state, _src = best_city_state(pages if pages else text)
+    if city:
+        data.city, data.state = city, state
 
     # Year built
     yb_pat = r"(?:year\s+built|built\s+in|constructed\s+in|vintage)[:\s]*(\d{4})"

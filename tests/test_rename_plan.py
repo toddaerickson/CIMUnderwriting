@@ -2,7 +2,8 @@
 
 The plan generator's job is to be safe, not clever: it must never overwrite, never
 rename a file it could not identify, and never lose the original name. These tests
-pin those invariants plus the address-extraction cases taken from real CIM covers.
+pin those invariants. The address extraction it relies on lives in
+extract/location.py and is covered by tests/test_parser_location.py.
 """
 import csv
 
@@ -13,55 +14,9 @@ from scripts.cims_rename_plan import (
     build_name,
     build_plan,
     find_collisions,
-    find_locations,
     load_overrides,
     render_scripts,
-    _tidy_city,
 )
-
-
-# ── city tidying ─────────────────────────────────────────────────────
-
-@pytest.mark.parametrize("raw,expect", [
-    ("Industry Drive Bastrop", "Bastrop"),      # ran backwards into the street line
-    ("East Pikes Peak Avenue Colorado Springs", "Colorado Springs"),
-    ("State Belton", "Belton"),                 # ran backwards into a field label
-    ("YORK", "York"),                           # ALL-CAPS cover
-    ("DECATU R", "Decatur"),                    # letter-split by the PDF text layer
-    ("McKinney", "McKinney"),                   # genuine CamelCase survives
-    ("5485 Airport Hwy", ""),                   # pure street fragment -> nothing
-])
-def test_tidy_city(raw, expect):
-    assert _tidy_city(raw) == expect
-
-
-# ── address extraction ───────────────────────────────────────────────
-
-def test_finds_address_with_no_space_before_zip():
-    """Real cover text from Texoma 377 OM.pdf — the PDF sets it with no spaces."""
-    hits = find_locations("63CedarMillsRd,Gordonville,TX76245")
-    assert ("Gordonville", "TX", "76245") in hits
-
-
-def test_finds_all_caps_address():
-    hits = find_locations("5485 AIRPORT HWY. 21, MAXWELL, TX 78666")
-    assert ("Maxwell", "TX", "78666") in hits
-
-
-def test_spelled_out_state_maps_to_code():
-    assert ("Rogers", "AR", "72756") in find_locations("Rogers, Arkansas 72756")
-
-
-def test_broker_office_address_is_suppressed():
-    """The disclaimer page carries the broker's own address, not the property's."""
-    assert find_locations("Marcus & Millichap, Encino, CA 91436") == []
-
-
-def test_broker_suppression_window_is_tight():
-    """A broker named far away must not suppress a real address — a wide window
-    silently blanks every file whose disclaimer page mentions brokers."""
-    text = "Marcus & Millichap" + " filler" * 40 + ", Gordonville, TX 76245"
-    assert ("Gordonville", "TX", "76245") in find_locations(text)
 
 
 # ── naming ───────────────────────────────────────────────────────────
@@ -190,6 +145,46 @@ def test_unreadable_inner_pdf_is_named_not_silently_abstained(tmp_path):
     r = analyse(p, check_placeholders=False)
     assert "inner PDF unreadable" in r["reason"]
     assert "OM.pdf" in r["reason"]
+
+
+# ── pairing ──────────────────────────────────────────────────────────
+
+def _row(old, ext, st="ZZ", city="ZZ", ac="ZZ", prop=""):
+    return dict(old=old, ext=ext, st=st, city=city, ac=ac, prop=prop,
+                tags="", confidence="LOW", reason="")
+
+
+def test_pairing_links_a_data_room_zip_to_its_om():
+    from scripts.cims_rename_plan import apply_pairing
+
+    rows = [_row("Kerrville Storwise Deal Room.zip", ".zip"),
+            _row("Storwise Kerrville OM.pdf", ".pdf", st="TX", city="Kerrville", ac="SS")]
+    apply_pairing(rows)
+    assert (rows[0]["city"], rows[0]["st"]) == ("Kerrville", "TX")
+    assert rows[0]["confidence"] == "REVIEW"
+
+
+def test_pairing_never_gives_one_om_another_oms_city():
+    """Two unrelated OMs share generic operator annotations; pairing across PDFs
+    labelled a Belton deal as Creedmoor on the real sample set."""
+    from scripts.cims_rename_plan import apply_pairing
+
+    rows = [_row("Belton open parking Expo Storage Offering Memoradum.pdf", ".pdf"),
+            _row("Austin open gravel Creedmoor Boat & RV Storage Property.pdf", ".pdf",
+                 st="TX", city="Creedmoor", ac="BRV")]
+    apply_pairing(rows)
+    assert rows[0]["city"] == "ZZ"
+    assert rows[0]["st"] == "ZZ"
+
+
+def test_pairing_needs_a_substantial_shared_token():
+    """Two short filler tokens are not evidence of the same property."""
+    from scripts.cims_rename_plan import apply_pairing
+
+    rows = [_row("new big deal room.zip", ".zip"),
+            _row("new big OM.pdf", ".pdf", st="TX", city="Kerrville", ac="SS")]
+    apply_pairing(rows)
+    assert rows[0]["city"] == "ZZ"
 
 
 # ── refusals ─────────────────────────────────────────────────────────
