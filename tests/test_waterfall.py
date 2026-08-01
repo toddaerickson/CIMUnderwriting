@@ -353,6 +353,100 @@ def test_tier_one_reconciles_to_its_capital_and_pref_parts(terms):
             == pytest.approx(row["ending_balance"], abs=CENT)
 
 
+# ── The pari-passu shortcut, against a second implementation ────────
+
+def _two_separate_accounts(contribs, dists, terms):
+    """A deliberately independent reference implementation.
+
+    `run_waterfall` rolls ONE aggregate accrual account and splits each
+    tier-1 payment by `gp_coinvest_pct`. This rolls the LP's and the GP's
+    accounts separately and splits tier-1 cash by each partner's share of
+    the OUTSTANDING claim — which is what pari passu has to mean when the
+    accounts are tracked apart, and which is not obviously the same
+    number once contributions arrive unevenly across periods. If the
+    shortcut is right they agree to float noise; if it is wrong this is
+    what says so.
+    """
+    coinvest = terms.gp_coinvest_pct
+    compounded = terms.pref_compounding == COMPOUNDING_ANNUAL
+    books = {"lp": {"share": 1.0 - coinvest}, "gp": {"share": coinvest}}
+    for book in books.values():
+        book.update(balance=0.0, capital=0.0, pref=0.0, paid=0.0)
+
+    for period, (contribution, cash) in enumerate(zip(contribs, dists)):
+        for book in books.values():
+            if period > 0:
+                if compounded:
+                    book["balance"] += book["balance"] * terms.pref_rate
+                else:
+                    book["pref"] += book["capital"] * terms.pref_rate
+            book["capital"] += contribution * book["share"]
+            book["balance"] += contribution * book["share"]
+
+        claims = {key: (book["balance"] if compounded
+                        else book["capital"] + book["pref"])
+                  for key, book in books.items()}
+        outstanding = sum(claims.values())
+        tier1 = min(cash, outstanding)
+        for key, book in books.items():
+            paid = tier1 * claims[key] / outstanding if outstanding else 0.0
+            book["paid"] += paid
+            if compounded:
+                book["balance"] -= paid
+            elif terms.ordering == ORDERING_ROC_FIRST:
+                returned = min(paid, book["capital"])
+                book["capital"] -= returned
+                book["pref"] -= min(paid - returned, book["pref"])
+            else:
+                pref_paid = min(paid, book["pref"])
+                book["pref"] -= pref_paid
+                book["capital"] -= min(paid - pref_paid, book["capital"])
+
+        residual = cash - tier1
+        lp_residual = residual * (1.0 - coinvest)
+        promote = lp_residual * terms.promote_split
+        books["lp"]["paid"] += lp_residual - promote
+        books["gp"]["paid"] += residual - lp_residual + promote
+
+    return books["lp"]["paid"], books["gp"]["paid"]
+
+
+#: Uneven, multi-period contribution schedules — the case where rolling
+#: one aggregate account and rolling two could plausibly diverge.
+UNEVEN_SCHEDULES = [
+    ([1_000_000.0, 0.0, 250_000.0, 0.0, 0.0, 0.0],
+     [0.0, 40_000.0, 55_000.0, 90_000.0, 110_000.0, 1_900_000.0]),
+    ([600_000.0, 400_000.0, 0.0, 300_000.0, 0.0],
+     [0.0, 0.0, 120_000.0, 0.0, 2_100_000.0]),
+    ([1_000_000.0, 0.0, 0.0, 0.0],           # never clears the hurdle
+     [0.0, 30_000.0, 30_000.0, 30_000.0]),
+]
+
+
+@pytest.mark.parametrize("contribs,dists", UNEVEN_SCHEDULES)
+@pytest.mark.parametrize("compounding", [COMPOUNDING_ANNUAL,
+                                         COMPOUNDING_SIMPLE])
+@pytest.mark.parametrize("ordering", [ORDERING_ROC_FIRST, ORDERING_PREF_FIRST])
+@pytest.mark.parametrize("coinvest", [0.0, 0.10, 0.30])
+def test_one_aggregate_account_equals_two_separate_ones(contribs, dists,
+                                                        compounding, ordering,
+                                                        coinvest):
+    """The load-bearing shortcut in this module, checked rather than
+    argued. It holds because contributions split at a fixed ratio every
+    period, so the two claims never leave that ratio."""
+    terms = WaterfallTerms(pref_rate=0.08, pref_compounding=compounding,
+                           ordering=ordering, promote_split=0.20,
+                           gp_coinvest_pct=coinvest)
+    result = run_waterfall(contribs, dists, terms)
+    lp_expected, gp_expected = _two_separate_accounts(contribs, dists, terms)
+    assert result["lp"]["distributions"] == pytest.approx(lp_expected,
+                                                          abs=CENT)
+    assert result["gp"]["distributions"] == pytest.approx(gp_expected,
+                                                          abs=CENT)
+    assert result["lp"]["distributions"] + result["gp"]["distributions"] == \
+        pytest.approx(sum(dists), abs=CENT)
+
+
 # ── Input validation ────────────────────────────────────────────────
 
 def test_a_single_number_means_all_equity_at_close():

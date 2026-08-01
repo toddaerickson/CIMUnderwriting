@@ -135,8 +135,10 @@ travel as parameters.
 is presentation only.** There is one balance and one claim; the split
 exists so the memo and Excel can print a Return-of-Capital row and a
 Preferred-Return row. The module applies accrued pref first and says so.
-No LP or GP dollar depends on it, which
-`test_the_compounded_memo_split_cannot_move_a_dollar` pins.
+No LP or GP dollar depends on it — every distribution is computed from
+`tier1_paid` and `residual`, never from the split — and
+`test_tier_one_reconciles_to_its_capital_and_pref_parts` pins the split
+to the payment and to the ending balance.
 
 **The result is a dict, not the `WaterfallResult` dataclass the design
 doc names.** Deviation, recorded on purpose: `build_debt_schedule`,
