@@ -23,6 +23,7 @@ from django.utils import timezone
 
 import config as cfg
 from analysis.valuation import resolve_hold_years, resolve_transaction_costs
+from model.returns_model import resolve_capital_structure
 from engine import (AnalysisResult, _apply_overrides, extract_pdf_data,
                     run_analysis)
 from webapp.models import Deal
@@ -714,12 +715,18 @@ def _analysis_worker(run_pk):
         # indistinguishable from a pre-item-B run rather than
         # self-describing. Deltas elsewhere; the truth here.
         hold_years = resolve_hold_years(overrides.get("hold_years"))
+        # Capital structure resolves off plain config scalars, which are
+        # never patched in place, so unlike transaction costs there is no
+        # pristine-snapshot dance to do here — see config.py for why the
+        # settings deliberately are not a _PATCHED_DICTS entry.
+        capital = resolve_capital_structure(overrides.get("capital_structure"))
         # Resolved here, not inside the engine, so the stamp and the run
         # cannot disagree: file default ← global ConfigOverride delta ←
         # per-deal override, then passed down whole.
         txn_costs = resolve_run_transaction_costs(patch, overrides)
         stamped = {**overrides, "hold_years": hold_years,
-                   "transaction_costs": txn_costs}
+                   "transaction_costs": txn_costs,
+                   "capital_structure": capital}
         # A per-deal cost supersedes the global row for THAT key, so the
         # global value must not be stamped as applied — same rule as
         # SOLVER_TARGET_IRR above, but key-level, because transaction
@@ -745,6 +752,7 @@ def _analysis_worker(run_pk):
                         "expense_line_overrides"),
                     hold_years=hold_years,
                     transaction_costs=txn_costs,
+                    capital_structure=capital,
                 )
 
         meta = build_deal_meta(cim, result, deal.deal_dir,
@@ -757,6 +765,7 @@ def _analysis_worker(run_pk):
             "gate_summary": result.gate_summary,
             "scenario_results": result.scenario_results,
             "sensitivity": result.sensitivity,
+            "sources_uses": result.sources_uses,
             "va_results": result.va_results,
             "max_offer": result.max_offer,
             "va_max_offer": result.va_max_offer,

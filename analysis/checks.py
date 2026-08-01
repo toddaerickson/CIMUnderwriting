@@ -59,6 +59,11 @@ OCCUPANCY_EPSILON = 1e-9
 # it is a wrong number.
 EXPENSE_FLOOR_FRACTION = 0.5
 
+# Sources = Uses = the DCF basis. This is an identity over figures the
+# pipeline computes itself, so it holds to the cent or something is
+# broken — a looser band would let a real disagreement hide inside it.
+SOURCES_USES_TOLERANCE_ABS = 0.01
+
 
 def noi_recon_tolerance(revenue: float) -> float:
     """Income-identity tolerance. Canonical definition — webapp.forms
@@ -115,6 +120,7 @@ class CheckInput:
     benchmarks: dict | None = None  # state-adjusted bands; None → national
     price_vs_replacement: dict | None = None
     scenarios: dict | None = None
+    sources_uses: dict | None = None   # model.returns_model.build_sources_uses
 
 
 @dataclass(frozen=True)
@@ -361,6 +367,56 @@ def _exit_cap_coercion(inp):
                   "on the one entered.", values)
 
 
+def _sources_uses_ties(inp):
+    """Total Uses = Total Sources = the DCF's total basis.
+
+    Unlike every other check here, this one tests arithmetic the pipeline
+    performed on itself rather than an analyst's input — so a failure is a
+    bug, not a bad number, which is exactly why it carries the loud
+    severity. It is also the seam item E1 will change: the day debt and
+    financing costs stop being zero, this is what refuses to let the
+    capital stack and the returns model quietly disagree.
+    """
+    su = inp.sources_uses or {}
+    if not su:
+        return (SKIPPED, "No Sources & Uses computed — no capital stack to "
+                         "reconcile.", {})
+    uses = su.get("total_uses")
+    sources = su.get("total_sources")
+    bases = sorted({round(float(s["total_basis"]), 2)
+                    for s in (inp.scenarios or {}).values()
+                    if isinstance(s, dict) and s.get("total_basis") is not None})
+    values = {"total_uses": uses, "total_sources": sources,
+              "scenario_bases": bases,
+              "tolerance": SOURCES_USES_TOLERANCE_ABS}
+    if uses is None or sources is None:
+        return (SKIPPED, "Sources & Uses is missing a total.", values)
+    problems = []
+    if abs(uses - sources) > SOURCES_USES_TOLERANCE_ABS:
+        problems.append(f"Uses ${uses:,.2f} vs Sources ${sources:,.2f}")
+    if not bases:
+        # No DCF to compare against — but a stack that does not balance
+        # against ITSELF is still a finding. Reporting `skipped` here
+        # would drop a real one on the floor.
+        if problems:
+            return (FAIL, "The capital stack does not balance: "
+                          + "; ".join(problems) + ".", values)
+        return (SKIPPED, "Sources and Uses balance, but there is no "
+                         "scenario basis to reconcile them against.", values)
+    if len(bases) > 1:
+        problems.append("scenarios disagree on total basis ("
+                        + ", ".join(f"${b:,.2f}" for b in bases) + ")")
+    elif abs(uses - bases[0]) > SOURCES_USES_TOLERANCE_ABS:
+        problems.append(f"Uses ${uses:,.2f} vs DCF basis ${bases[0]:,.2f}")
+    if problems:
+        return (FAIL, "The capital stack does not tie to the returns model: "
+                      + "; ".join(problems) + ". Every return is computed on "
+                      "the DCF basis, so a stack that disagrees with it is "
+                      "describing a different deal.", values)
+    return (PASS, f"Uses, Sources and the DCF basis all equal "
+                  f"${uses:,.0f}.", values)
+
+
 def _price_vs_replacement(inp):
     comp = inp.price_vs_replacement or {}
     if not comp.get("comparable"):
@@ -393,6 +449,9 @@ CHECKS = (
               "physical_occupancy, economic_occupancy", _occupancy_sanity),
     CheckSpec("egr_le_gpr", "EGR ≤ GPR", BLOCKING,
               "ttm_gpr, ttm_egr", _egr_le_gpr),
+    CheckSpec("sources_uses_ties", "Sources & Uses ties to DCF basis",
+              BLOCKING, "sources_uses, scenario_results[*].total_basis",
+              _sources_uses_ties),
     CheckSpec("unit_mix_sf", "Unit mix SF vs NRSF", ADVISORY,
               "unit_mix, nrsf", _unit_mix_sf),
     CheckSpec("unit_mix_gpr", "Unit mix rents vs GPR", ADVISORY,
@@ -484,7 +543,7 @@ def _unit_mix_dicts(unit_mix) -> tuple:
 
 
 def input_from_cim(cim, financial_analysis=None, physical_analysis=None,
-                   scenario_results=None) -> CheckInput:
+                   scenario_results=None, sources_uses=None) -> CheckInput:
     """Build the register's input from a CIMData plus whichever analysis
     outputs the caller has. Bands come from the ratio check the pipeline
     already computed (state-adjusted), never from a second read of raw
@@ -516,4 +575,5 @@ def input_from_cim(cim, financial_analysis=None, physical_analysis=None,
         price_vs_replacement=(physical_analysis or {}).get(
             "price_vs_replacement"),
         scenarios=scenario_results,
+        sources_uses=sources_uses,
     )

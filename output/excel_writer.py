@@ -8,7 +8,8 @@ Tabs:
   4. Bull Case — same structure
   5. Sensitivity — IRR sensitivity table (price × exit cap)
   6. Max Offer — solved max price and derivation
-  7. Checks — the model error-check register (analysis/checks.py)
+  7. Sources & Uses — capital stack (model/returns_model.py)
+  8. Checks — the model error-check register (analysis/checks.py)
 """
 
 import os
@@ -40,6 +41,7 @@ def generate_excel(property_name: str, cim_data, financial_analysis: dict,
                    scenario_results: dict, sensitivity: dict,
                    max_offer: dict, va_results: dict = None,
                    va_max_offer: dict = None, checks: list = None,
+                   sources_uses: dict = None,
                    output_dir: str = ".") -> str:
     """
     Generate the SS Returns Model .xlsx.
@@ -72,7 +74,14 @@ def generate_excel(property_name: str, cim_data, financial_analysis: dict,
     ws_max = wb.create_sheet(title="Max Offer")
     _build_max_offer_tab(ws_max, max_offer, cim_data)
 
-    # Tab 8: Checks — the whole register, not just the findings, so the
+    # Tab 8: Sources & Uses — what the deal costs and where the money
+    # comes from. Placed before Checks so the workbook reads deal →
+    # returns → capital → integrity.
+    if sources_uses:
+        _build_sources_uses_tab(wb.create_sheet(title="Sources & Uses"),
+                                sources_uses)
+
+    # Tab 9: Checks — the whole register, not just the findings, so the
     # workbook says what was verified as well as what failed.
     if checks:
         _build_checks_tab(wb.create_sheet(title="Checks"), checks)
@@ -551,6 +560,70 @@ def _build_value_add_tab(ws, va_results: dict, va_max_offer: dict, cim_data):
                 cell_b.number_format = fmt
             cell_b.font = BOLD_FONT
             row += 1
+
+
+def _build_sources_uses_tab(ws, su: dict):
+    """Capital stack. Every line is read off `build_sources_uses` — the
+    percentages are not recomputed here, so the sheet cannot disagree with
+    the returns model about what the deal costs."""
+    row = _write_section_header(ws, 1, "Uses of Funds", cols=3)
+    total_uses = su.get("total_uses") or 0
+    for line in su.get("uses") or []:
+        amount = line.get("amount") or 0
+        ws.cell(row=row, column=1, value=line.get("label")).font = LABEL_FONT
+        cell = ws.cell(row=row, column=2, value=amount)
+        cell.font = VALUE_FONT
+        cell.number_format = CURRENCY_FULL
+        share = ws.cell(row=row, column=3,
+                        value=(amount / total_uses) if total_uses else None)
+        share.font = VALUE_FONT
+        share.number_format = PCT_FORMAT
+        row += 1
+    row = _write_total_row(ws, row, "Total Uses", total_uses)
+
+    row += 1
+    row = _write_section_header(ws, row, "Sources of Funds", cols=3)
+    total_sources = su.get("total_sources") or 0
+    for line in su.get("sources") or []:
+        amount = line.get("amount") or 0
+        ws.cell(row=row, column=1, value=line.get("label")).font = LABEL_FONT
+        cell = ws.cell(row=row, column=2, value=amount)
+        cell.font = VALUE_FONT
+        cell.number_format = CURRENCY_FULL
+        share = ws.cell(row=row, column=3,
+                        value=(amount / total_sources) if total_sources else None)
+        share.font = VALUE_FONT
+        share.number_format = PCT_FORMAT
+        row += 1
+    row = _write_total_row(ws, row, "Total Sources", total_sources)
+
+    row += 1
+    row = _write_input_row(ws, row, "Total Equity", su.get("total_equity"),
+                           CURRENCY_FULL)
+    row = _write_input_row(ws, row, "Loan-to-Cost", su.get("ltv"), PCT_FORMAT)
+    # Say the tie held (or did not) on the sheet itself. A capital stack
+    # that silently disagrees with the DCF is the failure this block
+    # exists to prevent, so it should not require opening another tab.
+    row = _write_input_row(
+        ws, row, "Sources − Uses",
+        "In balance" if su.get("balanced")
+        else f"OUT OF BALANCE by ${abs(su.get('delta') or 0):,.2f}")
+
+    for col, width in ((1, 34), (2, 18), (3, 12)):
+        ws.column_dimensions[get_column_letter(col)].width = width
+
+
+def _write_total_row(ws, row: int, label: str, value) -> int:
+    """Bold, ruled total line under a Sources/Uses block."""
+    label_cell = ws.cell(row=row, column=1, value=label)
+    label_cell.font = BOLD_FONT
+    label_cell.border = THIN_BORDER
+    cell = ws.cell(row=row, column=2, value=value)
+    cell.font = BOLD_FONT
+    cell.number_format = CURRENCY_FULL
+    cell.border = THIN_BORDER
+    ws.cell(row=row, column=3).border = THIN_BORDER
+    return row + 1
 
 
 def _build_checks_tab(ws, checks: list):

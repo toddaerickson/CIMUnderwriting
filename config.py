@@ -294,6 +294,33 @@ TRANSACTION_COSTS = {
 DEFAULT_HOLD_YEARS = 5
 HOLD_YEARS_RANGE = (1, 10)
 
+# ── Capital Structure (Sources & Uses) ──────────────────────────────
+# Inputs to model.returns_model.build_sources_uses. Deliberately plain
+# module scalars rather than a dict added to
+# webapp.services._PATCHED_DICTS: a patched dict is mutated IN PLACE for
+# the duration of one deal's run, so anything resolving it outside that
+# run's lock reads another deal's values — the bug item B shipped and the
+# review caught. These travel as parameters instead, resolved once at the
+# services boundary, which is the same lane DEFAULT_HOLD_YEARS and
+# SOLVER_TARGET_IRR already occupy. Consequence: per-deal editable, not
+# editable from the settings page.
+
+# GP capital invested alongside the LPs, as a share of total equity.
+# 10% is the market term recorded in docs/levered-waterfall-design.md;
+# item E2 reads the same number for the waterfall's pari-passu tier.
+GP_COINVEST_PCT = 0.10
+
+# Upfront operating / working-capital reserve funded at close. Zero by
+# default so no published return moves when this ships. NOT the
+# `cap_reserve` expense benchmark, which is an annual OpEx line — same
+# word, different thing, and confusing them is the obvious failure mode.
+DEFAULT_OPERATING_RESERVE = 0.0
+DEFAULT_OPERATING_RESERVE_BASIS = "amount"
+
+# How the CapEx box is read (item H). "amount" reproduces the historical
+# behavior exactly.
+DEFAULT_CAPEX_BASIS = "amount"
+
 # ── Regional Expense Adjustments ──────────────────────────────────
 # Multipliers applied to national EXPENSE_BENCHMARKS by region.
 # Derived from ISS Self-Storage Expense Guidebook and SSA Operating

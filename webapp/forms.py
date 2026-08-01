@@ -16,6 +16,9 @@ from django.utils import timezone
 import config as cfg
 from analysis import checks
 from analysis.checks import noi_recon_tolerance      # noqa: F401 (re-export)
+from model.returns_model import (BASIS_AMOUNT, BASIS_LABELS, BASIS_PCT_PRICE,
+                                 BASIS_PER_SF, BASIS_PER_UNIT, CAPEX_BASES,
+                                 RESERVE_BASES)
 from webapp.services import ASSET_TYPES
 from registry import ScenarioType
 
@@ -89,6 +92,27 @@ TXN_COST_LABELS = [
 ]
 TXN_COST_PARAMS = [p for p, _ in TXN_COST_LABELS]
 
+# Capital structure (item D + H). The reserve and GP co-invest are new
+# inputs; capex_basis re-reads the EXISTING CapEx box as a rate. Stored
+# together under `capital_structure` in the deal's overrides, deltas only
+# like every other section.
+CAPITAL_KEYS = ("capex_basis", "operating_reserve",
+                "operating_reserve_basis", "gp_coinvest_pct")
+CAPITAL_DEFAULTS = {
+    "capex_basis": lambda: cfg.DEFAULT_CAPEX_BASIS,
+    "operating_reserve": lambda: cfg.DEFAULT_OPERATING_RESERVE,
+    "operating_reserve_basis": lambda: cfg.DEFAULT_OPERATING_RESERVE_BASIS,
+    "gp_coinvest_pct": lambda: cfg.GP_COINVEST_PCT,
+}
+#: basis → (the cleaned_data field that must be present, its label). A
+#: rate with no denominator resolves to $0 downstream by design, so the
+#: form refuses the combination while a human is standing in front of it.
+BASIS_DRIVER_FIELDS = {
+    BASIS_PER_SF: ("nrsf", "NRSF"),
+    BASIS_PER_UNIT: ("total_units", "Total Units"),
+    BASIS_PCT_PRICE: ("asking_price", "Asking Price"),
+}
+
 RC_PCT_KEYS = {"soft_cost_pct", "dev_profit_pct"}
 RC_KEYS = [k for hard, site, _ in cfg.FACILITY_TYPES for k in (hard, site)] \
     + ["soft_cost_pct", "dev_profit_pct"]
@@ -123,7 +147,9 @@ SECTION_DEMOGRAPHICS = [
 # Task-1 temporary homes in SECTION_INCOME/SECTION_SIZE/SECTION_DEMOGRAPHICS
 # — each field lives in exactly one section now.
 SECTION_DRIVERS = [
-    ("asking_price", "Asking Price ($)"), ("capex_estimate", "CapEx Estimate ($)"),
+    # No "($)" on CapEx: its basis selector rides in the same row, so the
+    # unit is whatever that selector says (item H).
+    ("asking_price", "Asking Price ($)"), ("capex_estimate", "CapEx Estimate"),
     ("physical_occupancy", "Physical Occupancy (%)"),
     ("economic_occupancy", "Economic Occupancy (%)"),
     ("market_rent_psf", "Street Rate ($/SF/mo)"),
@@ -223,6 +249,25 @@ class AssumptionsForm(forms.Form):
         for name in TXN_COST_PARAMS:
             self.fields[name] = forms.FloatField(
                 required=False, min_value=0, max_value=100, widget=_num())
+        # Capital structure. gp_coinvest_pct follows the whole-number
+        # percent convention; operating_reserve is dollars or $/NRSF
+        # depending on its basis, so it carries no percent conversion.
+        self.fields["operating_reserve"] = forms.FloatField(
+            required=False, min_value=0, widget=_num())
+        self.fields["gp_coinvest_pct"] = forms.FloatField(
+            required=False, min_value=0, max_value=100, widget=_num())
+        # Rides in the CapEx driver row itself, with no visible label of
+        # its own — the row label is "CapEx Estimate" and this says in
+        # what unit — so it carries an explicit accessible name.
+        self.fields["capex_basis"] = forms.ChoiceField(
+            required=False, choices=[(b, BASIS_LABELS[b]) for b in CAPEX_BASES],
+            widget=forms.Select(attrs={"class": INPUT_CSS,
+                                       "aria-label": "CapEx basis",
+                                       "title": "How the CapEx figure is read"}))
+        self.fields["operating_reserve_basis"] = forms.ChoiceField(
+            required=False,
+            choices=[(b, BASIS_LABELS[b]) for b in RESERVE_BASES],
+            widget=forms.Select(attrs={"class": INPUT_CSS}))
         # Declared in CIM_CHAR_FIELDS for the save/initial plumbing, but
         # rendered as a constrained dropdown, not free text.
         self.fields["market_verification"] = forms.ChoiceField(
@@ -268,6 +313,30 @@ class AssumptionsForm(forms.Form):
         else:
             cleaned["ttm_noi"] = round(rev - exp, 2)
 
+    def _validate_capital_bases(self, cleaned):
+        """A rate needs its denominator.
+
+        `model.returns_model.resolve_capital_amount` deliberately returns
+        $0 for `$0.50/SF` on a deal with no NRSF rather than inventing a
+        number of the wrong magnitude — correct for a stored override
+        arriving from the CLI, useless as feedback to the person typing
+        it. Caught here instead, where the missing field is on screen.
+        """
+        for basis_field, amount_field, label in (
+                ("capex_basis", "capex_estimate", "CapEx"),
+                ("operating_reserve_basis", "operating_reserve",
+                 "The operating reserve")):
+            basis = cleaned.get(basis_field)
+            if basis not in BASIS_DRIVER_FIELDS or not cleaned.get(amount_field):
+                continue
+            driver_field, driver_label = BASIS_DRIVER_FIELDS[basis]
+            if not cleaned.get(driver_field):
+                self.add_error(basis_field, forms.ValidationError(
+                    f"{label} is entered as {BASIS_LABELS[basis]}, but "
+                    f"{driver_label} is blank — there is nothing to "
+                    f"multiply by. Enter {driver_label}, or switch the "
+                    f"basis back to {BASIS_LABELS[BASIS_AMOUNT]}."))
+
     def clean(self):
         """Run the model error-check register over the submitted values.
 
@@ -280,6 +349,7 @@ class AssumptionsForm(forms.Form):
         """
         cleaned = super().clean()
         self._derive_income_triple(cleaned)
+        self._validate_capital_bases(cleaned)
         # parse_unit_mix needs getlist; self.data is a QueryDict for every
         # real POST but a plain dict when a form is constructed directly.
         # Without a mix the two unit-mix checks report `skipped`, which is
@@ -342,6 +412,16 @@ def build_initial(deal, eff=None) -> dict:
     for name in TXN_COST_PARAMS:
         initial[name] = _pct_display(
             txn_saved.get(name, eff["TRANSACTION_COSTS"][name]))
+    cap_saved = saved.get("capital_structure", {})
+    for key in CAPITAL_KEYS:
+        initial[key] = cap_saved.get(key, CAPITAL_DEFAULTS[key]())
+    initial["gp_coinvest_pct"] = _pct_display(initial["gp_coinvest_pct"])
+    # CapEx entered as a percentage is stored as a decimal like every
+    # other percent in this app, so it redisplays as a whole number. The
+    # conversion is keyed off the SAVED basis, not the posted one, so a
+    # value and the basis it was entered under can never be read apart.
+    if initial["capex_basis"] == BASIS_PCT_PRICE:
+        initial["capex_estimate"] = _pct_display(initial.get("capex_estimate"))
     for key, val in (saved.get("expense_line_overrides") or {}).items():
         initial[f"exp_{key}"] = val
     return initial
@@ -388,8 +468,8 @@ def _display_value(v):
     return f"{v:,.2f}".rstrip("0").rstrip(".")
 
 
-def model_rows(form, pairs, snapshot, source_log=None):
-    """Vertical driver rows: label | extracted (read-only) | input.
+def model_rows(form, pairs, snapshot, source_log=None, extras=None):
+    """Vertical driver rows: label | extracted (read-only) | input [| extra].
     source: 'you' when the bound/initial value differs from snapshot;
     'Census' when the snapshot value was tier-2 enrichment (extract-time
     enrichment runs BEFORE the snapshot is saved, so Census fills live
@@ -402,13 +482,26 @@ def model_rows(form, pairs, snapshot, source_log=None):
     is converted the same way BEFORE comparing/displaying, or every
     percent driver would show a decimal next to its whole-number input
     and read as "you edited this" on every load.
+
+    `extras` attaches a second widget to a row (field name → bound
+    field) — the CapEx basis selector, which has to sit beside the number
+    it reinterprets rather than in a settings block three sections away.
+    A row whose basis is anything but `amount` shows no extracted value:
+    the snapshot holds the CIM's DOLLAR figure and the input now holds a
+    rate, so printing them side by side invites a comparison between two
+    different units.
     """
     source_log = source_log or {}
+    extras = extras or {}
     rows = []
     for name, label in pairs:
         snap = snapshot.get(name)
         if name in CIM_PCT_FIELDS and snap is not None:
             snap = _pct_display(snap)
+        extra_bf = extras.get(name)
+        if extra_bf is not None and extra_bf.value() not in (None, "",
+                                                             BASIS_AMOUNT):
+            snap = None
         bf = form[name]
         cur = bf.value()
         if cur not in (None, "", snap):
@@ -418,7 +511,7 @@ def model_rows(form, pairs, snapshot, source_log=None):
                    else "CIM")
         else:
             src = ""
-        rows.append({"label": label, "bf": bf,
+        rows.append({"label": label, "bf": bf, "extra_bf": extra_bf,
                      "extracted": _display_value(snap), "source": src})
     return rows
 
@@ -520,12 +613,20 @@ def build_overrides(cleaned, post, deal, eff=None) -> dict:
     snapshot = deal.cim_json or {}
     out = {}
 
+    capex_basis = cleaned.get("capex_basis") or cfg.DEFAULT_CAPEX_BASIS
+
     cim_o = {}
     for name in CIM_SCALAR_FIELDS:
         v = cleaned.get(name)
         if v in (None, ""):
             continue
         if name in CIM_PCT_FIELDS:
+            v = round(v / 100.0, 6)
+        # The one field whose units depend on another field. Canonical
+        # storage is a decimal fraction, matching every other percent
+        # here; model.returns_model.resolve_capital_amount reads it that
+        # way. See build_initial for the inverse.
+        elif name == "capex_estimate" and capex_basis == BASIS_PCT_PRICE:
             v = round(v / 100.0, 6)
         snap = snapshot.get(name)
         if snap is None or not _same(v, snap):
@@ -626,6 +727,18 @@ def build_overrides(cleaned, post, deal, eff=None) -> dict:
             txn[name] = v
     if txn:
         out["transaction_costs"] = txn
+
+    cap = {}
+    for key in CAPITAL_KEYS:
+        v = cleaned.get(key)
+        if v in (None, ""):
+            continue
+        if key == "gp_coinvest_pct":
+            v = round(v / 100.0, 6)
+        if not _same(v, CAPITAL_DEFAULTS[key]()):
+            cap[key] = v
+    if cap:
+        out["capital_structure"] = cap
 
     return out
 

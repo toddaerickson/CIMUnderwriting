@@ -46,7 +46,8 @@ def run_value_add_scenarios(cim_data, financial_analysis: dict,
                             asking_price: float, capex: float = 0,
                             custom_scenarios: dict = None,
                             hold_years: int = None,
-                            transaction_costs: dict = None) -> dict:
+                            transaction_costs: dict = None,
+                            reserve: float = 0.0) -> dict:
     """
     Run Bear / Base / Bull value-add scenarios with monthly cash flows.
 
@@ -58,6 +59,10 @@ def run_value_add_scenarios(cim_data, financial_analysis: dict,
         custom_scenarios: optional override of VALUE_ADD_SCENARIOS
         hold_years: hold period in years (default config.DEFAULT_HOLD_YEARS)
         transaction_costs: override of config.TRANSACTION_COSTS
+        reserve: upfront operating reserve in dollars (item D). Carried
+            here for the same reason transaction costs are: a VA basis
+            that excludes the reserve while the static basis includes it
+            makes the two IRRs non-comparable.
 
     Returns:
         dict keyed by scenario name, each containing:
@@ -104,6 +109,7 @@ def run_value_add_scenarios(cim_data, financial_analysis: dict,
             capex=capex,
             hold_years=hold_years,
             costs=transaction_costs,
+            reserve=reserve,
         )
         results[name] = result
 
@@ -119,7 +125,8 @@ def _run_single_va_scenario(name: str, params: dict,
                              asking_price: float,
                              capex: float,
                              hold_years: int = None,
-                             costs: dict = None) -> dict:
+                             costs: dict = None,
+                             reserve: float = 0.0) -> dict:
     """Compute a single value-add scenario with monthly granularity.
 
     This is a genuinely different engine from `analysis.valuation.
@@ -132,7 +139,8 @@ def _run_single_va_scenario(name: str, params: dict,
     hold_years = resolve_hold_years(hold_years)
     costs = resolve_transaction_costs(costs)
     hold_months = hold_years * 12
-    total_basis = (asking_price + capex
+    reserve = float(reserve or 0.0)
+    total_basis = (asking_price + capex + reserve
                    + asking_price * costs["acquisition_closing_pct"])
 
     months_to_stab = int(params["months_to_stabilize"])
@@ -260,6 +268,7 @@ def _run_single_va_scenario(name: str, params: dict,
         "net_exit_proceeds": net_exit_proceeds,
         "acquisition_cost": asking_price * costs["acquisition_closing_pct"],
         "transaction_costs": costs,
+        "reserve": reserve,
         "hold_years": hold_years,
         "entry_cap": entry_cap,
         "exit_cap": exit_cap,
@@ -278,11 +287,14 @@ def compute_va_irr_at_price(cim_data, financial_analysis: dict,
                              price: float, capex: float,
                              params: dict,
                              hold_years: int = None,
-                             costs: dict = None) -> float | None:
+                             costs: dict = None,
+                             reserve: float = 0.0) -> float | None:
     """
     Compute VA IRR at a given purchase price.
     Used by the bisection solver, so acquisition closing costs must be
     derived from `price` inside this call rather than added afterwards.
+    `capex` arrives already resolved for this price — the solver owns the
+    %-of-price basis, since only it knows which price is being tried.
     """
     in_place_rent_psf = _compute_in_place_rent_psf(cim_data)
     market_rent_psf = cim_data.market_rent_psf or in_place_rent_psf
@@ -307,6 +319,7 @@ def compute_va_irr_at_price(cim_data, financial_analysis: dict,
         capex=capex,
         hold_years=hold_years,
         costs=costs,
+        reserve=reserve,
     )
     return result.get("irr")
 

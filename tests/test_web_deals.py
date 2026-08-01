@@ -503,3 +503,88 @@ def test_model_rows_extracted_and_source_columns():
     assert rows["Physical Occupancy (%)"]["extracted"] == "92"
     assert rows["Physical Occupancy (%)"]["source"] == "CIM"
     assert rows["Asking Price ($)"]["extracted"] == "3,500,000"
+
+
+# ── Capital structure + CapEx basis (items D / H) ──────────────────────
+
+def _capital_form(**vals):
+    from webapp.forms import AssumptionsForm
+    return AssumptionsForm(data={k: str(v) for k, v in vals.items()})
+
+
+@pytest.mark.django_db
+def test_capital_structure_saves_deltas_only():
+    from django.http import QueryDict
+    from webapp.forms import build_overrides
+    from webapp.models import Deal
+    import config as cfg
+
+    deal = Deal.objects.create(deal_id="cap", property_name="Cap", cim_json={})
+    at_defaults = _capital_form(
+        capex_basis=cfg.DEFAULT_CAPEX_BASIS,
+        operating_reserve=cfg.DEFAULT_OPERATING_RESERVE,
+        operating_reserve_basis=cfg.DEFAULT_OPERATING_RESERVE_BASIS,
+        gp_coinvest_pct=cfg.GP_COINVEST_PCT * 100)
+    assert at_defaults.is_valid(), at_defaults.errors
+    assert "capital_structure" not in build_overrides(
+        at_defaults.cleaned_data, QueryDict(""), deal)
+
+    changed = _capital_form(nrsf=50_000, operating_reserve=1.50,
+                            operating_reserve_basis="per_sf",
+                            gp_coinvest_pct=20)
+    assert changed.is_valid(), changed.errors
+    out = build_overrides(changed.cleaned_data, QueryDict(""), deal)
+    assert out["capital_structure"] == {"operating_reserve": 1.50,
+                                        "operating_reserve_basis": "per_sf",
+                                        "gp_coinvest_pct": 0.20}
+
+
+@pytest.mark.django_db
+def test_pct_of_price_capex_round_trips_through_decimal_storage():
+    """The one field whose units depend on another field: the form posts a
+    whole-number percent, storage is a decimal like every other percent
+    here, and redisplay must land back on the number that was typed."""
+    from django.http import QueryDict
+    from webapp.forms import build_initial, build_overrides
+    from webapp.models import Deal
+
+    deal = Deal.objects.create(deal_id="capex-pct", property_name="CapexPct",
+                               cim_json={"asking_price": 5_000_000.0})
+    form = _capital_form(asking_price=5_000_000, capex_estimate=2,
+                         capex_basis="pct_price")
+    assert form.is_valid(), form.errors
+    out = build_overrides(form.cleaned_data, QueryDict(""), deal)
+    assert out["cim_overrides"]["capex_estimate"] == 0.02
+    assert out["capital_structure"]["capex_basis"] == "pct_price"
+
+    deal.assumption_overrides = out
+    deal.save()
+    assert build_initial(deal)["capex_estimate"] == 2.0
+
+
+def test_a_rate_without_its_denominator_is_rejected():
+    """resolve_capital_amount returns $0 for a rate with no driver rather
+    than inventing a magnitude — useless as feedback to the person typing
+    it, so the form refuses the combination while they are still here."""
+    form = _capital_form(capex_estimate=0.50, capex_basis="per_sf")
+    assert not form.is_valid()
+    assert "NRSF is blank" in str(form.errors["capex_basis"])
+
+    ok = _capital_form(capex_estimate=0.50, capex_basis="per_sf", nrsf=50_000)
+    assert ok.is_valid(), ok.errors
+
+
+def test_a_rate_basis_hides_the_extracted_dollar_figure():
+    """The snapshot holds the CIM's DOLLARS; the input now holds a RATE.
+    Printing them side by side invites a comparison between two units."""
+    from webapp.forms import SECTION_DRIVERS, AssumptionsForm, model_rows
+
+    snapshot = {"capex_estimate": 50_000.0, "asking_price": 5_000_000.0}
+    for basis, expected in (("amount", "50,000"), ("per_sf", None)):
+        form = AssumptionsForm(initial={"capex_basis": basis})
+        rows = {r["label"]: r for r in model_rows(
+            form, SECTION_DRIVERS, snapshot, {},
+            extras={"capex_estimate": form["capex_basis"]})}
+        row = rows["CapEx Estimate"]
+        assert row["extracted"] == expected
+        assert row["extra_bf"] is not None
