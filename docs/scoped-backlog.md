@@ -26,7 +26,7 @@ projection that D, E and G all read from.
 | G | LP-facing 2-page investor summary | D to build, **E4 to ship** | Small-medium | Standard |
 | E1 | Debt layer (`model/debt.py`) | B | Medium | **High-risk** |
 | E2 | Single-tier waterfall (`model/waterfall.py`) | E1 | Medium | **High-risk** |
-| E3 | Levered wiring (assumptions / results / memo / xlsx) | E2, D | Medium | High-risk |
+| E3 | Levered wiring — E3a levered seam ⚑ shipped; E3b surfaces + XLSM de-literalization | E2, D | Medium-large | **High-risk** |
 | E4 | Solver retargeted to LP net IRR | E3 | Small | **High-risk** |
 
 Sequence: **A → B → D → E1 → E2 → E3 → E4 → G**. A goes first because it is the
@@ -268,9 +268,74 @@ LP net IRR, LP MOIC. GP co-invest is pari passu through the pref; promote is
 computed on the LP-attributable residual only. The 1% AM fee is a cash-flow line
 deducted before the waterfall. Design-doc oracles 1–3.
 
-**E3 — wiring.** Debt + waterfall inputs on the assumptions page; levered
+**E3 — wiring, in two parts.** **E3a ⚑ SHIPPED 2026-08-01** (#32):
+`model/levered.py`, the seam where the debt layer and the waterfall meet the
+unlevered projection — assembly only; sizing stays in `model.debt`,
+distribution in `model.waterfall`, the NOI series and exit proceeds in
+`project_cash_flows`. Financing costs stay out of the unlevered basis (the
+Sources & Uses tie became Uses == total_basis + financing_costs). **E3b —
+the surfaces:** debt + waterfall inputs on the assumptions page; levered
 results as a **second lens beside the unlevered screen, which stays primary**;
 memo section; Excel sheet. Reads the Sources & Uses block from D for equity.
+Leverage is **opt-in per deal**: with no debt terms entered there is no
+levered lens and every unlevered surface stays byte-identical.
+
+**E3b also owns `output/template_writer.py` de-literalization** (folded in
+2026-08-01 from the transparency audit — the one piece of item T with a hard
+sequencing dependency on item E). The XLSM writer is a parallel assumptions
+system, and E3a made its literals live contradictions: the app now computes
+levered returns from `DEBT_TERMS` (6.25% / 25-yr / 0-IO / 10-yr) and
+`WATERFALL_TERMS` (8% pref, 20% promote, `GP_COINVEST_PCT` 0.10) while every
+XLSM artifact still asserts 6.5% / 360-mo amort / 12-mo IO / 60-mo term
+(lines 201–209), an env-var waterfall (6% GP equity, 1% AM fee, 20% promote —
+lines 450–455), an 8%-or-6% pref formula (H258), terminal cap = entry +
+50bps (K181) against the resolved scenario `exit_cap`, a 0%-then-3% growth
+ladder on all six rows (213–227), a 0.90 occupancy fallback (234, 263, 315),
+a 0.88 stabilization test, a 24-month stabilize, a 10% stabilized vacancy
+behind a dead if/else, 1% credit loss, 1.0%/1.25% bank fees, $0.15/SF
+reserve, a 6.5% entry-cap fallback (421), a 6% mgmt-fee fallback, and CapEx
+timing months 1–6. Two deliverables asserting different terms on the same
+deal is the exact failure mode the audit flagged, and as of E3a it ships in
+production. This is therefore the blocking piece of E3b, not a follow-up.
+
+Rules:
+
+1. **The template never decides a value.** Every number written into the
+   XLSM reads from the resolved assumption set (config + ConfigOverride +
+   deal overrides) or from the run's computed results. Keys that do not
+   exist yet (credit loss, bank/merchant fees, the CapEx timing window) are
+   added to config with defaults equal to today's literals —
+   behavior-preserving; changing an underwriting default is item T's
+   decision, not E3b's.
+2. **Contradictions resolve to config.** Where a literal contradicts an
+   existing resolved value (debt terms, GP share, promote, pref, exit cap,
+   the mgmt-fee and cap-reserve bands) the resolved value wins and the
+   literal dies — including the K181 and H258 template formulas and the
+   `GP_EQUITY_SHARE` / `GP_AM_FEE_RATE` / `GP_PROMOTE_PCT` env vars, which
+   are deleted, not re-defaulted.
+3. **The template gains no new opinions.** Where the target definition is
+   itself disputed (stabilized occupancy 0.85 vs 0.88; the mgmt-fee
+   adjustment target) E3b reads the config key that exists and leaves the
+   reconciliation to item T.
+4. **The growth ladder becomes scenario-driven** — rent rows grow at the
+   resolved revenue CAGR, expense rows at `exp_growth`. Deliberate behavior
+   change; say it in the PR the way item B did. With leverage opted out,
+   LTC stays 0, but the rate/amort/IO/term cells still carry the resolved
+   `DEBT_TERMS` values, so a user who flips LTC in Excel gets the terms the
+   app would have used.
+
+Acceptance (in addition to item E's):
+
+- `template_writer.py` contains no numeric literals or env-var reads in its
+  write paths — enforced by a test (grep or AST), not by inspection.
+- One fixture deal run twice — unlevered, then with debt: the XLSM's debt
+  block, waterfall block, pref and exit-cap cells equal the resolved
+  `DEBT_TERMS` / `WATERFALL_TERMS` / scenario values the app used for that
+  run. A full Python↔XLSM formula-parity harness (evaluate the workbook
+  with the `formulas` library) is a stretch goal; do not block E3b on it.
+- The unlevered regression holds: an unlevered deal's XLSM differs from
+  today's only where this item deliberately changed a value, each delta
+  enumerated in the PR.
 
 **E4 — solver retarget.** Max price for a 15% LP net IRR instead of a 10%
 unlevered IRR (existing ROADMAP item). The solved price now moves debt sizing,
