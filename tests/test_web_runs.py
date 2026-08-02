@@ -191,6 +191,36 @@ def test_engine_end_to_end_with_overrides(tmp_path, monkeypatch):
         assert item["severity"] in {"High", "Medium", "Low"}
 
 
+def test_engine_end_to_end_writes_the_investor_summary(tmp_path, monkeypatch):
+    """Drives the REAL `run_analysis` through to the investor summary.
+
+    Same reasoning as the template test below: `generate_investor_summary`
+    is called inside a bare `except Exception` that appends to
+    `result.errors`, so a renamed kwarg or a missing result key would be
+    swallowed with the suite still green. `tests/test_investor_summary.py`
+    calls the writer directly and cannot see the engine's wiring at all.
+    """
+    from docx import Document
+
+    monkeypatch.setattr("data.comp_db.COMP_DB_PATH", str(tmp_path / "comps.db"))
+    from engine import AnalysisResult, run_analysis
+
+    result = AnalysisResult(pdf_path=str(tmp_path / "expo.pdf"))
+    result.cim_data = _sample_cim()
+    result = run_analysis(result, output_dir=str(tmp_path))
+
+    # Match the message this writer emits, not a loose substring: the
+    # errors list also carries the template writer's "Template not
+    # found", whose PATH contains the word summary on some checkouts.
+    assert not [e for e in result.errors
+                if e.startswith("Investor summary")], result.errors
+    assert os.path.isfile(result.summary_path)
+
+    body = "\n".join(p.text for p in Document(result.summary_path).paragraphs)
+    # The legend is what makes an un-cleared copy visibly not an offer.
+    assert "not an offer to sell" in body
+
+
 def test_engine_end_to_end_writes_the_template_with_resolved_terms(
         tmp_path, monkeypatch):
     """Drives the REAL `run_analysis` through to the XLSM writer.

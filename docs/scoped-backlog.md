@@ -391,6 +391,14 @@ regression-tested, since the unlevered screen remains the primary gate.
 
 ## G. LP-facing 2-page investor summary
 
+**Status 2026-08-02: the GENERATOR is shipped; the download button is not.**
+`generate_investor_summary` lives in `output/memo_writer.py` and is wired into
+both the engine and the CLI, so the .docx lands in the deal folder on every
+run. Exposing it on the results page needs a new `summary_filename` column on
+`AnalysisRun` plus a `DOWNLOAD_KINDS` entry — a migration, which is a
+different review tier from a rendering change and is deliberately not bundled
+with one. That is the immediate follow-up, not a dropped requirement.
+
 **Why.** [output/memo_writer.py](../output/memo_writer.py) produces a 9-section
 internal IC memo. There is no condensation for anyone outside the firm, and TSM
 sells its 2-page Investor Summary as a headline feature. Near-zero incremental

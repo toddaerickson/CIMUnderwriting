@@ -959,6 +959,366 @@ def _add_section_10(doc, gate_results, scenario_results, max_offer, risk_analysi
     ).italic = True
 
 
+# ── LP-Facing Investor Summary (item G) ─────────────────────────────
+#
+# A condensation of the IC memo for readers outside the firm. It is a
+# SECOND RENDERING, never a second computation: every figure is read off
+# the same result dicts `generate_memo` receives, so the two documents
+# cannot disagree about a deal. Nothing below calls the projection, the
+# solver or the waterfall.
+#
+# **Two pages is the design constraint, not an aspiration.** python-docx
+# does not paginate — page count is decided by Word at render time — so
+# "it fits" is enforced two ways instead of hoped for:
+#   1. A FIXED section list with hard caps (below). Three thesis bullets,
+#      three risks, truncated strings. A deal cannot add a section, so the
+#      only variable left is string length, and that is capped.
+#   2. `tests/test_investor_summary.py` estimates rendered height from the
+#      document body against this page geometry and asserts each page fits.
+#      It is a calibrated estimate, not a real render — see that test's
+#      docstring for why a true page count would mean adding a headless
+#      office suite as a dependency.
+#
+# **Distribution is gated, the build is not.** A document aimed at
+# prospective investors edges toward securities marketing, which sits
+# behind the operator's General Counsel gate. `_SUMMARY_LEGEND` states
+# that on the page itself; do not remove it, and route wording past GC
+# before this leaves the firm.
+
+_SUMMARY_PAGE_MARGIN_IN = 0.7
+_SUMMARY_BODY_PT = 10
+
+_SUMMARY_MAX_THESIS_BULLETS = 3
+_SUMMARY_MAX_RISKS = 3
+_SUMMARY_MAX_NAME_CHARS = 70
+_SUMMARY_MAX_BULLET_CHARS = 190
+_SUMMARY_MAX_RISK_CHARS = 150
+
+# Risk register severities, most severe first. `identify_risks` emits
+# title case and `_add_section_8` prints it unchanged, so this orders the
+# same vocabulary rather than inventing a second one.
+_SUMMARY_SEVERITY_ORDER = {"High": 0, "Medium": 1, "Low": 2}
+
+_SUMMARY_LEGEND = (
+    "Prepared by CIM Analyst from the seller's Confidential Information "
+    "Memorandum supplemented by benchmark assumptions. Figures are "
+    "underwriting estimates, not results, and are subject to due "
+    "diligence. Past or projected performance is not a guarantee of "
+    "future results. This document is for internal and prospect "
+    "discussion only. It is not an offer to sell or a solicitation of an "
+    "offer to buy any security, and it is not investment advice."
+)
+
+
+def generate_investor_summary(property_name: str, cim_data,
+                              market_analysis: dict, physical_analysis: dict,
+                              scenario_results: dict, risk_analysis: dict,
+                              gate_results: list = None,
+                              sources_uses: dict = None,
+                              levered: dict = None, debt: dict = None,
+                              output_dir: str = ".") -> str:
+    """Generate the 2-page LP-facing investor summary .docx.
+
+    Degrades cleanly rather than raising: a deal with no scenarios, no
+    Sources & Uses or no levered layer still produces a document, with
+    the sections that have no data omitted instead of printed as a wall
+    of N/A. That matters because this is the artifact most likely to be
+    generated from a thin early-look CIM.
+
+    Returns: path to generated file.
+    """
+    doc = Document()
+
+    style = doc.styles["Normal"]
+    style.font.name = "Calibri"
+    style.font.size = Pt(_SUMMARY_BODY_PT)
+
+    for section in doc.sections:
+        section.top_margin = Inches(_SUMMARY_PAGE_MARGIN_IN)
+        section.bottom_margin = Inches(_SUMMARY_PAGE_MARGIN_IN)
+        section.left_margin = Inches(_SUMMARY_PAGE_MARGIN_IN)
+        section.right_margin = Inches(_SUMMARY_PAGE_MARGIN_IN)
+
+    safe_name = _safe_filename(property_name or "Unknown_Property")
+    filepath = os.path.join(output_dir, f"Investor_Summary_{safe_name}.docx")
+
+    # ── Page 1 ──────────────────────────────────────────────────
+    _summary_header(doc, cim_data, property_name)
+    _summary_thesis(doc, cim_data, physical_analysis, scenario_results,
+                    levered)
+    _summary_key_metrics(doc, cim_data, scenario_results, sources_uses,
+                         levered)
+    _summary_capital_stack(doc, sources_uses)
+
+    doc.add_page_break()
+
+    # ── Page 2 ──────────────────────────────────────────────────
+    _summary_scenarios(doc, scenario_results, levered)
+    _summary_market(doc, market_analysis, gate_results)
+    _summary_risks(doc, risk_analysis)
+    _summary_legend(doc)
+
+    doc.save(filepath)
+    return filepath
+
+
+def _truncate(text: str, limit: int) -> str:
+    """Hard cap with an ellipsis. The page budget is only real if the
+    strings that feed it are bounded."""
+    text = (text or "").strip()
+    return text if len(text) <= limit else text[: limit - 1].rstrip() + "…"
+
+
+def _summary_header(doc, cim_data, property_name):
+    heading = doc.add_paragraph()
+    heading.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    run = heading.add_run(
+        _truncate(property_name or cim_data.property_name or "Storage Asset",
+                  _SUMMARY_MAX_NAME_CHARS))
+    run.bold = True
+    run.font.size = Pt(18)
+
+    where = ", ".join(p for p in (cim_data.city, cim_data.state) if p)
+    line = " · ".join(p for p in (cim_data.address, where) if p)
+    sub = doc.add_paragraph()
+    sub.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    sub.add_run(line or "Location TBD").font.size = Pt(11)
+
+    slot = doc.add_paragraph()
+    slot.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    slot_run = slot.add_run("[ Property photograph — insert before use ]")
+    slot_run.italic = True
+    slot_run.font.color.rgb = RGBColor(0x88, 0x88, 0x88)
+
+
+def _summary_thesis(doc, cim_data, physical_analysis, scenario_results,
+                    levered):
+    bullets = _summary_thesis_bullets(cim_data, physical_analysis,
+                                      scenario_results, levered)
+    if not bullets:
+        return
+    doc.add_heading("Investment Thesis", level=2)
+    for bullet in bullets:
+        doc.add_paragraph(_truncate(bullet, _SUMMARY_MAX_BULLET_CHARS),
+                          style="List Bullet")
+
+
+def _summary_thesis_bullets(cim_data, physical_analysis, scenario_results,
+                            levered) -> list:
+    """Up to three thesis bullets, each a restatement of a COMPUTED fact.
+
+    Deliberately not prose generation. Every candidate below is gated on
+    a value the pipeline already produced and prints that value, so the
+    thesis cannot claim something the model did not find. The order is
+    the priority order — basis first, because price against replacement
+    cost is the operator's anchor — and the first three that qualify win.
+    """
+    base = (scenario_results or {}).get("base") or {}
+    lev_base = (levered or {}).get("base") or {}
+    out = []
+
+    pvr = (physical_analysis or {}).get("price_vs_replacement") or {}
+    discount = pvr.get("discount_to_replacement")
+    if pvr.get("comparable") and discount is not None and discount > 0:
+        out.append(
+            f"Basis: asking {_fmt_currency(pvr.get('asking_price'))} "
+            f"({_fmt_currency(pvr.get('asking_per_sf'))}/SF) is "
+            f"{_fmt_pct(discount)} below the "
+            f"{_fmt_currency(pvr.get('replacement_cost'))} replacement-cost "
+            f"estimate — below the cost to build the competition.")
+
+    phys, econ = cim_data.physical_occupancy, cim_data.economic_occupancy
+    spread_flag = cfg.GATES.get("econ_phys_spread_flag")
+    if phys and econ and spread_flag and (phys - econ) >= spread_flag:
+        out.append(
+            f"Operational upside: {_fmt_pct(phys)} physical against "
+            f"{_fmt_pct(econ)} economic occupancy — a "
+            f"{(phys - econ) * 100:.0f}-point spread that is collected "
+            f"rent left on the table, not absent demand.")
+
+    if lev_base.get("lp_net_irr") is not None:
+        out.append(
+            f"Returns: {_fmt_pct(lev_base['lp_net_irr'])} LP net IRR and "
+            f"{_fmt_x(lev_base.get('lp_moic'))} net multiple in the base "
+            f"case, after debt service, asset-management fee and promote.")
+    elif base.get("irr") is not None:
+        out.append(
+            f"Returns: {_fmt_pct(base['irr'])} unlevered IRR and "
+            f"{_fmt_x(base.get('moic'))} multiple in the base case, net of "
+            f"acquisition and disposition costs.")
+
+    if base.get("yield_on_cost") is not None:
+        out.append(
+            f"Going-in yield: {_fmt_pct(base['yield_on_cost'])} Year-1 yield "
+            f"on total cost against a {_fmt_pct(base.get('entry_cap'))} "
+            f"entry cap.")
+
+    return out[:_SUMMARY_MAX_THESIS_BULLETS]
+
+
+def _summary_key_metrics(doc, cim_data, scenario_results, sources_uses,
+                         levered):
+    base = (scenario_results or {}).get("base") or {}
+    lev_base = (levered or {}).get("base") or {}
+
+    rows = [
+        ("Asking Price", _fmt_currency(cim_data.asking_price)),
+        ("Price / SF", _fmt_currency(cim_data.price_per_sf)),
+        ("NRSF", _fmt_number(cim_data.nrsf, suffix=" SF")),
+        ("Entry Cap", _fmt_pct(base.get("entry_cap"))),
+        ("Exit Cap (Base)", _fmt_pct(base.get("exit_cap"))),
+        ("Yr-1 Yield on Cost", _fmt_pct(base.get("yield_on_cost"))),
+        ("Unlevered IRR / MOIC",
+         f"{_fmt_pct(base.get('irr'))} / {_fmt_x(base.get('moic'))}"),
+    ]
+    # The levered pair is the fund's actual bar, so it goes on page 1 when
+    # it exists — and is omitted, not printed as N/A, when it does not.
+    if lev_base.get("lp_net_irr") is not None:
+        rows.append(("LP Net IRR / MOIC",
+                     f"{_fmt_pct(lev_base.get('lp_net_irr'))} / "
+                     f"{_fmt_x(lev_base.get('lp_moic'))}"))
+    if sources_uses:
+        rows.append(("Equity Required",
+                     _fmt_currency(sources_uses.get("total_equity"))))
+
+    doc.add_heading("Key Metrics", level=2)
+    table = doc.add_table(rows=len(rows), cols=2)
+    table.style = "Light Grid Accent 1"
+    table.alignment = WD_TABLE_ALIGNMENT.CENTER
+    for i, (label, value) in enumerate(rows):
+        cells = table.rows[i].cells
+        cells[0].text = label
+        cells[1].text = value
+
+
+def _summary_capital_stack(doc, sources_uses):
+    """Condensed Sources & Uses — totals and the equity split only.
+
+    The IC memo's full line-item tables are what page 2 does not have
+    room for; the numbers here are the same `build_sources_uses` output,
+    just fewer of them.
+    """
+    if not sources_uses:
+        return
+    doc.add_heading("Capital Stack", level=2)
+    rows = [
+        ("Total Uses", sources_uses.get("total_uses")),
+        ("Senior Debt", sources_uses.get("senior_debt")),
+        ("Total Equity", sources_uses.get("total_equity")),
+        (f"— GP Co-Invest ({_fmt_pct(sources_uses.get('gp_coinvest_pct'))})",
+         sources_uses.get("gp_equity")),
+        ("— LP Equity", sources_uses.get("lp_equity")),
+    ]
+    table = doc.add_table(rows=len(rows), cols=2)
+    table.style = "Light Grid Accent 1"
+    for i, (label, amount) in enumerate(rows):
+        cells = table.rows[i].cells
+        cells[0].text = label
+        cells[1].text = _fmt_currency(amount)
+
+
+def _summary_scenarios(doc, scenario_results, levered):
+    if not scenario_results:
+        return
+    hold = _hold_years(scenario_results)
+    doc.add_heading(f"{hold}-Year Scenario Returns", level=2)
+
+    rows = [("Yr-1 Yield on Cost", "yield_on_cost", _fmt_pct, scenario_results),
+            ("Exit Cap", "exit_cap", _fmt_pct, scenario_results),
+            ("Unlevered IRR", "irr", _fmt_pct, scenario_results),
+            ("Unlevered MOIC", "moic", _fmt_x, scenario_results)]
+    if (levered or {}).get("base", {}).get("lp_net_irr") is not None:
+        rows += [("LP Net IRR", "lp_net_irr", _fmt_pct, levered),
+                 ("LP Net MOIC", "lp_moic", _fmt_x, levered)]
+
+    table = doc.add_table(rows=len(rows) + 1, cols=4)
+    table.style = "Light Grid Accent 1"
+    header = table.rows[0].cells
+    header[0].text = "Metric"
+    for i, scen in enumerate(("bear", "base", "bull"), start=1):
+        header[i].text = scen.title()
+    for r, (label, key, fmt, source) in enumerate(rows, start=1):
+        cells = table.rows[r].cells
+        cells[0].text = label
+        for i, scen in enumerate(("bear", "base", "bull"), start=1):
+            cells[i].text = fmt((source.get(scen) or {}).get(key))
+
+
+def _summary_market(doc, market_analysis, gate_results):
+    """Three facts, read from the market analysis and the gate register.
+
+    SF-per-capita is taken from gate 5's own `actual` string rather than
+    recomputed from the supply inputs — the gate is where that arithmetic
+    lives, and a second copy would be free to disagree with the screen.
+    """
+    demos = (market_analysis or {}).get("demographics") or {}
+    msa = (market_analysis or {}).get("msa_info") or {}
+    by_gate = {g.get("gate"): g for g in (gate_results or [])}
+
+    rows = [("Population (3-mile)", _fmt_number(demos.get("population_3mi"))),
+            ("Median HHI (3-mile)",
+             _fmt_currency(demos.get("median_hhi_3mi")))]
+    oversupply = by_gate.get(5)
+    if oversupply:
+        rows.append(("Supply",
+                     f"{oversupply.get('actual')} (equilibrium ~7-8)"))
+    rows.append(("Market", (msa.get("msa") or "MSA not identified")
+                 + (" — top-50 MSA" if msa.get("is_top_50") else "")))
+
+    doc.add_heading("Market Snapshot", level=2)
+    table = doc.add_table(rows=len(rows), cols=2)
+    table.style = "Light Grid Accent 1"
+    for i, (label, value) in enumerate(rows):
+        cells = table.rows[i].cells
+        cells[0].text = label
+        cells[1].text = str(value)
+
+
+def _summary_risks(doc, risk_analysis):
+    """The three most severe risks, and a count of what was left out.
+
+    Printing three without saying how many exist would read as "there are
+    three risks", which is the one thing a condensation must not imply.
+    """
+    risks = list((risk_analysis or {}).get("risks") or [])
+    if not risks:
+        return
+    risks.sort(key=lambda r: _SUMMARY_SEVERITY_ORDER.get(
+        r.get("severity"), len(_SUMMARY_SEVERITY_ORDER)))
+    shown = risks[:_SUMMARY_MAX_RISKS]
+
+    doc.add_heading("Principal Risks", level=2)
+    table = doc.add_table(rows=len(shown) + 1, cols=3)
+    table.style = "Light Grid Accent 1"
+    header = table.rows[0].cells
+    header[0].text = "Risk"
+    header[1].text = "Severity"
+    header[2].text = "Mitigation"
+    for i, risk in enumerate(shown, start=1):
+        cells = table.rows[i].cells
+        cells[0].text = _truncate(risk.get("risk"), _SUMMARY_MAX_RISK_CHARS)
+        cells[1].text = risk.get("severity") or ""
+        cells[2].text = _truncate(risk.get("mitigation"),
+                                  _SUMMARY_MAX_RISK_CHARS)
+
+    remaining = len(risks) - len(shown)
+    if remaining > 0:
+        note = doc.add_paragraph(
+            f"{len(shown)} of {len(risks)} identified risks shown, most "
+            f"severe first. The full risk register is in the investment "
+            f"memo.")
+        note.runs[0].italic = True
+
+
+def _summary_legend(doc):
+    doc.add_paragraph()
+    legend = doc.add_paragraph()
+    run = legend.add_run(_SUMMARY_LEGEND)
+    run.italic = True
+    run.font.size = Pt(8)
+    run.font.color.rgb = RGBColor(0x55, 0x55, 0x55)
+
+
 # ── Formatting Helpers ──────────────────────────────────────────────
 
 def _fmt_currency(val) -> str:
@@ -1025,4 +1385,13 @@ def _fmt_x(val) -> str:
 
 
 def _safe_filename(name: str) -> str:
-    return "".join(c if c.isalnum() or c in (" ", "-", "_") else "_" for c in name).strip().replace(" ", "_")
+    """Sanitize and CAP. The cap is not cosmetic: most filesystems stop at
+    255 bytes, and a CIM whose property name runs long enough produced a
+    path that `Document.save` could not open — an OSError that surfaced
+    as a failed memo with no obvious cause. `output/template_writer.py`
+    has always truncated at 60; this matches it rather than inventing a
+    second limit. Caught by the investor summary's maximal-content test
+    (item G), but `generate_memo` had the same defect."""
+    safe = "".join(c if c.isalnum() or c in (" ", "-", "_") else "_"
+                   for c in name).strip().replace(" ", "_")
+    return safe[:60]
