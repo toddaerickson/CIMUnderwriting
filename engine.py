@@ -466,6 +466,11 @@ def run_analysis(result: AnalysisResult, progress: Callable = None,
         va_max_offer=result.va_max_offer,
         checks=result.checks,
         sources_uses=result.sources_uses,
+        # The levered lens (item E3b). Both writers degrade cleanly when
+        # these are empty — a deal with no NOI or no asking price prices
+        # no loan, and the memo and workbook must still build.
+        levered=result.levered,
+        debt=result.debt,
         output_dir=output_dir,
     )
 
@@ -480,6 +485,8 @@ def run_analysis(result: AnalysisResult, progress: Callable = None,
         va_max_offer=result.va_max_offer,
         checks=result.checks,
         sources_uses=result.sources_uses,
+        levered=result.levered,
+        debt=result.debt,
         output_dir=output_dir,
     )
 

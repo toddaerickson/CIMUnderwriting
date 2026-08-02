@@ -193,10 +193,20 @@ output/
    the base case and carried through bear/base/bull — sizing per scenario
    would hand the bear case a smaller loan and flatten its own downside.
    Leverage is allowed to be dilutive and the model says so when it is.
+   The lens surfaces on the Returns tab (below the unlevered tables, not
+   on a tab of its own), as a level-2 subsection of memo section 6, and
+   as the workbook's "Levered Returns" sheet. Its inputs are the
+   assumptions page's "Debt & Waterfall" section — per-deal only, never
+   settings-page editable, for the same in-place-mutation reason the
+   capital block is not (item E3b).
 7. **No LP net IRR without its assumption stamp**: five LPA questions are
-   still open and each changes the number, so `model.levered` renders the
-   resolved set beside every levered figure — including the AM fee's rate
-   and base, which is what makes "net" mean anything.
+   still open and each changes the number, so `model.levered` builds the
+   resolved set and all three surfaces render it beside every levered
+   figure — including the AM fee's rate and base, which is what makes
+   "net" mean anything. Three of those five conventions have exactly one
+   implemented value (`accrual_base`, `am_fee_treatment`, `catch_up`) and
+   the other value RAISES, so they deliberately get no form field: a
+   dropdown whose second option crashes the run is a trap, not a setting.
 8. **Bisection solver**: Deterministic, 20 iterations to 0.1% precision.
    Still targets the UNLEVERED IRR; item E4 retargets it to LP net.
 

@@ -1,4 +1,10 @@
-"""Item E3a — the levered seam (`model/levered.py`).
+"""Item E3 — the levered seam (`model/levered.py`) and its surfaces.
+
+E3a is the arithmetic; E3b is the assumptions inputs, the results-page
+lens, the memo section and the Excel sheet, in a section of its own at
+the bottom of this file. One module because it is one item, and because
+a surface test that renders an oracle's real numbers is worth more than
+one built on a fixture invented for it.
 
 Every oracle here was derived from scratch in `Decimal`, importing
 nothing from the repo, BEFORE `model/levered.py` existed — so these
@@ -714,3 +720,664 @@ def test_the_result_is_json_safe_all_the_way_down(oracle_a):
     encoded = json.dumps(json_safe(lev))
     assert "DebtTerms(" not in encoded
     assert "WaterfallTerms(" not in encoded
+
+
+# ════════════════════════════════════════════════════════════════════
+# Item E3b — the surfaces
+#
+# E3a computed and persisted the levered lens; nothing rendered it.
+# These cover the four places it now surfaces (assumptions inputs,
+# results page, memo, workbook) and the traps E3a flagged for this item.
+# They are here rather than in a new module because they are the same
+# item's tests and this file is already where item E3 lives.
+# ════════════════════════════════════════════════════════════════════
+
+from django.http import QueryDict            # noqa: E402
+
+
+def _levered_form(**vals):
+    """An AssumptionsForm carrying only the levered block, submitted the
+    way a browser does — every value a string."""
+    from webapp.forms import AssumptionsForm
+    return AssumptionsForm(data={k: str(v) for k, v in vals.items()})
+
+
+def _levered_run(oracle):
+    """The `result_json` shape the results page, memo and workbook read:
+    one `debt` block and one `levered` entry per scenario, exactly as
+    `webapp.services` persists it."""
+    projection, debt, _, lev = oracle
+    return {
+        "debt": debt,
+        "levered": {sc: lev for sc in ("bear", "base", "bull")},
+        "scenario_results": {
+            sc: {"irr": projection["irr"], "hold_years": 5,
+                 "noi_projection": projection["noi"]}
+            for sc in ("bear", "base", "bull")},
+    }
+
+
+# ── The assumptions inputs ──────────────────────────────────────────
+
+def test_every_levered_percent_field_converts_to_a_decimal_on_save():
+    """The percent-vs-decimal boundary E3a flagged as the thing that
+    breaks a naive form. `rate=6.5` meaning 6.5% priced a $6.5M loan at
+    $3,520,833/mo against a correct $43,888/mo — eighty times wrong, in a
+    payment that feeds every levered return. `DebtTerms` now RAISES above
+    1.0, so a naive form fails every save instead; either way the
+    conversion belongs here, as it does for every other percentage on
+    this page."""
+    from webapp.forms import (submitted_am_fee_pct, submitted_debt_terms,
+                              submitted_waterfall_terms)
+
+    form = _levered_form(debt_rate=6.5, debt_max_ltv=65,
+                         debt_min_debt_yield=10, debt_orig_fee_pct=1,
+                         debt_exit_fee_pct=0.5, debt_min_dscr=1.25,
+                         debt_amort_years=25, debt_io_months=24,
+                         debt_term_years=10, wf_pref_rate=8,
+                         wf_promote_split=20, am_fee_pct=1)
+    assert form.is_valid(), form.errors
+
+    debt = submitted_debt_terms(form.cleaned_data)
+    assert debt["rate"] == pytest.approx(0.065)
+    assert debt["max_ltv"] == pytest.approx(0.65)
+    assert debt["min_debt_yield"] == pytest.approx(0.10)
+    assert debt["orig_fee_pct"] == pytest.approx(0.01)
+    assert debt["exit_fee_pct"] == pytest.approx(0.005)
+    # A coverage RATIO, not a percentage — 1.25x must survive untouched,
+    # which is also why DebtTerms exempts it from its own >1.0 guard.
+    assert debt["min_dscr"] == pytest.approx(1.25)
+    # Integers stay integers: a 24.0-month IO would not compare equal to
+    # the config default and would write a pointless override row.
+    assert debt["amort_years"] == 25 and isinstance(debt["amort_years"], int)
+    assert debt["io_months"] == 24
+    assert debt["term_years"] == 10
+
+    wf = submitted_waterfall_terms(form.cleaned_data)
+    assert wf["pref_rate"] == pytest.approx(0.08)
+    assert wf["promote_split"] == pytest.approx(0.20)
+    assert submitted_am_fee_pct(form.cleaned_data) == pytest.approx(0.01)
+
+
+@pytest.mark.django_db
+def test_the_levered_block_round_trips_through_a_save():
+    """Save → store → redisplay must land on the same whole numbers the
+    analyst typed. A one-way conversion is how a 6.25% loan redisplays as
+    0.0625% and gets "corrected" to 6.25 basis points on the next save."""
+    from webapp.forms import build_initial, build_overrides
+    from webapp.models import Deal
+
+    deal = Deal.objects.create(deal_id="lev-rt", property_name="RT")
+    # Every value differs from its config default on purpose: this section
+    # stores DELTAS, so a field set to the default writes no row and the
+    # assertion below would pass for the wrong reason.
+    form = _levered_form(debt_rate=6.75, debt_max_ltv=70, debt_min_dscr=1.30,
+                         debt_amort_years=25, debt_io_months=0,
+                         debt_term_years=7, debt_min_debt_yield=9,
+                         debt_orig_fee_pct=1, debt_exit_fee_pct=0,
+                         wf_pref_rate=9, wf_promote_split=25,
+                         wf_pref_compounding="annual", wf_ordering="roc_first",
+                         am_fee_pct=1.5)
+    assert form.is_valid(), form.errors
+    deal.assumption_overrides = build_overrides(form.cleaned_data,
+                                                QueryDict(""), deal)
+    deal.save()
+
+    stored = deal.assumption_overrides
+    assert stored["debt_terms"]["rate"] == pytest.approx(0.0675)
+    assert stored["debt_terms"]["max_ltv"] == pytest.approx(0.70)
+    assert stored["debt_terms"]["min_dscr"] == pytest.approx(1.30)
+    assert stored["debt_terms"]["term_years"] == 7
+    assert stored["waterfall_terms"]["pref_rate"] == pytest.approx(0.09)
+    assert stored["am_fee_pct"] == pytest.approx(0.015)
+
+    initial = build_initial(deal)
+    assert initial["debt_rate"] == pytest.approx(6.75)
+    assert initial["debt_max_ltv"] == pytest.approx(70)
+    assert initial["debt_min_dscr"] == pytest.approx(1.30)
+    assert initial["debt_term_years"] == 7
+    assert initial["wf_pref_rate"] == pytest.approx(9)
+    assert initial["wf_promote_split"] == pytest.approx(25)
+    assert initial["am_fee_pct"] == pytest.approx(1.5)
+
+
+@pytest.mark.django_db
+def test_submitting_the_defaults_writes_no_override_rows():
+    """Deltas only, like every other section. A block that stores its own
+    defaults makes `applied_overrides` claim an analyst decision nobody
+    made, and freezes this deal against a later config change."""
+    from webapp.forms import build_initial, build_overrides
+    from webapp.models import Deal
+
+    deal = Deal.objects.create(deal_id="lev-def", property_name="Def")
+    initial = build_initial(deal)
+    posted = {k: v for k, v in initial.items()
+              if v is not None and (k.startswith(("debt_", "wf_"))
+                                    or k == "am_fee_pct")}
+    form = _levered_form(**posted)
+    assert form.is_valid(), form.errors
+    out = build_overrides(form.cleaned_data, QueryDict(""), deal)
+    assert "debt_terms" not in out
+    assert "waterfall_terms" not in out
+    assert "am_fee_pct" not in out
+
+
+@pytest.mark.django_db
+def test_unexposed_debt_and_waterfall_keys_survive_a_save():
+    """The trap this form's shape creates. Six keys have no field —
+    `loan_type`, `index_rate`, `spread`, `accrual_base`,
+    `am_fee_treatment`, `catch_up` — so rebuilding each section purely
+    from the form would DELETE a CLI-set floating rate on the first
+    unrelated save here. The deal keeps running, at a different cost of
+    debt, with nothing anywhere saying so. Every capital-block key had a
+    field, so this could not arise before item E3b."""
+    from webapp.forms import build_overrides
+    from webapp.models import Deal
+
+    deal = Deal.objects.create(
+        deal_id="lev-carry", property_name="Carry",
+        assumption_overrides={
+            "debt_terms": {"index_rate": 0.045, "spread": 0.025,
+                           "loan_type": "bridge_floating"},
+            "waterfall_terms": {"accrual_base": "contributed",
+                                "am_fee_treatment": "above_waterfall"}})
+    # An edit that touches only the LTV — nothing about the rate.
+    form = _levered_form(debt_max_ltv=60)
+    assert form.is_valid(), form.errors
+    out = build_overrides(form.cleaned_data, QueryDict(""), deal)
+
+    assert out["debt_terms"]["index_rate"] == pytest.approx(0.045)
+    assert out["debt_terms"]["spread"] == pytest.approx(0.025)
+    assert out["debt_terms"]["loan_type"] == "bridge_floating"
+    assert out["debt_terms"]["max_ltv"] == pytest.approx(0.60)
+    assert out["waterfall_terms"]["accrual_base"] == "contributed"
+    assert out["waterfall_terms"]["am_fee_treatment"] == "above_waterfall"
+
+
+@pytest.mark.django_db
+def test_a_floating_rate_deal_prefills_a_blank_rate_and_stays_floating():
+    """Why the prefill reads the RESOLVED terms and not
+    `{**config, **saved}`. `resolve_debt_terms` clears the seeded fixed
+    rate for a floating override; merging config in directly would
+    prefill 6.25%, post it, and the resolver's "both named, fixed wins"
+    branch would silently convert the deal to fixed paper."""
+    from model.debt import resolve_debt_terms
+    from webapp.forms import build_initial, build_overrides
+    from webapp.models import Deal
+
+    deal = Deal.objects.create(
+        deal_id="lev-float", property_name="Float",
+        assumption_overrides={"debt_terms": {"index_rate": 0.045,
+                                             "spread": 0.025}})
+    assert build_initial(deal)["debt_rate"] is None
+
+    form = _levered_form(debt_amort_years=25)      # rate left blank
+    assert form.is_valid(), form.errors
+    out = build_overrides(form.cleaned_data, QueryDict(""), deal)
+    resolved = resolve_debt_terms(out["debt_terms"])
+    assert resolved.rate is None
+    assert resolved.all_in_rate() == pytest.approx(0.070)
+
+
+@pytest.mark.parametrize("bad", [
+    # The percent-vs-decimal typo E1's review measured: `rate=6.5`
+    # meaning 6.5% priced a $6.5M loan eighty times too expensively.
+    {"debt_rate": 650},
+    # Would fall through `monthly_payment`'s degenerate branch to a
+    # sizing constant of 1200%/yr — a loan two orders of magnitude too
+    # small, reported without complaint.
+    {"debt_amort_years": 0},
+    # Switches off both the full-IO test and the maturity warning.
+    {"debt_term_years": 0},
+    {"debt_io_months": -1},
+    {"debt_min_dscr": -1},
+    # NaN passes every `< 0` guard untouched (every comparison against
+    # NaN is False) and then poisons the arithmetic downstream.
+    {"debt_min_dscr": "nan"},
+    {"wf_promote_split": 150},
+    # The BOUNDARY, and the case that proves the field bounds are not the
+    # whole story (review finding). `DebtTerms` rejects a decimal above
+    # 1.0, so `max_value=100` covers it; `WaterfallTerms` requires
+    # STRICTLY below 1.0, because a 100% promote hands the GP the entire
+    # residual. 100 is in bounds, converts to exactly 1.0, and is caught
+    # only by the resolver backstop.
+    {"wf_promote_split": 100},
+    {"wf_pref_rate": 100},
+])
+def test_a_save_can_never_store_terms_the_model_will_reject(bad):
+    """Each case is a `DebtTerms` / `WaterfallTerms` raise, refused while
+    a human is looking at the page instead of surfacing as a failed run
+    twenty minutes later. Some are caught by a field bound and some only
+    by the resolver backstop — which is the point: the form does not
+    re-list the model's rules, it runs them."""
+    assert not _levered_form(**bad).is_valid()
+
+
+def test_the_resolver_backstop_catches_what_no_field_bound_can():
+    """`clean()` validates by calling the REAL resolvers rather than
+    re-listing their rules — the duplicated-constant divergence this repo
+    has a rule against, and one that would go stale the first time a
+    guard is added to either dataclass.
+
+    Every case above is reachable today only through a field, so this
+    exercises the backstop directly: no field can produce this input now,
+    which is exactly why the guard is worth keeping. Adding a rule to
+    `DebtTerms` must not silently turn a save into a failed run.
+
+    Reported as a NON-field error, so `cleaned_data` keeps its keys —
+    `assumptions_preview` reads them on an invalid form by design (the
+    item D lesson)."""
+    from webapp.forms import AssumptionsForm
+
+    form = AssumptionsForm(data={})
+    assert form.is_valid(), form.errors
+    form._validate_levered_terms({"debt_min_dscr": float("nan")})
+    assert "Debt terms" in str(form.non_field_errors())
+
+    wf = AssumptionsForm(data={})
+    assert wf.is_valid(), wf.errors
+    wf._validate_levered_terms({"wf_pref_compounding": "quarterly"})
+    assert "Waterfall terms" in str(wf.non_field_errors())
+
+
+def test_the_waterfall_selectors_offer_only_implemented_values():
+    """`accrual_base="committed"`, `am_fee_treatment="netted_from_lp"`
+    and `catch_up=True` are real conventions this repo does NOT
+    implement — `WaterfallTerms` raises on each. A dropdown whose second
+    option crashes the run is a trap, so they get no field at all and
+    stay in the assumption stamp instead."""
+    from webapp.forms import WF_FORM_KEYS
+    from webapp.forms import AssumptionsForm
+
+    assert "accrual_base" not in WF_FORM_KEYS
+    assert "am_fee_treatment" not in WF_FORM_KEYS
+    assert "catch_up" not in WF_FORM_KEYS
+
+    form = AssumptionsForm()
+    for name, allowed in (("wf_pref_compounding", {"annual", "simple"}),
+                          ("wf_ordering", {"roc_first", "pref_first"})):
+        offered = {value for value, _ in form.fields[name].choices}
+        assert offered == allowed
+
+
+@pytest.mark.django_db
+def test_an_edited_loan_term_makes_the_maturity_advisory_fire():
+    """`loan_matures_before_exit` could not fire before this item: the
+    config term is 10 years and the hold is capped at 10. Making
+    `term_years` editable is what switches it on, so the form path is
+    asserted end to end rather than only the model path above."""
+    from analysis import checks
+    from model.debt import build_debt_schedule, resolve_debt_terms
+    from webapp.forms import build_overrides
+    from webapp.models import Deal
+
+    deal = Deal.objects.create(deal_id="lev-mat", property_name="Mat")
+    form = _levered_form(debt_term_years=3, hold_years=5)
+    assert form.is_valid(), form.errors
+    out = build_overrides(form.cleaned_data, QueryDict(""), deal)
+    assert out["debt_terms"]["term_years"] == 3
+
+    debt = build_debt_schedule(10_000_000, 600_000,
+                               resolve_debt_terms(out["debt_terms"]),
+                               hold_years=5)
+    result = next(r for r in checks.run_checks(
+        checks.CheckInput(debt=debt), only={"loan_matures_before_exit"}))
+    assert result.status == checks.FAIL
+    assert result.severity == checks.ADVISORY
+
+
+# ── The results page ────────────────────────────────────────────────
+
+def test_the_results_lens_is_absent_on_a_run_that_predates_the_levered_layer():
+    """Old runs carry no `levered` key. The whole block is gated rather
+    than degrading into a table of N/A, which would read as "this deal
+    supports no debt" instead of "this run was computed before the lens
+    existed"."""
+    from webapp.results import levered_context
+
+    assert levered_context({})["has_levered"] is False
+    assert levered_context({"debt": {}, "levered": {}})["has_levered"] is False
+
+
+def test_the_results_lens_renders_the_headline_the_loan_and_the_stamp(oracle_a):
+    from webapp.results import levered_context
+
+    ctx = levered_context(_levered_run(oracle_a))
+    assert ctx["has_levered"] is True
+
+    labels = {row["label"]: row["cells"] for row in ctx["levered_rows"]}
+    assert labels["5-Year LP Net IRR"] == ["7.1%", "7.1%", "7.1%"]
+    assert labels["5-Year LP MOIC"] == ["1.39x", "1.39x", "1.39x"]
+    assert labels["GP Promote"] == ["$0", "$0", "$0"]
+
+    loan = dict(ctx["loan_rows"])
+    assert loan["Loan Amount"] == "$6,000,000"
+    # The debt module's own label table, never a second copy of it.
+    assert loan["Bound By"] == "Min Debt Yield"
+    assert loan["All-In Rate"] == "6.50%"
+    assert loan["Interest-Only"] == "0 mos"      # zero is an answer here
+    assert loan["Equity Required"] == "$4,160,000"
+
+    assert len(ctx["levered_years"]) == 5
+    assert ctx["levered_years"][0]["am_fee"] == "$41,600"
+
+    # No LP net IRR leaves the building without its stamp — five of these
+    # are still open LPA questions and each one changes the number.
+    stamp = {row["label"] for row in ctx["levered_stamp"]}
+    assert len(ctx["levered_stamp"]) == 5
+    assert any("of invested equity" in label for label in stamp)
+
+
+def test_the_results_lens_says_when_leverage_is_dilutive(oracle_a):
+    """Oracle A prints 7.1479% LP net against a 7.3031% unlevered IRR.
+    A reader who assumes levered must beat unlevered reads that as a bug,
+    so the page says it first."""
+    from webapp.results import levered_context
+
+    ctx = levered_context(_levered_run(oracle_a))
+    assert ctx["levered_dilutive"] == "Bear, Base, Bull"
+
+
+def test_the_results_lens_survives_a_non_converging_irr(oracle_a):
+    """`run_waterfall` returns None rather than NaN when the IRR does not
+    converge, because `json.dumps(nan)` is invalid JSON. The page must
+    print N/A, not raise, and must not report a None IRR as dilutive."""
+    from webapp.results import levered_context
+
+    run = _levered_run(oracle_a)
+    run["levered"] = {sc: {**run["levered"][sc], "lp_net_irr": None,
+                           "lp_moic": None}
+                      for sc in ("bear", "base", "bull")}
+    ctx = levered_context(run)
+    labels = {row["label"]: row["cells"] for row in ctx["levered_rows"]}
+    assert labels["5-Year LP Net IRR"] == ["N/A", "N/A", "N/A"]
+    assert ctx["levered_dilutive"] == ""
+
+
+def test_every_display_surface_reads_one_rate_and_one_covenant_label():
+    """`DebtTerms.all_in_rate()` RAISES on an unresolvable pair, which is
+    right when a rate is about to price a loan and wrong when a page is
+    rendering a run stored months ago — a display surface that 500s on a
+    stored payload loses the rest of the page. So `displayed_rate` is the
+    None-returning twin, and it lives in `model.debt` BESIDE the formula
+    it mirrors: the first draft of this item had the same three lines
+    copied into the results page, the memo and the workbook (audit
+    finding), which is three chances to disagree about one loan's rate.
+    """
+    import inspect
+
+    from model.debt import binding_constraint_label, displayed_rate
+    from output import excel_writer, memo_writer
+    from webapp import results
+
+    assert displayed_rate({"rate": 0.0625}) == pytest.approx(0.0625)
+    assert displayed_rate({"rate": None, "index_rate": 0.045,
+                           "spread": 0.025}) == pytest.approx(0.070)
+    # Half a floating pair is not a rate. None, not the bare index — a
+    # spread-only loan priced at 2.25% is a confident wrong number.
+    assert displayed_rate({"rate": None, "spread": 0.025}) is None
+    assert displayed_rate({}) is None
+    assert displayed_rate(None) is None
+
+    assert binding_constraint_label({"binding_constraint": "dscr"}) \
+        == "Min DSCR"
+    assert binding_constraint_label({}) == "N/A"
+    assert binding_constraint_label(None) == "N/A"
+
+    # No surface may grow its own copy back. `index_rate` appearing in a
+    # display module means someone re-derived the rate locally.
+    for module in (results, memo_writer, excel_writer):
+        assert "index_rate" not in inspect.getsource(module), (
+            f"{module.__name__} re-derives the all-in rate — call "
+            f"model.debt.displayed_rate instead")
+
+
+def test_the_results_lens_handles_a_priced_deal_that_supports_no_debt(oracle_a):
+    """Covenants can size a real deal to zero debt. The lens still has an
+    AM fee, a waterfall and an LP net IRR to show, so it renders — with
+    the flag saying the figures are the all-equity case. Every rate and
+    ratio the loan strip would print is None here, and none of them may
+    render as a number (audit coverage gap)."""
+    from webapp.results import levered_context
+
+    run = _levered_run(oracle_a)
+    run["debt"] = {**run["debt"], "loan": 0.0, "ltv": None,
+                   "debt_yield": None, "dscr_year_1": None,
+                   "payoff_balance": 0.0, "origination_fee": 0.0}
+    ctx = levered_context(run)
+    assert ctx["has_levered"] is True
+    assert ctx["levered_no_loan"] is True
+    loan = dict(ctx["loan_rows"])
+    assert loan["Loan Amount"] == "$0"
+    assert loan["LTV"] == "N/A"
+    assert loan["Year-1 DSCR"] == "N/A"
+    assert loan["Debt Yield"] == "N/A"
+
+
+# ── The memo and the workbook ───────────────────────────────────────
+
+def test_the_levered_lens_reaches_the_memo(tmp_path, mock_cim_data, oracle_a):
+    from docx import Document
+
+    from output.memo_writer import generate_memo
+
+    _, debt, _, lev = oracle_a
+    path = generate_memo(
+        property_name="Levered Memo", cim_data=mock_cim_data,
+        gate_results=[], market_analysis={}, physical_analysis={},
+        financial_analysis={}, rent_analysis={},
+        scenario_results=_levered_run(oracle_a)["scenario_results"],
+        value_add={}, risk_analysis={}, max_offer={},
+        levered={sc: lev for sc in ("bear", "base", "bull")}, debt=debt,
+        output_dir=str(tmp_path))
+    text = "\n".join(p.text for p in Document(path).paragraphs)
+    tables = [c.text for t in Document(path).tables for r in t.rows
+              for c in r.cells]
+
+    assert "Levered Returns (LP Net)" in text
+    assert "Levered Assumptions" in text
+    assert "$6,000,000" in text                 # the sized loan
+    assert "Min Debt Yield" in text             # what bound it
+    assert "DILUTIVE" in text                   # stated, not left to infer
+    assert "LP Net IRR" in tables
+    assert "7.1%" in tables
+    # The stamp is not optional: it is what makes "net" mean anything.
+    assert "1.00% of invested equity" in text
+
+
+def test_the_memo_and_workbook_build_with_no_levered_payload(tmp_path,
+                                                             mock_cim_data):
+    """A deal with no NOI or no asking price prices no loan. Both writers
+    must still build — the same contract `sources_uses` and `checks`
+    already follow."""
+    from docx import Document
+    from openpyxl import load_workbook
+
+    from output.excel_writer import generate_excel
+    from output.memo_writer import generate_memo
+
+    memo = generate_memo(
+        property_name="No Debt", cim_data=mock_cim_data, gate_results=[],
+        market_analysis={}, physical_analysis={}, financial_analysis={},
+        rent_analysis={}, scenario_results={}, value_add={},
+        risk_analysis={}, max_offer={}, levered=None, debt=None,
+        output_dir=str(tmp_path))
+    assert "Levered Returns (LP Net)" not in "\n".join(
+        p.text for p in Document(memo).paragraphs)
+
+    xlsx = generate_excel(
+        property_name="No Debt", cim_data=mock_cim_data,
+        financial_analysis={}, scenario_results={}, sensitivity={},
+        max_offer={}, levered=None, debt=None, output_dir=str(tmp_path))
+    assert "Levered Returns" not in load_workbook(xlsx).sheetnames
+
+
+def test_the_levered_lens_reaches_the_workbook(tmp_path, mock_cim_data,
+                                               oracle_a):
+    from openpyxl import load_workbook
+
+    from output.excel_writer import generate_excel
+
+    _, debt, _, lev = oracle_a
+    path = generate_excel(
+        property_name="Levered Model", cim_data=mock_cim_data,
+        financial_analysis={},
+        scenario_results=_levered_run(oracle_a)["scenario_results"],
+        sensitivity={}, max_offer={},
+        levered={sc: lev for sc in ("bear", "base", "bull")}, debt=debt,
+        output_dir=str(tmp_path))
+    wb = load_workbook(path)
+    assert "Levered Returns" in wb.sheetnames
+    ws = wb["Levered Returns"]
+    labels = {ws.cell(row=r, column=1).value for r in range(1, ws.max_row + 1)}
+    assert "Loan Amount" in labels
+    assert "LP Net IRR" in labels
+    assert "Base-Case Equity Cash Flow" in labels
+    # The stamp travels with the number here too.
+    assert any(isinstance(v, str) and "AM fee above" in v
+               for v in labels if v)
+
+    values = {ws.cell(row=r, column=1).value: ws.cell(row=r, column=2).value
+              for r in range(1, ws.max_row + 1)}
+    assert values["Loan Amount"] == pytest.approx(6_000_000.00, abs=CENT)
+    assert values["Bound By"] == "Min Debt Yield"
+
+
+def test_the_writers_do_not_mutate_the_payload_they_are_handed(tmp_path,
+                                                               mock_cim_data,
+                                                               oracle_a):
+    """This item is presentation only, and this is the assertion that
+    keeps it that way. One loan is sized for the whole deal and every
+    scenario's result embeds it, so a writer annotating the dict in place
+    would corrupt what the other surfaces read — the aliasing hazard E3a
+    deep-copied `debt` to prevent."""
+    import copy
+
+    from output.excel_writer import generate_excel
+    from output.memo_writer import generate_memo
+
+    _, debt, _, lev = oracle_a
+    levered = {sc: lev for sc in ("bear", "base", "bull")}
+    scen = _levered_run(oracle_a)["scenario_results"]
+    before = copy.deepcopy((debt, levered, scen))
+
+    generate_memo(
+        property_name="Immutable", cim_data=mock_cim_data, gate_results=[],
+        market_analysis={}, physical_analysis={}, financial_analysis={},
+        rent_analysis={}, scenario_results=scen, value_add={},
+        risk_analysis={}, max_offer={}, levered=levered, debt=debt,
+        output_dir=str(tmp_path))
+    generate_excel(
+        property_name="Immutable", cim_data=mock_cim_data,
+        financial_analysis={}, scenario_results=scen, sensitivity={},
+        max_offer={}, levered=levered, debt=debt, output_dir=str(tmp_path))
+
+    assert (debt, levered, scen) == before
+
+
+@pytest.mark.django_db
+def test_the_returns_tab_template_actually_renders_the_lens(oracle_a):
+    """A context builder that returns the right dict proves nothing about
+    the page. Django resolves missing variables to the empty string, so a
+    template can silently render NOTHING and every context test still
+    passes — and the tag errors that DO raise (a bad tuple unpack in the
+    loan strip, for one) only surface at render time. So render it."""
+    from django.template.loader import render_to_string
+
+    from webapp.results import levered_context
+
+    html = render_to_string("webapp/_tab_returns.html",
+                            levered_context(_levered_run(oracle_a)))
+    assert "Levered Returns" in html
+    assert "$6,000,000" in html                  # the sized loan
+    assert "Min Debt Yield" in html              # the binding covenant
+    assert "7.1%" in html                        # LP net IRR
+    assert "$41,600" in html                     # year-1 AM fee
+    assert "dilutive" in html                    # said, not left to infer
+    assert "1.00% of invested equity" in html    # the stamp travels
+
+
+@pytest.mark.django_db
+def test_the_returns_tab_renders_unchanged_without_a_levered_payload():
+    """The unlevered screen is the primary gate and must not depend on
+    the lens existing — a run stored before item E3a still renders."""
+    from django.template.loader import render_to_string
+
+    from webapp.results import levered_context
+
+    html = render_to_string("webapp/_tab_returns.html",
+                            {**levered_context({}),
+                             "scenario_rows": [{"label": "5-Year IRR",
+                                                "cells": ["1%", "2%", "3%"]}]})
+    assert "Static Returns" in html
+    assert "Levered Returns" not in html
+
+
+@pytest.mark.django_db
+def test_the_assumptions_page_renders_every_levered_input(client,
+                                                          django_user_model,
+                                                          settings, tmp_path):
+    """Fourteen fields declared on a form prove nothing about the page.
+    This asserts each one reaches the DOM, prefilled from config, with the
+    percents shown as WHOLE numbers — which is the boundary that priced a
+    $6.5M loan eighty times too expensively when it was got wrong."""
+    from webapp.models import Deal
+
+    settings.CIM_DEALS_DIR = str(tmp_path)
+    user = django_user_model.objects.create_user(username="lev", password="x")
+    client.force_login(user)
+    deal = Deal.objects.create(
+        deal_id="lev-page", property_name="Lev Page", extract_status="done",
+        cim_json={"property_name": "Lev Page", "asking_price": 10_000_000.0,
+                  "nrsf": 50_000.0, "ttm_noi": 600_000.0},
+        extraction_report={"missing": []})
+
+    html = client.get(f"/deals/{deal.pk}/assumptions/").content.decode()
+    assert "Debt &amp; Waterfall" in html
+    for name in ("debt_rate", "debt_amort_years", "debt_io_months",
+                 "debt_term_years", "debt_max_ltv", "debt_min_dscr",
+                 "debt_min_debt_yield", "debt_orig_fee_pct",
+                 "debt_exit_fee_pct", "wf_pref_rate", "wf_promote_split",
+                 "wf_pref_compounding", "wf_ordering", "am_fee_pct"):
+        assert f'name="{name}"' in html, f"{name} never reached the page"
+    # Whole numbers, not decimals: 6.25 for a 0.0625 rate, 65.0 for a 0.65
+    # LTV. `_pct_display` returns a float, so a round percentage renders
+    # with a trailing .0 — the same as the GP co-invest field beside it,
+    # and the number a browser posts back is identical either way.
+    assert 'value="6.25"' in html
+    assert 'value="65.0"' in html
+    # A coverage ratio passes through untouched.
+    assert 'value="1.25"' in html
+    # The two conventions that have no second implemented value get no
+    # field — a dropdown whose other option crashes the run is a trap.
+    assert 'name="wf_accrual_base"' not in html
+    assert 'name="wf_catch_up"' not in html
+
+
+@pytest.mark.django_db
+def test_a_carried_forward_unimplemented_convention_does_not_500_the_page():
+    """`WaterfallTerms` splits its refusals across TWO exception types: a
+    bad NUMBER raises ValueError, an unimplemented CONVENTION raises
+    NotImplementedError. The three conventions this form deliberately
+    does not expose are exactly the NotImplementedError ones, and exactly
+    the ones that reach the prefill by being carried forward from a
+    stored override — so catching only ValueError made the fallback a lie
+    for the single case most likely to hit it (review finding).
+    """
+    from webapp.forms import AssumptionsForm, build_initial
+    from webapp.models import Deal
+
+    deal = Deal.objects.create(
+        deal_id="lev-notimpl", property_name="NotImpl",
+        assumption_overrides={"waterfall_terms": {"catch_up": True}})
+
+    # Prefill falls back to the raw merge instead of raising.
+    initial = build_initial(deal)
+    assert initial["wf_pref_rate"] == pytest.approx(8.0)
+
+    # And the same split is honoured on the way in, so a convention that
+    # reached cleaned_data becomes a form error rather than a 500.
+    form = AssumptionsForm(data={})
+    assert form.is_valid(), form.errors
+    form._validate_levered_terms({"wf_pref_compounding": "quarterly"})
+    assert "Waterfall terms" in str(form.non_field_errors())

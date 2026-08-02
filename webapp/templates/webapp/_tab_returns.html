@@ -67,6 +67,147 @@
     {% endif %}
   </div>
 
+  {% comment %} The levered second lens (item E3b). Renders what the run
+     persisted — nothing here recomputes an LP net IRR, which would be a
+     different number wearing this run's date. Below the unlevered tables
+     because the unlevered screen is still the primary gate. {% endcomment %}
+  {% if has_levered %}
+  <div>
+    <h2 class="text-sm font-semibold mb-1.5">Levered Returns <span class="font-normal text-slate-500">(LP Net, After Debt &amp; Fees)</span></h2>
+
+    {% comment %} ONE bordered container, not five. Each of these states a
+       fact that changes what the LP net IRR means, so none may be dropped
+       — but five separately-chromed boxes pay five borders and five pad
+       pairs to say so. Same idiom the assumption stamp below and the
+       assumptions page's warning list already use. {% endcomment %}
+    {% if levered_dilutive or levered_matures_early or levered_called_capital or levered_no_loan or levered_has_unrecovered_promote %}
+    <ul class="mb-1.5 space-y-0.5 rounded border border-amber-200 bg-amber-50 px-2 py-1.5 text-xs text-amber-900">
+      {% if levered_dilutive %}
+      <li>Leverage is <span class="font-semibold">dilutive</span> in the {{ levered_dilutive }} case — LP net IRR is below the unlevered IRR because the loan constant sits above the deal&rsquo;s yield on cost. This is an outcome, not an error.</li>
+      {% endif %}
+      {% if levered_no_loan %}
+      <li>The covenants sized this deal to <span class="font-semibold">no debt</span>, so the levered figures below are the all-equity case net of the AM fee and the waterfall.</li>
+      {% endif %}
+      {% if levered_matures_early %}
+      <li>The loan <span class="font-semibold">matures before exit</span>. These figures amortize straight past maturity — no refinancing, rate reset or prepayment cost is modeled.</li>
+      {% endif %}
+      {% if levered_called_capital %}
+      <li>This deal <span class="font-semibold">calls {{ levered_capital_calls }} of capital after close</span> ({{ levered_reserve_drawn }} covered by the operating reserve). Called capital accrues preferred return from the following period.</li>
+      {% endif %}
+      {% if levered_has_unrecovered_promote %}
+      <li>{{ levered_unrecovered_promote }} of promote was paid before a later capital call and the deal ends short of capital plus pref. These fund terms carry <span class="font-semibold">no clawback</span>, so the GP keeps it.</li>
+      {% endif %}
+    </ul>
+    {% endif %}
+
+    {% comment %} `auto` on the first track, not a second `1fr`: a
+       four-column scenario table stretched to half the row lands its
+       whitespace INSIDE the table, between right-aligned numbers and
+       their column edges. {% endcomment %}
+    <div class="grid gap-2 lg:grid-cols-[minmax(0,auto)_minmax(0,1fr)]">
+      <div class="bg-white border border-slate-200 rounded-lg overflow-x-auto">
+        <table class="w-full text-sm border-collapse">
+          <thead>
+            <tr class="text-left border-b border-slate-300 text-xs text-slate-600">
+              <th class="py-1.5 pl-3 pr-3">Metric</th>
+              <th class="py-1.5 pr-3 text-right">Bear</th>
+              <th class="py-1.5 pr-3 text-right">Base</th>
+              <th class="py-1.5 pr-3 text-right">Bull</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in levered_rows %}
+            <tr class="border-b border-slate-100">
+              <td class="py-1.5 pl-3 pr-3 font-medium">{{ row.label }}</td>
+              {% for cell in row.cells %}<td class="py-1.5 pr-3 text-right">{{ cell }}</td>{% endfor %}
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+
+      {% comment %} One loan, sized once off the base case and carried
+         through all three scenarios — so this reads as a single strip,
+         not three identical columns. {% endcomment %}
+      <div class="bg-white border border-slate-200 rounded-lg px-3 py-2">
+        <div class="text-xs font-semibold uppercase tracking-wide text-slate-500 mb-1">Senior Loan <span class="font-normal normal-case tracking-normal">— sized once off the base case</span></div>
+        {% comment %} auto-fit on the CONTAINER's width, not a viewport
+           `sm:` breakpoint: this card is one half of the grid above at
+           lg+, so a viewport rule would force three columns into half a
+           row. `min-w-0` is what makes the `truncate` real — a flex child
+           will not shrink below its content width without it, so the
+           label would overflow into the value instead of ellipsizing, and
+           `title=` keeps the full label one hover away.
+
+           11rem, not 9: the worst pair here is "Origination Fee" beside
+           "$5,616,659" — about 163px of text at text-xs plus the flex
+           gap. A 9rem track fits a fourth column by clipping that label,
+           and a label the analyst cannot read is the one trade this
+           repo's UI rule refuses. Truncation stays a safety net for
+           values wider than any real loan, not the normal case.
+           {% endcomment %}
+        <dl class="grid gap-x-4 gap-y-0.5 text-xs grid-cols-[repeat(auto-fit,minmax(11rem,1fr))]">
+          {% for label, value in loan_rows %}
+          <div class="flex min-w-0 justify-between gap-2 border-b border-slate-100 py-0.5">
+            <dt class="text-slate-500 truncate" title="{{ label }}">{{ label }}</dt>
+            <dd class="font-medium tabular-nums whitespace-nowrap">{{ value }}</dd>
+          </div>
+          {% endfor %}
+        </dl>
+      </div>
+    </div>
+
+    {% if levered_years %}
+    <div class="mt-2 bg-white border border-slate-200 rounded-lg overflow-x-auto">
+      {% comment %} A div eyebrow, not a `<caption>` — the loan strip
+         above labels itself the same way, and two idioms for "label above
+         a data block" in one screen is one too many. {% endcomment %}
+      <div class="text-xs font-semibold uppercase tracking-wide text-slate-500 px-3 pt-1.5">Base-Case Equity Cash Flow</div>
+      <table class="w-full text-sm border-collapse">
+        <thead>
+          <tr class="text-left border-b border-slate-300 text-xs text-slate-600">
+            <th class="py-1.5 pl-3 pr-3">Year</th>
+            <th class="py-1.5 pr-3 text-right">NOI</th>
+            <th class="py-1.5 pr-3 text-right">Debt Service</th>
+            <th class="py-1.5 pr-3 text-right">AM Fee</th>
+            <th class="py-1.5 pr-3 text-right">Levered CF</th>
+            <th class="py-1.5 pr-3 text-right">Distribution</th>
+            <th class="py-1.5 pr-3 text-right">Capital Call</th>
+            <th class="py-1.5 pr-3 text-right">DSCR</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in levered_years %}
+          <tr class="border-b border-slate-100">
+            <td class="py-1.5 pl-3 pr-3 font-medium">{{ row.year }}</td>
+            <td class="py-1.5 pr-3 text-right tabular-nums">{{ row.noi }}</td>
+            <td class="py-1.5 pr-3 text-right tabular-nums">{{ row.debt_service }}</td>
+            <td class="py-1.5 pr-3 text-right tabular-nums">{{ row.am_fee }}</td>
+            <td class="py-1.5 pr-3 text-right tabular-nums">{{ row.levered_cf }}</td>
+            <td class="py-1.5 pr-3 text-right tabular-nums">{{ row.distribution }}</td>
+            <td class="py-1.5 pr-3 text-right tabular-nums">{{ row.capital_call }}</td>
+            <td class="py-1.5 pr-3 text-right tabular-nums">{{ row.dscr }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% endif %}
+
+    {% comment %} The stamp is NOT optional and is not collapsed away:
+       five of these are open LPA questions and each one changes the LP
+       net IRR above it. {% endcomment %}
+    <div class="mt-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
+      <div class="text-xs font-semibold uppercase tracking-wide text-slate-500 mb-1">Assumptions behind these figures</div>
+      <ul class="grid gap-x-4 gap-y-0.5 text-xs text-slate-600 sm:grid-cols-2">
+        {% for row in levered_stamp %}
+        <li class="flex gap-1.5"><span class="text-slate-400 shrink-0">&bull;</span><span><span class="font-medium text-slate-800">{{ row.label }}</span> <span class="text-slate-500">&mdash; {{ row.question }}</span></span></li>
+        {% endfor %}
+      </ul>
+    </div>
+  </div>
+  {% endif %}
+
   {% if has_sensitivity %}
   <div>
     <h2 class="text-sm font-semibold mb-1.5">IRR Sensitivity <span class="font-normal text-slate-500">(Price × Exit Cap)</span></h2>

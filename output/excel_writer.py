@@ -9,7 +9,9 @@ Tabs:
   5. Sensitivity — IRR sensitivity table (price × exit cap)
   6. Max Offer — solved max price and derivation
   7. Sources & Uses — capital stack (model/returns_model.py)
-  8. Checks — the model error-check register (analysis/checks.py)
+  8. Levered Returns — the sized loan, LP net returns and the assumption
+     stamp (model/levered.py). Absent when a deal priced no loan.
+  9. Checks — the model error-check register (analysis/checks.py)
 """
 
 import os
@@ -46,7 +48,8 @@ def generate_excel(property_name: str, cim_data, financial_analysis: dict,
                    scenario_results: dict, sensitivity: dict,
                    max_offer: dict, va_results: dict = None,
                    va_max_offer: dict = None, checks: list = None,
-                   sources_uses: dict = None,
+                   sources_uses: dict = None, levered: dict = None,
+                   debt: dict = None,
                    output_dir: str = ".") -> str:
     """
     Generate the SS Returns Model .xlsx.
@@ -87,7 +90,15 @@ def generate_excel(property_name: str, cim_data, financial_analysis: dict,
         _build_sources_uses_tab(wb.create_sheet(title="Sources & Uses"),
                                 sources_uses)
 
-    # Tab 9: Checks — the whole register, not just the findings, so the
+    # Tab 9: Levered Returns — the second lens. After Sources & Uses
+    # because it reads off that capital stack, and before Checks so the
+    # workbook keeps reading deal → returns → capital → levered →
+    # integrity. Absent on a deal that priced no loan.
+    if levered:
+        _build_levered_tab(wb.create_sheet(title="Levered Returns"),
+                           levered, debt or {}, scenario_results)
+
+    # Tab 10: Checks — the whole register, not just the findings, so the
     # workbook says what was verified as well as what failed.
     if checks:
         _build_checks_tab(wb.create_sheet(title="Checks"), checks)
@@ -757,6 +768,120 @@ def _write_total_row(ws, row: int, label: str, value) -> int:
     cell.border = THIN_BORDER
     ws.cell(row=row, column=3).border = THIN_BORDER
     return row + 1
+
+
+def _build_levered_tab(ws, levered: dict, debt: dict, scenario_results: dict):
+    """The levered second lens (item E3b).
+
+    Every figure is read off the persisted `levered` / `debt` payload.
+    Nothing here re-runs the waterfall, so the workbook cannot disagree
+    with the memo or the results page about the LP's net return.
+
+    The assumption stamp is at the BOTTOM and is not optional: five of
+    those inputs are open LPA questions and each one moves the IRR above.
+    """
+    base = levered.get("base") or {}
+    terms = debt.get("terms") or {}
+    scenarios = [s for s in ScenarioType]
+
+    row = _write_section_header(ws, 1, "Senior Loan (sized once, base case)",
+                                cols=2)
+    from model.debt import binding_constraint_label, displayed_rate
+    for label, value, fmt in (
+            ("Loan Amount", debt.get("loan"), CURRENCY_FULL),
+            ("Bound By", binding_constraint_label(debt), None),
+            ("All-In Rate", displayed_rate(terms), CAP_FORMAT),
+            ("Amortization (yrs)", terms.get("amort_years"), None),
+            ("Interest-Only (mos)", terms.get("io_months"), None),
+            ("Loan Term (yrs)", terms.get("term_years"), None),
+            ("LTV", debt.get("ltv"), PCT_FORMAT),
+            ("Year-1 DSCR", debt.get("dscr_year_1"), MULTIPLE_FORMAT),
+            ("Debt Yield", debt.get("debt_yield"), PCT_FORMAT),
+            ("Origination Fee", debt.get("origination_fee"), CURRENCY_FULL),
+            ("Exit Fee", debt.get("exit_fee"), CURRENCY_FULL),
+            ("Payoff Balance at Exit", debt.get("payoff_balance"),
+             CURRENCY_FULL),
+            ("Matures Before Exit",
+             "YES — no refinancing modeled" if debt.get("matures_before_exit")
+             else "No", None)):
+        row = _write_input_row(ws, row, label, value, fmt)
+
+    row += 1
+    row = _write_section_header(ws, row, "LP Net Returns by Scenario",
+                                cols=len(scenarios) + 1)
+    for col, scen in enumerate(scenarios, start=2):
+        cell = ws.cell(row=row, column=col, value=scen.title())
+        cell.font = BOLD_FONT
+        cell.border = THIN_BORDER
+    ws.cell(row=row, column=1).border = THIN_BORDER
+    row += 1
+    for label, key, fmt in (
+            ("LP Net IRR", "lp_net_irr", PCT_FORMAT),
+            ("LP MOIC", "lp_moic", MULTIPLE_FORMAT),
+            ("GP Promote", "gp_promote", CURRENCY_FULL),
+            ("AM Fee (total)", "am_fee_total", CURRENCY_FULL),
+            ("Capital Called After Close", "capital_calls_total",
+             CURRENCY_FULL),
+            ("Equity Required", "total_equity", CURRENCY_FULL)):
+        ws.cell(row=row, column=1, value=label).font = LABEL_FONT
+        for col, scen in enumerate(scenarios, start=2):
+            value = (levered.get(scen) or {}).get(key)
+            cell = ws.cell(row=row, column=col, value=value)
+            cell.font = VALUE_FONT
+            if value is not None:
+                cell.number_format = fmt
+        row += 1
+    # Leverage is allowed to be dilutive; the sheet says so rather than
+    # leaving a reader to treat it as an arithmetic error.
+    dilutive = [scen.title() for scen in scenarios
+                if (levered.get(scen) or {}).get("lp_net_irr") is not None
+                and ((scenario_results or {}).get(scen) or {}).get("irr")
+                is not None
+                and (levered[scen]["lp_net_irr"]
+                     < scenario_results[scen]["irr"])]
+    if dilutive:
+        row = _write_input_row(
+            ws, row, "Leverage Is Dilutive In",
+            f"{', '.join(dilutive)} — LP net below the unlevered IRR "
+            f"(loan constant above yield on cost)")
+
+    years = base.get("years") or []
+    if years:
+        row += 1
+        row = _write_section_header(ws, row, "Base-Case Equity Cash Flow",
+                                    cols=8)
+        headers = ("Year", "NOI", "Debt Service", "AM Fee", "Levered CF",
+                   "Distribution", "Capital Call", "DSCR")
+        for col, title in enumerate(headers, start=1):
+            cell = ws.cell(row=row, column=col, value=title)
+            cell.font = BOLD_FONT
+            cell.border = THIN_BORDER
+        row += 1
+        for yr in years:
+            values = (yr.get("year"), yr.get("noi"), yr.get("debt_service"),
+                      yr.get("am_fee"), yr.get("levered_cf"),
+                      yr.get("distribution"), yr.get("capital_call"),
+                      yr.get("dscr"))
+            for col, value in enumerate(values, start=1):
+                cell = ws.cell(row=row, column=col, value=value)
+                cell.font = VALUE_FONT
+                if col == 8:
+                    cell.number_format = MULTIPLE_FORMAT
+                elif col > 1:
+                    cell.number_format = CURRENCY_FULL
+            row += 1
+
+    stamp = base.get("assumption_stamp") or []
+    if stamp:
+        row += 1
+        row = _write_section_header(ws, row, "Levered Assumptions", cols=2)
+        for entry in stamp:
+            row = _write_input_row(ws, row, entry.get("question") or "",
+                                   entry.get("label") or "")
+
+    for col, width in ((1, 34), (2, 22), (3, 16), (4, 14), (5, 16),
+                       (6, 16), (7, 14), (8, 10)):
+        ws.column_dimensions[get_column_letter(col)].width = width
 
 
 def _build_checks_tab(ws, checks: list):

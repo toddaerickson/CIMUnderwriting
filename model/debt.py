@@ -213,6 +213,42 @@ class DebtTerms:
         return self.io_months >= self.term_years * MONTHS_PER_YEAR
 
 
+def displayed_rate(terms: dict):
+    """`all_in_rate` for a DISPLAY surface reading a PERSISTED run.
+
+    Same formula as `DebtTerms.all_in_rate`, one difference that is the
+    whole reason it exists: this returns None where that RAISES. Raising
+    is right when a rate is about to price a loan — a spread-only loan
+    quoted at the bare index is a confident wrong number. It is wrong
+    when the results page, the memo or the workbook is rendering a run
+    that was stored months ago: a display surface that 500s on a stored
+    payload tells the analyst nothing and loses the rest of the page.
+
+    Takes the plain dict `build_debt_schedule` persists under `terms`,
+    not the frozen dataclass, because that is what comes back out of
+    JSONB. Lives HERE, beside the authoritative formula, so the three
+    surfaces cannot drift from it or from each other (audit finding).
+    """
+    terms = terms or {}
+    if terms.get("rate") is not None:
+        return float(terms["rate"])
+    index, spread = terms.get("index_rate"), terms.get("spread")
+    if index is None or spread is None:
+        return None
+    return float(index) + float(spread)
+
+
+def binding_constraint_label(debt: dict) -> str:
+    """Which covenant sized the loan, in this module's own words.
+
+    One lookup for all three display surfaces — a second copy of the
+    label table is how "Min DSCR" and "DSCR" end up on two pages
+    describing the same loan.
+    """
+    key = (debt or {}).get("binding_constraint")
+    return CONSTRAINT_LABELS.get(key, key or "N/A")
+
+
 def resolve_debt_terms(overrides: dict = None) -> DebtTerms:
     """Partial override → fully resolved terms.
 
@@ -519,20 +555,28 @@ def build_debt_schedule(price: float, y1_noi: float, terms: DebtTerms, *,
     out of proceeds, so it is NOT a use of funds; putting it there would
     inflate the basis and understate the return at both ends.
 
-    **E3 CANNOT just hand this to `build_sources_uses` and stop.** Doing
-    only that fails `analysis.checks.sources_uses_ties`, the BLOCKING
-    check, by exactly `financing_costs`: the fee lands in Total Uses while
+    **`financing_costs` is NOT in the unlevered basis, and must not
+    become so.** This paragraph used to prescribe the opposite: E1
+    measured that handing the fee to `build_sources_uses` breaks
+    `analysis.checks.sources_uses_ties` by exactly `financing_costs` —
+    the fee lands in Total Uses while
     `analysis.valuation.project_cash_flows` computes
     `total_basis = price + capex + acquisition_cost + reserve`, which has
-    no financing term. Uses and Sources still agree with each other; it is
-    the tie to the DCF basis that breaks. So E3 must ALSO extend the
-    projection to carry financing costs into the basis — the same
-    additive, zero-defaulted move item D made for `reserve`, and it has to
-    reach the scenario engine, both solvers and the value-add model, which
-    is why it is E3's change and not this module's. That is the check
-    behaving exactly as item A designed it; the failure is loud on
-    purpose. `test_financing_costs_break_the_basis_tie_until_e3_extends_it`
-    pins the arithmetic so E3 starts from a measured quantity.
+    no financing term — and prescribed threading a zero-defaulted
+    financing term through the projection, the scenario engine, both
+    solvers and the value-add model.
+
+    **The operator reversed that on 2026-08-01 (item E3a).** An
+    origination fee inside `total_basis` moves the primary 10% unlevered
+    IRR screen the moment a deal names a loan, and an unlevered return
+    charged a financing fee is not an unlevered return. So the TIE moved
+    instead — `Uses == total_basis + financing_costs`, checked to the
+    cent — and `project_cash_flows` was never touched. E1's measurement
+    still stands; only the side of the equation it is written on changed.
+    `test_financing_costs_break_the_basis_tie_until_e3_extends_it` was
+    deleted with the route it pinned; the new identity has tests on both
+    sides. Item E4 inherits an unlevered engine that behaves exactly as it
+    always did — do not re-thread the fee into it.
 
     Two coverage ratios come back and they are allowed to disagree:
     `sizing_dscr` is the covenant the loan was sized against (the
