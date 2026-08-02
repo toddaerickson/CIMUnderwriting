@@ -338,6 +338,18 @@ SOLVER_TARGET_IRR = 0.10
 SOLVER_TOLERANCE = 0.001
 SOLVER_MAX_ITERATIONS = 50
 
+# The LEVERED solver's target (item E4): the maximum price at which the
+# fund still clears its LP net IRR, after debt service, the AM fee and
+# the promote. 15% is the fund's stated LP net target — a different
+# number from SOLVER_TARGET_IRR, measured on a different cash-flow
+# stream, so the two are separate keys rather than one shared "target".
+#
+# Deliberately NOT in webapp.forms.override_key_registry, unlike
+# SOLVER_TARGET_IRR. It is a levered input, and every levered input is
+# per-deal only (CLAUDE.md key design decision 6) — the settings page
+# edits the unlevered screen, which the levered lens must not move.
+SOLVER_TARGET_LP_NET_IRR = 0.15
+
 # ── Transaction Costs & Hold Period ─────────────────────────────────
 # Round-trip friction. Omitting these overstates every unlevered IRR by
 # roughly 30-60 bps, and the IRR gate is evaluated on that figure.

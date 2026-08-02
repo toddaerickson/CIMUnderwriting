@@ -21,6 +21,7 @@ def generate_memo(property_name: str, cim_data, gate_results: list,
                   va_results: dict = None, va_max_offer: dict = None,
                   checks: list = None, sources_uses: dict = None,
                   levered: dict = None, debt: dict = None,
+                  levered_max_offer: dict = None,
                   output_dir: str = ".") -> str:
     """
     Generate the SS Investment Memo .docx.
@@ -60,7 +61,7 @@ def generate_memo(property_name: str, cim_data, gate_results: list,
 
     # ── Section 6: Valuation & Returns ──────────────────────────
     _add_section_6(doc, scenario_results, max_offer, sources_uses,
-                   levered, debt)
+                   levered, debt, levered_max_offer)
 
     # ── Section 7: Value-Add Opportunities ──────────────────────
     _add_section_7(doc, value_add, va_results, va_max_offer)
@@ -487,7 +488,7 @@ def _add_section_5(doc, rent):
 
 
 def _add_section_6(doc, scenario_results, max_offer, sources_uses=None,
-                   levered=None, debt=None):
+                   levered=None, debt=None, levered_max_offer=None):
     doc.add_heading("6. Valuation & Returns", level=1)
 
     if not scenario_results:
@@ -534,13 +535,71 @@ def _add_section_6(doc, scenario_results, max_offer, sources_uses=None,
     _add_levered_returns(doc, levered, debt, scenario_results)
 
     # Max offer
-    if max_offer:
+    if max_offer or levered_max_offer:
         doc.add_heading("Maximum Offer Price", level=2)
+    if max_offer:
         doc.add_paragraph(
             f"At a target {max_offer.get('target_irr', 0.10):.0%} base case unlevered IRR, "
             f"the maximum offer price is {_fmt_currency(max_offer.get('max_price'))} "
             f"(implied entry cap: {_fmt_pct(max_offer.get('implied_entry_cap'))})."
         )
+    _add_levered_max_offer(doc, levered_max_offer)
+
+
+def _add_levered_max_offer(doc, levered_max_offer):
+    """The levered max offer (item E4), beside the unlevered one.
+
+    Beside and not instead of: the unlevered figure is the price the
+    primary 10% gate is measured against, and the two answer different
+    questions — "what can the property carry" versus "what can the fund
+    pay and still clear its LP net target". A memo showing only the
+    second would leave the primary screen with no price of its own.
+
+    Silent when the deal priced no loan, for the same reason
+    `_add_levered_returns` returns early: a block of N/A reads as a
+    failed calculation rather than an absent one.
+    """
+    offer = levered_max_offer or {}
+    if not offer.get("max_price"):
+        return
+
+    doc.add_paragraph(
+        f"At a target {offer.get('target_irr', 0.15):.0%} LP NET IRR — after "
+        f"debt service, the asset-management fee and the GP promote — the "
+        f"maximum offer price is {_fmt_currency(offer.get('max_price'))} "
+        f"(implied entry cap: {_fmt_pct(offer.get('implied_entry_cap'))}). "
+        f"At that price the deal supports "
+        f"{_fmt_currency(offer.get('senior_debt'))} of senior debt "
+        f"({_fmt_pct(offer.get('ltv'))} LTV, bound by "
+        f"{_binding_label(offer)}) and requires "
+        f"{_fmt_currency(offer.get('total_equity'))} of equity.")
+
+    # The bisection assumes LP net IRR falls as price rises. It does over
+    # every range measured (see model/solver.py), but an observed
+    # inversion means this price may be the wrong root, and a memo must
+    # not print a suspect number as a clean one.
+    if offer.get("monotonicity_warning"):
+        doc.add_paragraph(f"WARNING: {offer['monotonicity_warning']}")
+    if not offer.get("converged"):
+        doc.add_paragraph(
+            "WARNING: the levered solver did not converge to its target "
+            "within the iteration budget — treat this price as indicative.")
+
+    # Same rule as every other LP net figure in this memo: no LP net IRR
+    # without its assumption stamp (CLAUDE.md key design decision 7). A
+    # price derived FROM an LP net IRR inherits the requirement.
+    stamp = offer.get("assumption_stamp") or []
+    if stamp:
+        doc.add_paragraph(
+            "This price is computed on the levered assumption set stated "
+            "under Levered Returns above: "
+            + "; ".join(row.get("label", "") for row in stamp) + ".")
+
+
+def _binding_label(offer) -> str:
+    from model.debt import CONSTRAINT_LABELS
+    key = (offer or {}).get("binding_constraint")
+    return CONSTRAINT_LABELS.get(key, key or "n/a")
 
 
 def _add_sources_uses(doc, sources_uses):

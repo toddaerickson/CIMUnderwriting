@@ -239,6 +239,25 @@ def returns_context(r) -> dict:
         "va_max_offer_unconverged": _unconverged(r.get("va_max_offer")),
         "va_max_offer": fmt_money((r.get("va_max_offer") or {}).get("max_price")),
         "has_va_max_offer": bool((r.get("va_max_offer") or {}).get("max_price")),
+        # The levered max offer (item E4) — a pure read, like every other
+        # figure here. Absent on runs stored before E4 and on deals that
+        # priced no loan, so the card is gated rather than showing N/A.
+        "levered_max_offer": fmt_money(
+            (r.get("levered_max_offer") or {}).get("max_price")),
+        "has_levered_max_offer": bool(
+            (r.get("levered_max_offer") or {}).get("max_price")),
+        "levered_max_offer_unconverged": _unconverged(
+            r.get("levered_max_offer")),
+        # The target is shown on the card because it is NOT the unlevered
+        # target and a reader comparing two prices must be able to see
+        # they were solved to different bars.
+        "levered_max_offer_target": fmt_pct(
+            (r.get("levered_max_offer") or {}).get("target_irr")),
+        # Only the observed-inversion flag reaches the UI. `coerced_region`
+        # is ordinary and fires on most deals; caveating on it would train
+        # the reader to ignore the badge (see model/solver.py).
+        "levered_max_offer_warning": (
+            r.get("levered_max_offer") or {}).get("monotonicity_warning"),
         "has_sensitivity": bool(sens.get("irr_grid")),
         "sens_caps": [fmt_pct(c, digits=2) for c in sens.get("cap_values") or []],
         "sens_rows": sens_rows,

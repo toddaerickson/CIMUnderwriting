@@ -108,7 +108,8 @@ model/
   levered.py               # The seam: levered equity CF, AM fee, reserve draw vs
                            #   capital call, then the waterfall. Assembles only —
                            #   it sizes no loan and distributes no dollar itself.
-  solver.py                # Bisection solver: max price for 10% IRR (still unlevered)
+  solver.py                # Bisection solvers: max price for a 10% UNLEVERED IRR and
+                           #   (item E4) for a 15% LP NET IRR — both kept, both shown
 output/
   memo_writer.py           # Generates .docx from analysis outputs
   excel_writer.py          # Generates .xlsx returns model
@@ -207,8 +208,29 @@ output/
    implemented value (`accrual_base`, `am_fee_treatment`, `catch_up`) and
    the other value RAISES, so they deliberately get no form field: a
    dropdown whose second option crashes the run is a trap, not a setting.
-8. **Bisection solver**: Deterministic, 20 iterations to 0.1% precision.
-   Still targets the UNLEVERED IRR; item E4 retargets it to LP net.
+8. **Bisection solvers**: Deterministic, ~20 iterations to 0.1% precision.
+   There are now TWO max offers and they are both kept (item E4,
+   operator's call 2026-08-01): `solve_max_price` targets the 10%
+   UNLEVERED IRR — the price the primary gate is read against — and
+   `solve_max_price_levered` targets the fund's 15% LP NET IRR, after
+   debt service, the AM fee and the promote. Neither replaces the other;
+   they answer different questions and are solved to different bars, so
+   every surface prints the target beside the price.
+   The levered solver re-sizes the loan at every candidate price. That
+   does NOT contradict "sized once off the base case" (decision 6): that
+   rule fixes sizing across bear/base/bull at ONE price, whereas here the
+   price is the variable and a lender asked to fund a different price
+   writes a different loan.
+   **Monotonicity is the assumption bisection rests on, and it is
+   CI-guarded, not assumed.** The exit-cap floor pushes the wrong way —
+   below a certain price the exit cap is coerced up to the entry cap, so
+   raising the price lowers it and raises exit value. It never actually
+   inverts, because that gain lands at exit and is discounted at the very
+   IRR the cheap price produces. `test_levered_objective_is_monotone_over
+   _the_underwriting_range` pins that as a red test. The solver also keeps
+   every price it evaluated and reports an observed inversion as
+   `monotonicity_warning`; `coerced_region` beside it is ORDINARY DATA
+   that fires on most deals, so nothing may raise a UI caveat off it.
 
 ## Manual steps flagged by the program
 - Population verification (if not in CIM)

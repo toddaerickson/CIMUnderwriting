@@ -49,7 +49,7 @@ def generate_excel(property_name: str, cim_data, financial_analysis: dict,
                    max_offer: dict, va_results: dict = None,
                    va_max_offer: dict = None, checks: list = None,
                    sources_uses: dict = None, levered: dict = None,
-                   debt: dict = None,
+                   debt: dict = None, levered_max_offer: dict = None,
                    output_dir: str = ".") -> str:
     """
     Generate the SS Returns Model .xlsx.
@@ -79,9 +79,13 @@ def generate_excel(property_name: str, cim_data, financial_analysis: dict,
     ws_sens = wb.create_sheet(title="Sensitivity")
     _build_sensitivity_tab(ws_sens, sensitivity)
 
-    # Tab 7: Max Offer
+    # Tab 7: Max Offer — the unlevered derivation, and below it the
+    # levered one (item E4). One sheet, not two: they are two answers to
+    # "what can we pay", and a reader comparing them should not have to
+    # hold one in their head while switching tabs.
     ws_max = wb.create_sheet(title="Max Offer")
-    _build_max_offer_tab(ws_max, max_offer, cim_data)
+    _build_max_offer_tab(ws_max, max_offer, cim_data,
+                         levered_max_offer or {})
 
     # Tab 8: Sources & Uses — what the deal costs and where the money
     # comes from. Placed before Checks so the workbook reads deal →
@@ -475,13 +479,15 @@ def _build_sensitivity_tab(ws, sensitivity: dict):
     c.fill = red_fill
 
 
-def _build_max_offer_tab(ws, max_offer: dict, cim_data):
-    """Build Max Offer derivation tab."""
+def _build_max_offer_tab(ws, max_offer: dict, cim_data,
+                         levered_max_offer: dict = None):
+    """Build Max Offer derivation tab — unlevered, then levered (item E4)."""
     ws.column_dimensions["A"].width = 35
     ws.column_dimensions["B"].width = 20
 
     row = 1
-    row = _write_section_header(ws, row, "Maximum Offer Price Derivation", cols=2)
+    row = _write_section_header(ws, row, "Maximum Offer Price Derivation "
+                                         "(Unlevered)", cols=2)
     row += 1
 
     items = [
@@ -529,6 +535,88 @@ def _build_max_offer_tab(ws, max_offer: dict, cim_data):
             if fmt and val is not None:
                 cell.number_format = fmt
             row += 1
+
+    _write_levered_max_offer(ws, row + 1, levered_max_offer or {})
+
+
+def _write_levered_max_offer(ws, row: int, offer: dict) -> int:
+    """The levered max offer block (item E4), below the unlevered one.
+
+    Silent when the deal priced no loan — a block of blanks reads as a
+    failed calculation rather than an absent one, the same reason the
+    Levered Returns sheet is omitted outright in that case.
+    """
+    if not offer.get("max_price"):
+        return row
+
+    row = _write_section_header(ws, row, "Maximum Offer Price Derivation "
+                                         "(Levered — LP Net)", cols=2)
+    items = [
+        ("Target LP Net IRR", offer.get("target_irr"), PCT_FORMAT),
+        ("Solver Converged", "Yes" if offer.get("converged") else "No", None),
+        ("Iterations", offer.get("iterations"), None),
+        ("", None, None),
+        ("Maximum Purchase Price", offer.get("max_price"), CURRENCY_FULL),
+        ("Implied Entry Cap Rate", offer.get("implied_entry_cap"), PCT_FORMAT),
+        ("Achieved LP Net IRR", offer.get("lp_net_irr"), PCT_FORMAT),
+        ("Achieved LP MOIC", offer.get("lp_moic"), None),
+        ("", None, None),
+        ("Senior Debt at Max Price", offer.get("senior_debt"), CURRENCY_FULL),
+        ("LTV at Max Price", offer.get("ltv"), PCT_FORMAT),
+        ("Binding Constraint", _binding_constraint_label(offer), None),
+        ("Financing Costs", offer.get("financing_costs"), CURRENCY_FULL),
+        ("Equity Required", offer.get("total_equity"), CURRENCY_FULL),
+        # Total Basis is the UNLEVERED definition and excludes financing
+        # costs; Total Uses is the levered one and includes them. Both are
+        # shown because a reader who sees only one and subtracts debt from
+        # it gets the wrong equity (CLAUDE.md key design decision 3).
+        ("Total Basis (excl. financing)", offer.get("total_basis"),
+         CURRENCY_FULL),
+        ("Total Uses (incl. financing)", offer.get("total_uses"),
+         CURRENCY_FULL),
+        ("Unlevered IRR at This Price", offer.get("unlevered_irr"),
+         PCT_FORMAT),
+    ]
+    for label, val, fmt in items:
+        if not label:
+            row += 1
+            continue
+        emphasis = "Maximum" in label or "Achieved" in label
+        ws.cell(row=row, column=1,
+                value=label).font = BOLD_FONT if emphasis else LABEL_FONT
+        cell = ws.cell(row=row, column=2, value=val)
+        if fmt and val is not None and not isinstance(val, str):
+            cell.number_format = fmt
+        cell.font = BOLD_FONT if emphasis else VALUE_FONT
+        row += 1
+
+    if offer.get("monotonicity_warning"):
+        row += 1
+        ws.cell(row=row, column=1,
+                value="WARNING").font = BOLD_FONT
+        ws.cell(row=row, column=2, value=offer["monotonicity_warning"])
+        row += 1
+
+    # No LP net figure without its stamp — the same rule the Levered
+    # Returns sheet and the memo enforce (CLAUDE.md key design decision 7).
+    stamp = offer.get("assumption_stamp") or []
+    if stamp:
+        row += 1
+        row = _write_section_header(ws, row, "Levered Assumptions Applied",
+                                    cols=2)
+        for entry in stamp:
+            ws.cell(row=row, column=1,
+                    value=entry.get("question")).font = LABEL_FONT
+            ws.cell(row=row, column=2,
+                    value=entry.get("label")).font = VALUE_FONT
+            row += 1
+    return row
+
+
+def _binding_constraint_label(offer: dict) -> str:
+    from model.debt import CONSTRAINT_LABELS
+    key = (offer or {}).get("binding_constraint")
+    return CONSTRAINT_LABELS.get(key, key or "n/a")
 
 
 def _build_value_add_tab(ws, va_results: dict, va_max_offer: dict, cim_data):

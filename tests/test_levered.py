@@ -1381,3 +1381,159 @@ def test_a_carried_forward_unimplemented_convention_does_not_500_the_page():
     assert form.is_valid(), form.errors
     form._validate_levered_terms({"wf_pref_compounding": "quarterly"})
     assert "Waterfall terms" in str(form.non_field_errors())
+
+
+# ── Item E4 — the levered max offer reaches all three surfaces ───────
+
+
+def _solved_levered_offer():
+    from model.solver import solve_max_price_levered
+    return solve_max_price_levered(adjusted_ttm_noi=300_000)
+
+
+def test_the_levered_max_offer_reaches_the_memo(tmp_path, mock_cim_data,
+                                                oracle_a):
+    from docx import Document
+
+    from output.memo_writer import generate_memo
+
+    offer = _solved_levered_offer()
+    # Section 6 returns early without scenarios, and the engine never
+    # produces a levered max offer without them either — so a fixture
+    # pairing an offer with no scenarios tests a state that cannot exist.
+    path = generate_memo(
+        property_name="E4 Memo", cim_data=mock_cim_data, gate_results=[],
+        market_analysis={}, physical_analysis={}, financial_analysis={},
+        rent_analysis={},
+        scenario_results=_levered_run(oracle_a)["scenario_results"],
+        value_add={}, risk_analysis={}, max_offer={},
+        levered_max_offer=offer, output_dir=str(tmp_path))
+    text = "\n".join(p.text for p in Document(path).paragraphs)
+
+    assert "LP NET IRR" in text
+    assert f"{offer['max_price']:,.0f}" in text
+    # The stack at that price, not just the price — a max offer nobody can
+    # finance is not an offer.
+    assert f"{offer['senior_debt']:,.0f}" in text
+    assert f"{offer['total_equity']:,.0f}" in text
+    # Same rule as every other LP net figure: the stamp travels with it.
+    assert "pref" in text.lower()
+
+
+def test_the_memo_omits_the_levered_max_offer_when_no_loan_was_priced(
+        tmp_path, mock_cim_data, oracle_a):
+    """A block of N/A reads as a failed calculation rather than an absent
+    one — the same contract `_add_levered_returns` already keeps.
+
+    Scenarios ARE supplied, so section 6 renders in full and the absence
+    of the levered paragraph is the thing under test rather than an early
+    return hiding it.
+    """
+    from docx import Document
+
+    from output.memo_writer import generate_memo
+
+    path = generate_memo(
+        property_name="E4 None", cim_data=mock_cim_data, gate_results=[],
+        market_analysis={}, physical_analysis={}, financial_analysis={},
+        rent_analysis={},
+        scenario_results=_levered_run(oracle_a)["scenario_results"],
+        value_add={}, risk_analysis={}, max_offer={},
+        levered_max_offer=None, output_dir=str(tmp_path))
+    text = "\n".join(p.text for p in Document(path).paragraphs)
+    assert "6. Valuation & Returns" in text     # section 6 really rendered
+    assert "LP NET IRR" not in text
+
+
+def test_the_levered_max_offer_reaches_the_workbook(tmp_path, mock_cim_data):
+    from openpyxl import load_workbook
+
+    from output.excel_writer import generate_excel
+
+    offer = _solved_levered_offer()
+    path = generate_excel(
+        property_name="E4 Model", cim_data=mock_cim_data,
+        financial_analysis={}, scenario_results={}, sensitivity={},
+        max_offer={}, levered_max_offer=offer, output_dir=str(tmp_path))
+    ws = load_workbook(path)["Max Offer"]
+    cells = {ws.cell(row=r, column=1).value: ws.cell(row=r, column=2).value
+             for r in range(1, ws.max_row + 1)}
+
+    assert cells["Maximum Purchase Price"] == pytest.approx(
+        offer["max_price"], abs=CENT)
+    assert cells["Achieved LP Net IRR"] == pytest.approx(offer["lp_net_irr"])
+    assert cells["Senior Debt at Max Price"] == pytest.approx(
+        offer["senior_debt"], abs=CENT)
+    # Both basis definitions, because subtracting debt from the wrong one
+    # gives the wrong equity (CLAUDE.md key design decision 3).
+    assert cells["Total Basis (excl. financing)"] == pytest.approx(
+        offer["total_basis"], abs=CENT)
+    assert cells["Total Uses (incl. financing)"] == pytest.approx(
+        offer["total_uses"], abs=CENT)
+    # The unlevered header must still say it is unlevered — two prices on
+    # one sheet solved to different bars.
+    headers = {ws.cell(row=r, column=1).value for r in range(1, ws.max_row + 1)}
+    assert "Maximum Offer Price Derivation (Unlevered)" in headers
+    assert "Maximum Offer Price Derivation (Levered — LP Net)" in headers
+
+
+def test_the_workbook_omits_the_levered_max_offer_when_absent(tmp_path,
+                                                              mock_cim_data):
+    from openpyxl import load_workbook
+
+    from output.excel_writer import generate_excel
+
+    path = generate_excel(
+        property_name="E4 No Offer", cim_data=mock_cim_data,
+        financial_analysis={}, scenario_results={}, sensitivity={},
+        max_offer={}, levered_max_offer=None, output_dir=str(tmp_path))
+    ws = load_workbook(path)["Max Offer"]
+    headers = {ws.cell(row=r, column=1).value for r in range(1, ws.max_row + 1)}
+    assert "Maximum Offer Price Derivation (Levered — LP Net)" not in headers
+
+
+@pytest.mark.django_db
+def test_the_returns_tab_renders_the_levered_max_offer_card():
+    """Render it, do not trust the context dict — Django resolves a
+    missing variable to the empty string, so a mis-named key renders a
+    blank card and every context assertion still passes."""
+    from django.template.loader import render_to_string
+
+    from webapp.results import returns_context
+
+    offer = _solved_levered_offer()
+    html = render_to_string("webapp/_tab_returns.html",
+                            returns_context({"levered_max_offer": offer}))
+    assert "Max Offer — LP Net" in html
+    assert f"${offer['max_price']:,.0f}" in html
+    # The target is on the card because it is NOT the unlevered target.
+    assert "15.0%" in html
+    # `coerced_region` is ordinary and must not raise a badge on its own.
+    assert "CHECK EXIT CAP" not in html
+
+
+@pytest.mark.django_db
+def test_the_returns_tab_omits_the_card_on_runs_stored_before_e4():
+    from django.template.loader import render_to_string
+
+    from webapp.results import returns_context
+
+    html = render_to_string("webapp/_tab_returns.html", returns_context({}))
+    assert "Max Offer — LP Net" not in html
+    assert "Max Offer — Static" in html      # the unlevered card is untouched
+
+
+@pytest.mark.django_db
+def test_the_returns_tab_flags_an_observed_monotonicity_inversion():
+    """The badge is driven by `monotonicity_warning` only. If it were
+    driven by `coerced_region` it would fire on most deals and be
+    ignored."""
+    from django.template.loader import render_to_string
+
+    from webapp.results import returns_context
+
+    offer = {**_solved_levered_offer(),
+             "monotonicity_warning": "LP net IRR RISES with price ..."}
+    html = render_to_string("webapp/_tab_returns.html",
+                            returns_context({"levered_max_offer": offer}))
+    assert "CHECK EXIT CAP" in html
