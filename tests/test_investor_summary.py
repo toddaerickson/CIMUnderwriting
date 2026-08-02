@@ -408,8 +408,15 @@ def test_thin_deal_omits_the_market_snapshot(tmp_path):
         market_analysis={}, physical_analysis={}, scenario_results={},
         risk_analysis={}, gate_results=None, sources_uses=None,
         levered=None, output_dir=str(tmp_path)))
+    # The section with no data at all is omitted...
     assert "Market Snapshot" not in body
-    assert "N/A" not in body
+    assert "Scenario Returns" not in body
+    # ...but gaps inside a section that DOES render are shown, not
+    # dropped: an LP cannot tell a missing metric from an uncomputed one
+    # if the row simply vanishes.
+    assert "Key Metrics" in body
+    assert "Entry Cap" in body
+    assert "N/A" in body
 
 
 # ── The filename helper is now shared, and disambiguates ─────────────

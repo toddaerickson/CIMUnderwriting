@@ -1189,12 +1189,13 @@ def _summary_key_metrics(doc, cim_data, scenario_results, sources_uses,
         rows.append(("Equity Required",
                      _fmt_currency(sources_uses.get("total_equity"))))
 
-    # Same contract as the sections around it: a metric the run could not
-    # produce is dropped, not printed as N/A. On a thin early-look CIM
-    # that leaves a short honest table rather than a column of blanks,
-    # and if nothing at all resolved there is no table.
-    rows = [(label, value) for label, value in rows
-            if set(value.split(" / ")) != {"N/A"}]
+    # Gaps are SHOWN, not dropped (operator's call). A metric the run
+    # could not produce prints as N/A, because an LP reading a short
+    # table cannot tell a metric that is missing from one that was never
+    # part of the analysis — and "we did not compute an exit cap" is
+    # itself information. This differs from the section-level rule
+    # below: a section with NO data at all is omitted, since a heading
+    # over three N/A rows conveys nothing.
     if not rows:
         return
 
