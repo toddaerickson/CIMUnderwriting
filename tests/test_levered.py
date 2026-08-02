@@ -935,12 +935,21 @@ def test_a_floating_rate_deal_prefills_a_blank_rate_and_stays_floating():
     # NaN is False) and then poisons the arithmetic downstream.
     {"debt_min_dscr": "nan"},
     {"wf_promote_split": 150},
+    # The BOUNDARY, and the case that proves the field bounds are not the
+    # whole story (review finding). `DebtTerms` rejects a decimal above
+    # 1.0, so `max_value=100` covers it; `WaterfallTerms` requires
+    # STRICTLY below 1.0, because a 100% promote hands the GP the entire
+    # residual. 100 is in bounds, converts to exactly 1.0, and is caught
+    # only by the resolver backstop.
+    {"wf_promote_split": 100},
+    {"wf_pref_rate": 100},
 ])
-def test_every_terms_raise_is_unreachable_from_the_form(bad):
-    """The bounds are chosen so a save can never store terms the model
-    will reject at run time. Each case here is a `DebtTerms` /
-    `WaterfallTerms` raise; each is refused while a human is looking at
-    the page instead of surfacing as a failed run twenty minutes later."""
+def test_a_save_can_never_store_terms_the_model_will_reject(bad):
+    """Each case is a `DebtTerms` / `WaterfallTerms` raise, refused while
+    a human is looking at the page instead of surfacing as a failed run
+    twenty minutes later. Some are caught by a field bound and some only
+    by the resolver backstop — which is the point: the form does not
+    re-list the model's rules, it runs them."""
     assert not _levered_form(**bad).is_valid()
 
 
@@ -1343,3 +1352,32 @@ def test_the_assumptions_page_renders_every_levered_input(client,
     # field — a dropdown whose other option crashes the run is a trap.
     assert 'name="wf_accrual_base"' not in html
     assert 'name="wf_catch_up"' not in html
+
+
+@pytest.mark.django_db
+def test_a_carried_forward_unimplemented_convention_does_not_500_the_page():
+    """`WaterfallTerms` splits its refusals across TWO exception types: a
+    bad NUMBER raises ValueError, an unimplemented CONVENTION raises
+    NotImplementedError. The three conventions this form deliberately
+    does not expose are exactly the NotImplementedError ones, and exactly
+    the ones that reach the prefill by being carried forward from a
+    stored override — so catching only ValueError made the fallback a lie
+    for the single case most likely to hit it (review finding).
+    """
+    from webapp.forms import AssumptionsForm, build_initial
+    from webapp.models import Deal
+
+    deal = Deal.objects.create(
+        deal_id="lev-notimpl", property_name="NotImpl",
+        assumption_overrides={"waterfall_terms": {"catch_up": True}})
+
+    # Prefill falls back to the raw merge instead of raising.
+    initial = build_initial(deal)
+    assert initial["wf_pref_rate"] == pytest.approx(8.0)
+
+    # And the same split is honoured on the way in, so a convention that
+    # reached cleaned_data becomes a form error rather than a 500.
+    form = AssumptionsForm(data={})
+    assert form.is_valid(), form.errors
+    form._validate_levered_terms({"wf_pref_compounding": "quarterly"})
+    assert "Waterfall terms" in str(form.non_field_errors())

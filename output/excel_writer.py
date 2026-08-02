@@ -9,7 +9,9 @@ Tabs:
   5. Sensitivity — IRR sensitivity table (price × exit cap)
   6. Max Offer — solved max price and derivation
   7. Sources & Uses — capital stack (model/returns_model.py)
-  8. Checks — the model error-check register (analysis/checks.py)
+  8. Levered Returns — the sized loan, LP net returns and the assumption
+     stamp (model/levered.py). Absent when a deal priced no loan.
+  9. Checks — the model error-check register (analysis/checks.py)
 """
 
 import os

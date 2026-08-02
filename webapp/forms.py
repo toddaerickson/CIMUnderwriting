@@ -395,14 +395,21 @@ class AssumptionsForm(forms.Form):
             required=False,
             choices=[(b, BASIS_LABELS[b]) for b in RESERVE_BASES],
             widget=forms.Select(attrs={"class": INPUT_CSS}))
-        # Debt, waterfall and the AM fee (item E3b). Bounds are chosen so
-        # that every `DebtTerms` / `WaterfallTerms` raise is unreachable
-        # FROM THIS FORM — `max_value=100` on the percent fields keeps a
-        # 6.5-means-6.5% typo out of a decimal field, and amortization and
-        # term cannot be zero, which would otherwise size a loan off a
-        # 1200%/yr constant. The dataclass guards stay as the backstop for
-        # the CLI and stored rows, which is what E1 built them for; this is
-        # the boundary, so the message arrives while a human is looking.
+        # Debt, waterfall and the AM fee (item E3b). `max_value=100` on the
+        # percent fields keeps a 6.5-means-6.5% typo out of a decimal
+        # field, and amortization and term cannot be zero, which would
+        # otherwise size a loan off a 1200%/yr constant.
+        #
+        # These bounds do NOT catch everything, and an earlier draft of
+        # this comment claimed they did (review finding). `DebtTerms`
+        # rejects a decimal `> 1.0`, so 100 here is fine; `WaterfallTerms`
+        # requires `pref_rate` and `promote_split` STRICTLY below 1.0,
+        # because a 100% promote hands the GP the whole residual. So
+        # `wf_promote_split=100` is in bounds, converts to exactly 1.0 and
+        # raises — which is precisely why `_validate_levered_terms` calls
+        # the real resolvers instead of trusting this list. Two guards
+        # with slightly different edges is exactly the drift that makes
+        # re-listing a dataclass's rules in a form a bad idea.
         for key in DEBT_FORM_KEYS:
             if key in DEBT_INT_KEYS:
                 self.fields[f"debt_{key}"] = forms.IntegerField(
@@ -553,6 +560,12 @@ class AssumptionsForm(forms.Form):
         Non-field errors, for the reason `_basis_error` documents:
         `add_error(field, ...)` detaches the field from `cleaned_data`,
         which the live preview reads on an invalid form by design.
+
+        `NotImplementedError` is caught alongside `ValueError` because
+        `WaterfallTerms` splits its refusals between the two: a bad NUMBER
+        raises ValueError, an unimplemented CONVENTION raises
+        NotImplementedError. Catching only the first turns the second into
+        a 500.
         """
         for label, resolve, submitted in (
                 ("Debt terms", resolve_debt_terms,
@@ -561,7 +574,7 @@ class AssumptionsForm(forms.Form):
                  submitted_waterfall_terms(cleaned))):
             try:
                 resolve(submitted)
-            except ValueError as exc:
+            except (ValueError, NotImplementedError) as exc:
                 self._basis_error(f"{label}: {exc}")
 
     def clean(self):
@@ -681,18 +694,26 @@ def _debt_waterfall_initial(initial: dict, saved: dict) -> None:
     merge so the page still renders. Nothing is swallowed: the RUN
     resolves the same dict unguarded in `webapp.services`, so the failure
     still surfaces, at the one place where it changes an answer.
+
+    BOTH exception types, not just `ValueError` (review finding). The
+    three waterfall conventions this form deliberately does not expose —
+    `accrual_base`, `am_fee_treatment`, `catch_up` — are exactly the ones
+    that raise `NotImplementedError`, and they are exactly the ones that
+    reach here by being CARRIED FORWARD from a stored override. Catching
+    only ValueError made the fallback above a lie for the single case
+    most likely to hit it: the assumptions page 500ed instead.
     """
     debt_saved = saved.get("debt_terms") or {}
     wf_saved = saved.get("waterfall_terms") or {}
     try:
         debt = dataclasses.asdict(resolve_debt_terms(debt_saved))
-    except ValueError:
+    except (ValueError, NotImplementedError):
         logger.warning("stored debt_terms override does not resolve — "
                        "prefilling the assumptions form from the raw merge")
         debt = {**cfg.DEBT_TERMS, **debt_saved}
     try:
         wf = dataclasses.asdict(resolve_waterfall_terms(wf_saved))
-    except ValueError:
+    except (ValueError, NotImplementedError):
         logger.warning("stored waterfall_terms override does not resolve — "
                        "prefilling the assumptions form from the raw merge")
         wf = {**cfg.WATERFALL_TERMS, **wf_saved}
