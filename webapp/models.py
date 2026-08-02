@@ -72,6 +72,8 @@ class AnalysisRun(models.Model):
     memo_filename = models.CharField(max_length=300, blank=True, default="")
     excel_filename = models.CharField(max_length=300, blank=True, default="")
     template_filename = models.CharField(max_length=300, blank=True, default="")
+    investor_summary_filename = models.CharField(max_length=300, blank=True,
+                                                 default="")
     created_at = models.DateTimeField(auto_now_add=True)
     finished_at = models.DateTimeField(null=True, blank=True)
 

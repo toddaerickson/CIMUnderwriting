@@ -354,7 +354,8 @@ def fake_run(monkeypatch):
         name = result.cim_data.property_name.replace(" ", "_")
         for attr, suffix in [("memo_path", "_memo.docx"),
                              ("excel_path", "_model.xlsx"),
-                             ("template_path", "_uw.xlsm")]:
+                             ("template_path", "_uw.xlsm"),
+                             ("investor_summary_path", "_summary.docx")]:
             path = os.path.join(output_dir, f"{name}{suffix}")
             with open(path, "wb") as f:
                 f.write(b"fake-office-bytes")
@@ -929,6 +930,8 @@ def test_download_endpoints_serve_run_outputs(client, operator, deals_dir, fake_
          "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"),
         ("template", "Expo_Storage_uw.xlsm",
          "application/vnd.ms-excel.sheet.macroEnabled.12"),
+        ("investor_summary", "Expo_Storage_summary.docx",
+         "application/vnd.openxmlformats-officedocument.wordprocessingml.document"),
     ]:
         resp = client.get(f"/deals/{deal.pk}/download/{kind}/")
         assert resp.status_code == 200
@@ -1009,3 +1012,25 @@ def test_a_unit_change_is_refused_once_then_saves(client, operator, deals_dir):
     deal.refresh_from_db()
     assert deal.assumption_overrides["capital_structure"]["capex_basis"] == "pct_price"
     assert deal.assumption_overrides["cim_overrides"]["capex_estimate"] == 0.02
+
+
+@pytest.mark.django_db
+def test_investor_summary_button_appears_only_once_a_run_produced_one(
+        client, operator, deals_dir, fake_run):
+    """The button is conditional on the RUN's filename, like the .xlsm
+    one. Generation is wrapped in try/except, so a deal whose summary
+    failed must not offer a link that 404s."""
+    deal = _run_deal(client, deals_dir)
+    content = client.get(f"/deals/{deal.pk}/").content.decode()
+    assert "Investor Summary (.docx)" in content
+
+    run = deal.runs.filter(status="done").first()
+    assert run.investor_summary_filename == "Expo_Storage_summary.docx"
+
+    run.investor_summary_filename = ""
+    run.save(update_fields=["investor_summary_filename"])
+    content = client.get(f"/deals/{deal.pk}/").content.decode()
+    assert "Investor Summary (.docx)" not in content
+    # ...and the endpoint itself refuses rather than serving a stale file.
+    assert client.get(
+        f"/deals/{deal.pk}/download/investor_summary/").status_code == 404

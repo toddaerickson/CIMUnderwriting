@@ -84,10 +84,14 @@ upfront, x% promote above a y% pref. No catch-up, no clawback, no tier builder.
       each labelled with the target it was solved to. Monotonicity is
       CI-guarded by a sweep across the exit-cap-coerced region, and an
       observed inversion is reported on all three surfaces.
-- [ ] **G.** LP-facing 2-page investor summary (.docx) — **ships last**, after
-      E4, so it can quote LP net IRR rather than unlevered property IRR. Its
-      build dependency is D; its *ordering* dependency is E4. GC gate before any
-      external distribution.
+- [x] **G.** LP-facing 2-page investor summary (.docx) — target-return box
+      (unlevered and LP net at equal weight, with the leverage effect), a
+      derived thesis, a "Plan to Achieve the Return" section, fee and promote
+      transparency, and risks WITH mitigants. Two pages held by a CONTENT
+      BUDGET (`output/page_budget.py`), not by a page count python-docx cannot
+      produce. Downloadable from the results page (migration `0006`).
+      **GC gate still binds before any external distribution** — the build was
+      never blocked, the distribution is.
 
 ### UI Polish
 - [ ] Extraction confidence indicators per field (green/yellow/red)
