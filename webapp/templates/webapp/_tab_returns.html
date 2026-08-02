@@ -74,8 +74,12 @@
        NOT the unlevered target — two prices solved to different bars, and
        a reader must be able to see that without opening the workbook.
        {% endcomment %}
+    {% comment %} col-span-2 below md: as the third card in a 2-column grid
+       it would otherwise sit in one cell and leave the next one empty —
+       wasted space with no legibility gain. Reverts to 1-of-3 at md+.
+       {% endcomment %}
     {% if has_levered_max_offer %}
-    <div class="rounded-md border border-slate-200 bg-white px-3 py-2">
+    <div class="rounded-md border border-slate-200 bg-white px-3 py-2 col-span-2 md:col-span-1">
       <div class="text-xs uppercase tracking-wide text-slate-500">Max Offer — LP Net {{ levered_max_offer_target }}</div>
       <div class="text-sm font-semibold">{{ levered_max_offer }}{% if levered_max_offer_unconverged %}
         <span class="ml-1 rounded px-1.5 py-0.5 text-xs font-semibold bg-amber-100 text-amber-800" title="The solver hit its iteration limit without reaching the target LP net IRR at any price in range — this is a bound, not a solved price.">DID NOT CONVERGE</span>{% endif %}{% if levered_max_offer_warning %}
