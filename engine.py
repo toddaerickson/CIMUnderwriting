@@ -66,7 +66,7 @@ class AnalysisResult:
     memo_path: str = ""
     excel_path: str = ""
     template_path: str = ""
-    summary_path: str = ""
+    investor_summary_path: str = ""
     # Metadata
     errors: list = field(default_factory=list)
     adjusted_noi: Optional[float] = None
@@ -526,16 +526,22 @@ def run_analysis(result: AnalysisResult, progress: Callable = None,
     # model that already succeeded.
     try:
         from output.memo_writer import generate_investor_summary
-        result.summary_path = generate_investor_summary(
+        result.investor_summary_path = generate_investor_summary(
             property_name=property_name,
             cim_data=cim_data,
             market_analysis=result.market_analysis,
             physical_analysis=result.physical_analysis,
             scenario_results=result.scenario_results,
             risk_analysis=result.risk_analysis,
+            rent_analysis=result.rent_analysis,
+            value_add=result.value_add,
+            va_results=result.va_results,
             gate_results=result.gate_results,
+            gate_summary=result.gate_summary,
+            check_summary=result.check_summary,
             sources_uses=result.sources_uses,
             levered=result.levered,
+            debt=result.debt,
             output_dir=output_dir,
         )
     except Exception as e:

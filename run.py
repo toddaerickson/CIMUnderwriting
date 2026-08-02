@@ -297,18 +297,22 @@ def stage_output(ctx: AnalysisContext, comp_db):
     # cost the analyst the IC memo and model that already succeeded.
     try:
         from output.memo_writer import generate_investor_summary
-        ctx.summary_path = generate_investor_summary(
+        ctx.investor_summary_path = generate_investor_summary(
             property_name=ctx.property_name,
             cim_data=ctx.cim_data,
             market_analysis=ctx.market_analysis,
             physical_analysis=ctx.physical_analysis,
             scenario_results=ctx.scenario_results,
             risk_analysis=ctx.risk_analysis,
+            rent_analysis=ctx.rent_analysis,
+            value_add=ctx.value_add_ops,
+            va_results=ctx.va_results,
             gate_results=ctx.gate_results,
+            gate_summary=ctx.gate_summary,
             sources_uses=ctx.sources_uses,
             output_dir=ctx.output_dir,
         )
-        logger.info("  Investor summary: %s", ctx.summary_path)
+        logger.info("  Investor summary: %s", ctx.investor_summary_path)
     except Exception:
         logger.warning("  Investor summary generation failed", exc_info=True)
 
@@ -555,7 +559,7 @@ def _print_summary(ctx: AnalysisContext):
     if ctx.template_path:
         print(f"  → {ctx.template_path}")
     if getattr(ctx, "summary_path", ""):
-        print(f"  → {ctx.summary_path}")
+        print(f"  → {ctx.investor_summary_path}")
     print("=" * 57)
     print()
 

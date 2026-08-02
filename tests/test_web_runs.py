@@ -214,9 +214,9 @@ def test_engine_end_to_end_writes_the_investor_summary(tmp_path, monkeypatch):
     # found", whose PATH contains the word summary on some checkouts.
     assert not [e for e in result.errors
                 if e.startswith("Investor summary")], result.errors
-    assert os.path.isfile(result.summary_path)
+    assert os.path.isfile(result.investor_summary_path)
 
-    body = "\n".join(p.text for p in Document(result.summary_path).paragraphs)
+    body = "\n".join(p.text for p in Document(result.investor_summary_path).paragraphs)
     # The legend is what makes an un-cleared copy visibly not an offer.
     assert "not an offer to sell" in body
 

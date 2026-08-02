@@ -1,132 +1,52 @@
 """Item G — the LP-facing 2-page investor summary.
 
-Two things are worth testing here and they are different:
+Three things are worth testing and they are different:
 
 1. **It is a second RENDERING, not a second computation.** Every figure
-   must trace to the same result dicts the IC memo receives. The tests
-   below feed deliberately distinctive values and assert those exact
-   values appear, so a helper that quietly recomputed anything would
-   print a different number and fail.
+   traces to the result dicts the IC memo receives. The fixtures below
+   feed deliberately distinctive values and assert those exact values
+   appear, so a helper that quietly recomputed anything would print a
+   different number and fail.
 
-2. **It fits on two pages.** The scope contract says "assert the page
-   count, do not eyeball it", and that is harder than it sounds —
-   python-docx does not paginate. Page count is decided by Word at
-   render time, and the only way to get a true count is to render
-   through a headless office suite, which is not installed and would be
-   a heavyweight new dependency for one assertion (the repo's
-   no-net-complexity guardrail).
+2. **The two-page guarantee is a CONTENT BUDGET, not a page count.**
+   python-docx does not paginate. The writer constrains Word's layout —
+   pinned geometry, EXACTLY line spacing, EXACTLY row heights — and
+   `output.page_budget` refuses a document whose content exceeds the
+   page. These tests assert the budget numbers, the pinned geometry that
+   makes the budget meaningful, and the calibration table underneath it.
+   The opt-in `soffice` test is the only thing that re-validates the
+   calibration against a real renderer.
 
-   So `_estimated_lines` below models rendered height from the document
-   body against the known page geometry and font, and the fit tests
-   assert each page's content lands inside the printable area. It is a
-   CALIBRATED ESTIMATE, not a page count, and it is named that way on
-   purpose — it catches the failure that actually happens (a deal whose
-   content grows past the page) without pretending to be a renderer.
-   Its companion is the structural test: exactly one page break, so the
-   document is two pages by construction as long as the content fits.
+3. **The disclosures cannot be dropped.** The securities legend and the
+   levered assumption stamp are asserted directly, including on the
+   degraded paths, because those are the renderings most likely to skip
+   a block.
 """
 
-import os
+import shutil
+import subprocess
 
 import pytest
 from docx import Document
+from docx.shared import Inches
 
 import config as cfg
-from output.memo_writer import (_SUMMARY_BODY_PT, _SUMMARY_MAX_RISKS,
-                                _SUMMARY_PAGE_MARGIN_IN,
-                                generate_investor_summary)
+from output import MAX_FILENAME_STEM, safe_filename
+from output.memo_writer import (_IS_BODY_PT, _IS_HEAD_PT,
+                                _IS_MAX_MITIGANT_CHARS, _IS_MAX_NAME_CHARS,
+                                _IS_MICRO_PT, _SUMMARY_LEGEND, _derive_thesis,
+                                _is_build, generate_investor_summary)
+from output.page_budget import (InvestorSummaryOverflow,
+                                InvestorSummaryUnderflow, MARGIN_X_IN,
+                                MARGIN_Y_IN, PAGE_BUDGET_PT, PAGE_HEIGHT_IN,
+                                PAGE_MIN_PT, PAGE_WIDTH_IN, estimate_lines,
+                                text_width_pt)
 
-# ── Page geometry ────────────────────────────────────────────────────
-# US Letter, the python-docx default. Printable height is what is left
-# after the margins `generate_investor_summary` sets.
-_PAGE_HEIGHT_IN = 11.0
-_PRINTABLE_IN = _PAGE_HEIGHT_IN - 2 * _SUMMARY_PAGE_MARGIN_IN
-
-# Calibri at 10pt sets on roughly 12pt of leading; Word's default
-# paragraph spacing adds ~8pt after each block-level element. Both are
-# expressed in inches so the budget is in the same unit as the page.
-_LINE_IN = (_SUMMARY_BODY_PT * 1.2) / 72.0
-_BLOCK_SPACING_IN = 8.0 / 72.0
-# Characters per line at 10pt Calibri across the 7.1in text column, and
-# the same density expressed per inch so table cells can be measured
-# against their own (much narrower) column width.
-_TEXT_COLUMN_IN = 8.5 - 2 * _SUMMARY_PAGE_MARGIN_IN
-_CHARS_PER_LINE = 110
-_CHARS_PER_IN = _CHARS_PER_LINE / _TEXT_COLUMN_IN
-# Cell padding, on top of however many lines the cell text wraps to.
-_TABLE_ROW_PAD_IN = _LINE_IN * 0.35
-
-
-def _wrapped_lines(text, width_in) -> int:
-    return max(1, -(-len(text or "") // max(1, int(_CHARS_PER_IN * width_in))))
-
-
-def _estimated_height_in(blocks) -> float:
-    """Estimated rendered height, in inches, of a list of docx blocks.
-
-    Table rows are measured by the TALLEST cell, wrapped against that
-    cell's own column width — not assumed to be one line. The risks
-    table puts up to `_SUMMARY_MAX_RISK_CHARS` into a ~2.4in column,
-    which wraps to four or five lines; pricing that row as one line
-    would let the estimate pass while the real page overflowed, which
-    is precisely the failure this test exists to catch.
-    """
-    total = 0.0
-    for kind, payload in blocks:
-        if kind == "table":
-            rows, cols = payload
-            col_in = _TEXT_COLUMN_IN / max(1, cols)
-            for cells in rows:
-                tallest = max(_wrapped_lines(c, col_in) for c in cells)
-                total += tallest * _LINE_IN + _TABLE_ROW_PAD_IN
-            total += _BLOCK_SPACING_IN
-        else:
-            text, size_pt = payload
-            lines = _wrapped_lines(text, _TEXT_COLUMN_IN)
-            total += lines * (size_pt * 1.2) / 72.0 + _BLOCK_SPACING_IN
-    return total
-
-
-def _pages(path):
-    """Split the document body into pages at explicit page breaks.
-
-    Returns a list of block lists, one per page, walking the body in
-    document order so tables and paragraphs stay interleaved.
-    """
-    from docx.table import Table
-    from docx.text.paragraph import Paragraph
-
-    doc = Document(path)
-    body = doc.element.body
-    pages, current = [], []
-
-    for child in body.iterchildren():
-        if child.tag.endswith("}p"):
-            para = Paragraph(child, doc)
-            size = (para.runs[0].font.size.pt
-                    if para.runs and para.runs[0].font.size
-                    else _SUMMARY_BODY_PT)
-            if "w:br" in child.xml and 'w:type="page"' in child.xml:
-                pages.append(current)
-                current = []
-                continue
-            current.append(("p", (para.text, size)))
-        elif child.tag.endswith("}tbl"):
-            table = Table(child, doc)
-            rows = [[c.text for c in row.cells] for row in table.rows]
-            cols = max((len(r) for r in rows), default=1)
-            current.append(("table", (rows, cols)))
-    pages.append(current)
-    return pages
-
-
-def _text(path) -> str:
-    doc = Document(path)
-    parts = [p.text for p in doc.paragraphs]
-    for table in doc.tables:
-        for row in table.rows:
-            parts += [c.text for c in row.cells]
-    return "\n".join(parts)
+_BUILD_ARGS = ("property_name", "cim_data", "market_analysis",
+               "physical_analysis", "scenario_results", "risk_analysis",
+               "rent_analysis", "value_add", "va_results", "gate_results",
+               "gate_summary", "check_summary", "sources_uses", "levered",
+               "debt", "thesis")
 
 
 # ── Fixtures ─────────────────────────────────────────────────────────
@@ -148,7 +68,8 @@ def _scenarios(**over):
     def one(irr, moic, exit_cap):
         d = {"irr": irr, "moic": moic, "exit_cap": exit_cap,
              "entry_cap": 0.065, "yield_on_cost": 0.0712,
-             "noi_projection": [1, 2, 3, 4, 5]}
+             "noi_projection": [650_000, 690_000, 720_000, 750_000, 780_000],
+             "hold_years": 5}
         d.update(over)
         return d
     return {"bear": one(0.041, 1.19, 0.0785),
@@ -156,19 +77,15 @@ def _scenarios(**over):
             "bull": one(0.211, 2.44, 0.0585)}
 
 
-# `assumption_stamp` shape mirrors model.levered._stamp — label carries
-# the RESOLVED convention, which is what has to reach the reader.
 STAMP = [
-    {"key": "pref_rate", "label": "8.00% preferred return, annually "
-                                  "compounded on unreturned capital"},
+    {"key": "pref_rate", "label": "8.00% preferred return, annually compounded"},
     {"key": "promote_split", "label": "20% promote on the LP residual"},
-    {"key": "am_fee_treatment", "label": "Asset-management fee charged above "
-                                         "the waterfall — 1.00% of invested "
-                                         "equity, measured at the start of "
-                                         "each period"},
+    {"key": "am_fee_treatment",
+     "label": "AM fee above the waterfall - 1.00% of invested equity"},
 ]
 LEVERED = {"base": {"lp_net_irr": 0.1567, "lp_moic": 2.03,
-                    "assumption_stamp": STAMP},
+                    "am_fee_total": 208_000, "am_fee_pct": 0.01,
+                    "gp_promote": 415_000, "assumption_stamp": STAMP},
            "bear": {"lp_net_irr": 0.012, "lp_moic": 1.05},
            "bull": {"lp_net_irr": 0.2891, "lp_moic": 2.99}}
 
@@ -176,190 +93,271 @@ SOURCES_USES = {"total_uses": 10_350_000, "senior_debt": 6_400_000,
                 "total_equity": 3_950_000, "gp_equity": 395_000,
                 "lp_equity": 3_555_000, "gp_coinvest_pct": 0.10}
 
-PHYSICAL = {"price_vs_replacement": {
-    "comparable": True, "asking_price": 10_000_000, "asking_per_sf": 200.0,
-    "replacement_cost": 13_000_000, "discount_to_replacement": 0.2308}}
+DEBT = {"loan": 6_400_000, "binding_constraint": "max_ltv"}
 
-MARKET = {"demographics": {"population_3mi": 87_450,
-                           "median_hhi_3mi": 64_300},
+PHYSICAL = {"property_profile": {
+                "property_name": "Sunbelt Storage Portfolio",
+                "city_state": "Abilene, TX", "year_built": 2005,
+                "nrsf": 50_000, "total_units": 420, "cc_pct": 0.45,
+                "physical_occupancy": 0.92, "economic_occupancy": 0.78},
+            "price_vs_replacement": {
+                "comparable": True, "asking_price": 10_000_000,
+                "asking_per_sf": 200.0, "replacement_cost": 13_000_000,
+                "discount_to_replacement": 0.2308}}
+
+MARKET = {"demographics": {"population_3mi": 87_450, "median_hhi_3mi": 64_300},
           "msa_info": {"msa_name": "Abilene", "is_top_50": False}}
 
 GATES = [{"gate": 5, "name": "No Oversupply Flag",
           "actual": "6.2 SF/capita", "result": "PASS"}]
 
 RISKS = {"risks": [
-    {"risk": "Low severity item", "severity": "Low", "mitigation": "Monitor",
-     "category": "Market"},
+    {"risk": "Low severity item", "severity": "Low", "mitigation": "Monitor"},
     {"risk": "Property tax reassessment on sale", "severity": "High",
-     "mitigation": "Model reassessed basis", "category": "Financial"},
+     "mitigation": "Model reassessed basis at the state formula"},
     {"risk": "Economic occupancy 14 points below physical", "severity": "High",
-     "mitigation": "Audit concessions and delinquency", "category": "Ops"},
+     "mitigation": "Audit concessions and delinquency in diligence"},
     {"risk": "New supply within 3 miles", "severity": "Medium",
-     "mitigation": "Confirm pipeline", "category": "Market"},
-]}
+     "mitigation": "Confirm pipeline with the planning department"}],
+    "why_deal_could_fail": ["The in-place-to-market rent gap closes from "
+                            "above in a falling street-rate market."]}
+
+VALUE_ADD = {"revenue_opportunities": [
+                 {"category": "Economic Occupancy Recovery",
+                  "description": "Close the 14-point collection gap.",
+                  "est_annual_impact": 118_000, "timeline": "6-12 months"},
+                 {"category": "Revenue Management / ECRI",
+                  "description": "Institute a quarterly ECRI programme.",
+                  "est_annual_impact": 62_000, "timeline": "12-18 months"}],
+             "expense_opportunities": [
+                 {"category": "Payroll", "description": "Move to kiosk staffing.",
+                  "est_annual_impact": 24_000, "timeline": "6 months"}],
+             "estimated_noi_uplift": 204_000}
+
+VA_RESULTS = {"base": {"current_occupancy": 0.78, "target_occupancy": 0.88,
+                       "months_to_stabilize": 24, "in_place_rent_psf": 11.40,
+                       "target_rent_psf": 13.10, "market_rent_psf": 13.75}}
+
+RENT = {"rent_gap_pct": 0.14}
+GATE_SUMMARY = {"recommendation": "PROCEED TO DILIGENCE"}
+CHECK_SUMMARY = {"blocking_failed": 0}
 
 
-def _generate(tmp_path, **over):
+def _kwargs(**over):
     kw = dict(property_name="Sunbelt Storage Portfolio", cim_data=_CIM(),
               market_analysis=MARKET, physical_analysis=PHYSICAL,
               scenario_results=_scenarios(), risk_analysis=RISKS,
-              gate_results=GATES, sources_uses=SOURCES_USES,
-              levered=LEVERED, output_dir=str(tmp_path))
+              rent_analysis=RENT, value_add=VALUE_ADD, va_results=VA_RESULTS,
+              gate_results=GATES, gate_summary=GATE_SUMMARY,
+              check_summary=CHECK_SUMMARY, sources_uses=SOURCES_USES,
+              levered=LEVERED, debt=DEBT, thesis=None)
     kw.update(over)
-    return generate_investor_summary(**kw)
+    return kw
 
 
-# ── It fits on two pages ─────────────────────────────────────────────
-
-def test_document_has_exactly_one_page_break(tmp_path):
-    """Two pages by construction. More than one break means a section
-    escaped the fixed layout; none means page 2's content ran onto
-    page 1."""
-    assert len(_pages(_generate(tmp_path))) == 2
+def _build(**over):
+    kw = _kwargs(**over)
+    return _is_build(**{k: kw[k] for k in _BUILD_ARGS})
 
 
-def test_estimated_content_fits_both_pages(tmp_path):
-    """Calibrated height estimate, not a render — see the module
-    docstring for why."""
-    for i, page in enumerate(_pages(_generate(tmp_path)), start=1):
-        height = _estimated_height_in(page)
-        assert height <= _PRINTABLE_IN, (
-            f"page {i} estimated at {height:.2f}in against a "
-            f"{_PRINTABLE_IN:.2f}in printable area")
+def _generate(tmp_path, **over):
+    return generate_investor_summary(output_dir=str(tmp_path), **_kwargs(**over))
 
 
-def test_fits_with_the_longest_realistic_deal(tmp_path):
-    """The acceptance criterion's worst case: longest property name, all
-    three scenarios populated, the maximum number of risks each at
-    maximum message length. If truncation is doing its job this fits with
-    the same margin as the ordinary deal."""
-    long_risks = {"risks": [
-        {"risk": "R" * 400, "severity": sev, "mitigation": "M" * 400,
-         "category": "Market"}
-        for sev in ("High", "High", "High", "Medium", "Medium", "Low")]}
-    path = _generate(
-        tmp_path,
-        property_name="P" * 300,
-        cim_data=_CIM(property_name="P" * 300, address="A" * 200,
-                      city="C" * 100, state="TX"),
-        risk_analysis=long_risks)
-
-    pages = _pages(path)
-    assert len(pages) == 2
-    for i, page in enumerate(pages, start=1):
-        height = _estimated_height_in(page)
-        assert height <= _PRINTABLE_IN, (
-            f"page {i} overflows at {height:.2f}in with maximal content")
+def _text(path) -> str:
+    doc = Document(path)
+    parts = [p.text for p in doc.paragraphs]
+    for table in doc.tables:
+        for row in table.rows:
+            parts += [c.text for c in row.cells]
+    return "\n".join(parts)
 
 
-def test_risks_are_capped_and_the_omission_is_disclosed(tmp_path):
-    """Printing three risks without saying how many exist would read as
-    'there are three risks', which is the one thing a condensation must
-    not imply."""
+def longest_realistic_deal():
+    """Worst case that could actually occur: a name at the cap, three
+    scenarios, three risks each at the mitigant cap, widest currency."""
+    long_mit = "M" * _IS_MAX_MITIGANT_CHARS
+    return _kwargs(
+        property_name="P" * _IS_MAX_NAME_CHARS,
+        cim_data=_CIM(property_name="P" * _IS_MAX_NAME_CHARS,
+                      asking_price=987_654_321, price_per_sf=1234.56),
+        risk_analysis={"risks": [
+            {"risk": "R" * 120, "severity": s, "mitigation": long_mit}
+            for s in ("High", "High", "Medium")],
+            "why_deal_could_fail": ["F" * 200]},
+        sources_uses={**SOURCES_USES, "total_uses": 987_654_321,
+                      "total_equity": 456_789_012, "senior_debt": 530_865_309},
+    )
+
+
+# ── The two-page content budget ──────────────────────────────────────
+
+def test_budget_fits_both_pages():
+    _, p1, p2 = _build()
+    assert p1.total_pt <= PAGE_BUDGET_PT, f"page 1 {p1.total_pt:.0f}pt"
+    assert p2.total_pt <= PAGE_BUDGET_PT, f"page 2 {p2.total_pt:.0f}pt"
+    # An under-filled page 2 means the ladder ate content that belonged.
+    assert p2.total_pt >= PAGE_MIN_PT, f"page 2 only {p2.total_pt:.0f}pt"
+
+
+def test_budget_fits_the_longest_realistic_deal():
+    kw = longest_realistic_deal()
+    _, p1, p2 = _is_build(**{k: kw[k] for k in _BUILD_ARGS})
+    assert p1.total_pt <= PAGE_BUDGET_PT, f"page 1 {p1.total_pt:.0f}pt"
+    assert p2.total_pt <= PAGE_BUDGET_PT, f"page 2 {p2.total_pt:.0f}pt"
+
+
+def test_over_budget_raises_rather_than_shrinking(tmp_path):
+    """No silent shrink-to-fit. The document goes to investors; a page
+    that quietly lost a block is worse than a loud failure."""
+    monster = {"risks": [{"risk": "R" * 400, "severity": "High",
+                          "mitigation": "M" * 400} for _ in range(3)],
+               "why_deal_could_fail": ["F" * 4000]}
+    with pytest.raises(InvestorSummaryOverflow) as exc:
+        generate_investor_summary(output_dir=str(tmp_path),
+                                  **_kwargs(risk_analysis=monster))
+    assert "over by" in str(exc.value)
+
+
+def test_under_filled_page_two_also_raises():
+    """The one-sided assert this replaces would have passed a nearly
+    blank page 2. The floor applies only to a COMPLETE deal — see
+    `test_thin_deal_still_produces_a_document` for the other side."""
+    from output.page_budget import PageBudget
+    budget = PageBudget("Page 2")
+    budget.add("tiny", 10.0)
+    with pytest.raises(InvestorSummaryUnderflow, match="rendered only"):
+        budget.check(floor_pt=PAGE_MIN_PT)
+
+
+# ── The geometry the budget depends on ───────────────────────────────
+
+def test_saved_document_pins_page_and_margins(tmp_path):
+    """A later margin edit must fail here, not in an LP's inbox — the
+    budget is computed against these exact numbers."""
+    doc = Document(_generate(tmp_path))
+    section = doc.sections[0]
+    assert section.page_width == Inches(PAGE_WIDTH_IN)
+    assert section.page_height == Inches(PAGE_HEIGHT_IN)
+    assert section.left_margin == Inches(MARGIN_X_IN)
+    assert section.right_margin == Inches(MARGIN_X_IN)
+    assert section.top_margin == Inches(MARGIN_Y_IN)
+    assert section.bottom_margin == Inches(MARGIN_Y_IN)
+
+
+def test_styles_carry_the_sizes_the_budget_assumes(tmp_path):
+    doc = Document(_generate(tmp_path))
+    for name, size in (("LPBody", _IS_BODY_PT), ("LPHead", _IS_HEAD_PT),
+                       ("LPMicro", _IS_MICRO_PT)):
+        assert doc.styles[name].font.size.pt == size
+        assert doc.styles[name].font.name == "Calibri"
+
+
+def test_exactly_one_page_break_and_it_is_page_break_before(tmp_path):
+    """`add_page_break()` injects a stray empty paragraph, which is a
+    line of unbudgeted height. `page_break_before` does not."""
+    xml = Document(_generate(tmp_path)).element.body.xml
+    assert xml.count("pageBreakBefore") == 1
+    assert 'w:type="page"' not in xml
+
+
+# ── The calibration underneath the budget ────────────────────────────
+
+@pytest.mark.parametrize("text,size,col_pt,expected", [
+    ("", 9, 300, 1),
+    ("short", 9, 300, 1),
+    ("i" * 100, 9, 300, 1),          # narrow bucket
+    ("M" * 100, 9, 300, 3),          # wide bucket
+    ("x" * 100, 9, 300, 2),          # default bucket
+    ("x" * 100, 9, 150, 4),          # half the column, double the lines
+])
+def test_golden_calibration_table(text, size, col_pt, expected):
+    assert estimate_lines(text, size, col_pt) == expected
+
+
+def test_bold_is_measured_wider_than_regular():
+    assert text_width_pt("Sample", 9, bold=True) > text_width_pt("Sample", 9)
+
+
+def test_non_latin_is_measured_wide_not_rejected():
+    """This guard used to RAISE on non-ASCII. The pipeline immediately
+    fed it a "≥" from `analysis.filters`' own gate text and killed the
+    document, so it now measures unknown glyphs at full width — the
+    direction the budget is allowed to be wrong in."""
+    wide = text_width_pt("自自自", 9)
+    latin = text_width_pt("xxx", 9)
+    assert wide > latin
+
+
+def test_pipeline_symbols_are_folded_before_they_reach_the_budget(tmp_path):
+    """Regression: gate text carries >=, risk text carries arrows. A
+    maths symbol in a risk description must not fail the document."""
+    body = _text(_generate(tmp_path, risk_analysis={"risks": [
+        {"risk": "Population >= 50,000 unverified", "severity": "High",
+         "mitigation": "Order a demographic report; occupancy -> target"}]}))
+    assert ">= 50,000" in body
+    assert "-> target" in body
+
+
+def test_smart_quotes_from_a_cim_do_not_fail_the_document(tmp_path):
+    """Broker PDFs are full of typographic punctuation. It is folded to
+    ASCII before it reaches a cell, so it cannot trip the width table."""
+    name = "O’Brien’s “Premier” Storage — Abilene"
+    body = _text(_generate(tmp_path, cim_data=_CIM(property_name=name),
+                           property_name=name))
+    assert "O'Brien's" in body
+
+
+# ── Second rendering, never a second computation ─────────────────────
+
+def test_target_return_box_shows_both_lenses_and_the_delta(tmp_path):
     body = _text(_generate(tmp_path))
-    assert "Property tax reassessment on sale" in body   # High
-    assert "Economic occupancy 14 points below physical" in body  # High
-    assert "New supply within 3 miles" in body           # Medium, 3rd
-    assert "Low severity item" not in body               # cut
-    assert f"{_SUMMARY_MAX_RISKS} of {len(RISKS['risks'])}" in body
+    assert "12.3%" in body          # unlevered base IRR
+    assert "15.7%" in body          # LP net base IRR
+    assert "1.87x" in body and "2.03x" in body
+    # Leverage delta: 15.67% - 12.34% = +333 bps, a difference between
+    # two published figures.
+    assert "+333 bps" in body
+    assert "accretive" in body
 
 
-# ── It renders the model's numbers, and does not compute its own ─────
+def test_dilutive_leverage_is_stated_plainly(tmp_path):
+    """On config defaults the loan constant frequently sits above yield
+    on cost, so LP net can land BELOW unlevered. A sophisticated
+    allocator spots that instantly; the document must not bury it."""
+    dilutive = {**LEVERED, "base": {**LEVERED["base"], "lp_net_irr": 0.0912}}
+    body = _text(_generate(tmp_path, levered=dilutive))
+    assert "DILUTIVE" in body
+    assert "-322 bps" in body
 
-def test_figures_are_read_from_the_result_dicts(tmp_path):
+
+def test_figures_trace_to_the_result_dicts(tmp_path):
     body = _text(_generate(tmp_path))
-    assert "12.3%" in body            # base unlevered IRR
-    assert "1.87x" in body            # base unlevered MOIC
-    assert "15.7%" in body            # LP net IRR
-    assert "2.03x" in body            # LP net MOIC
-    assert "6.9%" in body             # base exit cap
-    assert "$3,950,000" in body       # equity required
-    assert "$6,400,000" in body       # senior debt
-    assert "87,450" in body           # 3-mile population
-    assert "6.2 SF/capita" in body    # read off gate 5, not recomputed
+    assert "$10,000,000" in body            # asking price
+    assert "23.1%" in body                  # discount to replacement
+    assert "6.500%" in body                 # entry cap (3dp, as _fmt_cap)
+    assert "6.850%" in body                 # base exit cap
+    assert "$6,400,000" in body             # senior debt
+    assert "$10,350,000" in body            # total uses
 
 
-def test_scenario_table_carries_all_three_cases(tmp_path):
+def test_fee_and_promote_load_is_volunteered(tmp_path):
+    """This audience asks what was deducted to reach an LP net number
+    within ten minutes. Printing it converts an interrogation into a
+    checked box."""
     body = _text(_generate(tmp_path))
-    for value in ("4.1%", "12.3%", "21.1%"):     # bear / base / bull IRR
-        assert value in body
-    for value in ("1.2%", "28.9%"):              # bear / bull LP net IRR
-        assert value in body
+    assert "$208,000" in body               # AM fee, hold total
+    assert "1.00%/yr" in body
+    assert "$415,000" in body               # GP promote, hold total
+    assert "10% of equity" in body          # GP co-invest
 
-
-def test_thesis_bullets_restate_computed_facts(tmp_path):
-    body = _text(_generate(tmp_path))
-    # Basis bullet quotes the replacement-cost discount it was given.
-    assert "23.1%" in body
-    assert "$13,000,000" in body
-    # Spread bullet fires because 92% - 78% clears the config threshold.
-    assert cfg.GATES["econ_phys_spread_flag"] <= 0.14
-    assert "14-point spread" in body
-
-
-def test_thesis_omits_the_spread_bullet_below_the_config_threshold(tmp_path):
-    """The bullet is gated on the same constant the mismanagement screen
-    uses, so it cannot claim an opportunity the gate would not flag."""
-    body = _text(_generate(tmp_path, cim_data=_CIM(physical_occupancy=0.92,
-                                                   economic_occupancy=0.90)))
-    assert "spread" not in body.lower()
-
-
-# ── It degrades cleanly ──────────────────────────────────────────────
-
-def test_unlevered_deal_omits_the_levered_rows(tmp_path):
-    """Scope contract: 'degrades cleanly when the levered layer is
-    absent'. Omitted, not printed as a row of N/A."""
-    body = _text(_generate(tmp_path, levered=None))
-    assert "LP Net IRR" not in body
-    assert "12.3%" in body            # the unlevered screen still prints
-    assert "Unlevered IRR" in body
-
-
-def test_thin_deal_still_produces_a_document(tmp_path):
-    """The early-look CIM: no scenarios, no capital stack, no risks, no
-    market data. This is the artifact most likely to be generated from
-    thin data, so it must not raise."""
-    path = generate_investor_summary(
-        property_name="Thin Deal", cim_data=_CIM(asking_price=None,
-                                                 price_per_sf=None,
-                                                 physical_occupancy=None,
-                                                 economic_occupancy=None),
-        market_analysis={}, physical_analysis={}, scenario_results={},
-        risk_analysis={}, gate_results=None, sources_uses=None,
-        levered=None, output_dir=str(tmp_path))
-
-    assert os.path.isfile(path)
-    body = _text(path)
-    assert "Thin Deal" in body
-    assert "Scenario Returns" not in body
-    assert "Capital Stack" not in body
-
-
-# ── The legal legend is not optional ─────────────────────────────────
-
-def test_every_document_carries_the_securities_legend(tmp_path):
-    """Distribution of this document sits behind the operator's General
-    Counsel gate. The legend is what makes an un-cleared copy visibly
-    not an offer, so it ships on every rendering including the thin one.
-    """
-    for path in (_generate(tmp_path),
-                 _generate(tmp_path, levered=None, sources_uses=None)):
-        body = _text(path)
-        assert "not an offer to sell" in body
-        assert "not investment advice" in body
-
-
-# ── CLAUDE.md decision 7: no LP net IRR without its assumption stamp ──
 
 def test_levered_figures_carry_their_assumption_stamp(tmp_path):
-    """The rule binds hardest on THIS surface: it is the only one that
-    leaves the firm, and a reader outside it has no memo section 6 and
-    no Returns tab to cross-check which conventions produced the number.
-    """
+    """CLAUDE.md key design decision 7. This is the only surface that
+    leaves the firm, so the reader has no memo section 6 to cross-check
+    which conventions produced the number."""
     body = _text(_generate(tmp_path))
-    assert "15.7%" in body                       # the LP net IRR is printed
-    for row in STAMP:                            # ...so the stamp must be too
+    for row in STAMP:
         assert row["label"] in body
     assert "subject to the final partnership agreement" in body
 
@@ -369,14 +367,95 @@ def test_unlevered_deal_gains_no_orphaned_stamp(tmp_path):
     assert "LP net returns are computed under" not in body
 
 
-# ── Regressions found in review ──────────────────────────────────────
+# ── The plan to achieve the return ───────────────────────────────────
+
+def test_plan_section_carries_initiatives_impacts_and_the_bridge(tmp_path):
+    body = _text(_generate(tmp_path))
+    assert "Plan to Achieve the Return" in body
+    assert "$204,000" in body                       # total NOI uplift
+    assert "Economic Occupancy Recovery" in body
+    assert "$118,000" in body and "6-12 months" in body
+    # The quantified bridge from the monthly engine.
+    assert "occupancy 78% -> 88%" in body
+    assert "24 months" in body
+    assert "$11.40" in body and "$13.10" in body and "$13.75" in body
+
+
+def test_stabilized_deal_falls_back_to_sources_of_return(tmp_path):
+    """No value-add narrative exists for a stabilized asset, so the
+    section says where the return comes from arithmetically — all
+    differences between figures printed on page 1."""
+    body = _text(_generate(tmp_path, value_add=None, va_results=None))
+    assert "stabilized asset" in body
+    assert "+62 bp spread" in body                  # 7.12% YoC - 6.50% cap
+    assert "20%" in body                            # NOI growth across hold
+    assert "+35 bp wider" in body                   # 6.85% exit - 6.50% entry
+
+
+# ── Risks always carry mitigants ─────────────────────────────────────
+
+def test_every_rendered_risk_carries_its_mitigant(tmp_path):
+    body = _text(_generate(tmp_path))
+    assert body.count("Mitigant:") == 3
+    assert "Audit concessions and delinquency" in body
+    assert "Primary failure mode:" in body
+
+
+def test_risks_are_ordered_by_severity_and_capped(tmp_path):
+    body = _text(_generate(tmp_path))
+    assert body.index("Property tax reassessment") < body.index("New supply")
+    assert "Low severity item" not in body          # capped at 3
+
+
+def test_mitigants_are_truncated_but_never_dropped(tmp_path):
+    body = _text(_generate(tmp_path, risk_analysis={"risks": [
+        {"risk": "A risk", "severity": "High", "mitigation": "M" * 400}]}))
+    assert "Mitigant:" in body
+    assert "..." in body
+
+
+def test_a_risk_without_a_mitigation_still_gets_a_line(tmp_path):
+    body = _text(_generate(tmp_path, risk_analysis={"risks": [
+        {"risk": "Unmitigated", "severity": "High"}]}))
+    assert "Mitigant: Under diligence." in body
+
+
+# ── Thesis: derived, or overridden ───────────────────────────────────
+
+def test_thesis_ladder_is_gated_on_computed_values():
+    bullets = _derive_thesis(_CIM(), PHYSICAL, RENT, VALUE_ADD, MARKET)
+    assert len(bullets) == 3
+    assert "23% below replacement cost" in bullets[0]
+    assert "14 points" in bullets[1]                # 92% - 78%
+    assert "14% below market" in bullets[2]
+
+
+def test_thesis_omits_the_spread_bullet_below_the_config_threshold():
+    flag = cfg.GATES["econ_phys_spread_flag"]
+    cim = _CIM(physical_occupancy=0.92, economic_occupancy=0.92 - flag / 2)
+    bullets = _derive_thesis(cim, PHYSICAL, RENT, VALUE_ADD, MARKET)
+    assert not any("trails physical" in b for b in bullets)
+
+
+def test_spread_bullet_survives_a_zero_economic_occupancy():
+    """A property collecting nothing is the loudest mismanagement case;
+    truthiness on the pair silently dropped it."""
+    bullets = _derive_thesis(_CIM(physical_occupancy=0.85,
+                                  economic_occupancy=0.0),
+                             PHYSICAL, RENT, VALUE_ADD, MARKET)
+    assert any("85 points" in b for b in bullets)
+
+
+def test_operator_override_replaces_the_derived_thesis(tmp_path):
+    body = _text(_generate(tmp_path, thesis=["Operator wrote this one."]))
+    assert "Operator wrote this one." in body
+    assert "below replacement cost" not in body
+
+
+# ── Market snapshot ──────────────────────────────────────────────────
 
 def test_msa_is_read_from_the_key_market_analysis_actually_emits(tmp_path):
-    """`analysis.market._assess_msa` emits `msa_name`, never `msa`.
-    Reading the wrong key printed "Not identified" on every deal — and
-    on a top-50 deal, the self-contradicting "Not identified — top-50
-    MSA". The original fixture used the wrong key too, so the unit tests
-    could not see it; this asserts against the real schema."""
+    """`analysis.market._assess_msa` emits `msa_name`, never `msa`."""
     from analysis.market import _assess_msa
 
     class _M:
@@ -384,54 +463,73 @@ def test_msa_is_read_from_the_key_market_analysis_actually_emits(tmp_path):
         city = "Dallas"
     real = _assess_msa(_M())
     assert "msa_name" in real
-
     body = _text(_generate(tmp_path, market_analysis={
         "demographics": {"population_3mi": 87_450}, "msa_info": real}))
-    assert "Dallas — top-50 MSA" in body
-    assert "Not identified" not in body
+    assert "Dallas - top-50 MSA" in body
 
 
-def test_spread_bullet_survives_a_zero_economic_occupancy(tmp_path):
-    """A property collecting nothing is the LOUDEST mismanagement case,
-    and truthiness on the pair silently dropped it."""
-    body = _text(_generate(tmp_path, cim_data=_CIM(physical_occupancy=0.85,
-                                                   economic_occupancy=0.0)))
-    assert "85-point spread" in body
+def test_no_msa_rank_is_ever_printed(tmp_path):
+    """`msa_info` carries a bool and a name. There is no rank number in
+    this codebase; inventing one would be a fabricated fact."""
+    assert "#" not in _text(_generate(tmp_path))
 
 
-def test_thin_deal_omits_the_market_snapshot(tmp_path):
-    """Same contract as every other section: omitted when empty, never a
-    table of N/A rows. An invented-looking market snapshot is worse on
-    an LP-facing document than a missing one."""
-    body = _text(generate_investor_summary(
-        property_name="Thin Deal", cim_data=_CIM(),
+def test_sf_per_capita_is_conditional_on_not_being_tbd(tmp_path):
+    assert "6.2 SF/capita" in _text(_generate(tmp_path))
+    hidden = _text(_generate(tmp_path, gate_results=[
+        {"gate": 5, "name": "No Oversupply Flag", "actual": "TBD"}]))
+    assert "Supply (3-mile)" not in hidden
+
+
+# ── Degradation ──────────────────────────────────────────────────────
+
+def test_thin_deal_still_produces_a_document(tmp_path):
+    path = generate_investor_summary(
+        output_dir=str(tmp_path), property_name="Thin Deal", cim_data=_CIM(),
         market_analysis={}, physical_analysis={}, scenario_results={},
-        risk_analysis={}, gate_results=None, sources_uses=None,
-        levered=None, output_dir=str(tmp_path)))
-    # The section with no data at all is omitted...
+        risk_analysis={})
+    body = _text(path)
+    assert "Thin Deal" in body
     assert "Market Snapshot" not in body
     assert "Scenario Returns" not in body
-    # ...but gaps inside a section that DOES render are shown, not
-    # dropped: an LP cannot tell a missing metric from an uncomputed one
-    # if the row simply vanishes.
-    assert "Key Metrics" in body
-    assert "Entry Cap" in body
-    assert "N/A" in body
+    assert _SUMMARY_LEGEND in body
 
 
-# ── The filename helper is now shared, and disambiguates ─────────────
+def test_every_document_carries_the_securities_legend(tmp_path):
+    for over in ({}, {"levered": None}, {"va_results": None},
+                 {"risk_analysis": {}}, {"sources_uses": None}):
+        assert _SUMMARY_LEGEND in _text(_generate(tmp_path, **over))
 
-def test_long_names_do_not_collide_across_the_writers(tmp_path):
-    """`output.safe_filename` is one definition for all three writers.
-    `excel_writer`'s private copy was uncapped, and `generate_excel` is
-    called UNWRAPPED, so a long property name aborted the whole run one
-    line after the memo succeeded."""
-    from output import MAX_FILENAME_STEM, safe_filename
 
+def test_screening_result_and_blocking_checks_reach_the_footer(tmp_path):
+    body = _text(_generate(tmp_path, check_summary={"blocking_failed": 2}))
+    assert "PROCEED TO DILIGENCE" in body
+    assert "2 blocking model check(s) unresolved" in body
+
+
+# ── The shared filename helper ───────────────────────────────────────
+
+def test_long_names_do_not_collide_across_the_writers():
+    """`excel_writer`'s private copy was uncapped, and `generate_excel`
+    is called UNWRAPPED, so a long name aborted the whole run."""
     a = "Fund IV Self-Storage Portfolio - " + "X" * 60 + " - Abilene, TX"
     b = "Fund IV Self-Storage Portfolio - " + "X" * 60 + " - Waco, TX"
     assert len(safe_filename(a)) <= MAX_FILENAME_STEM
     assert safe_filename(a) != safe_filename(b)
-    # Names that already fit are untouched, so nothing that works today
-    # gets a new filename.
     assert safe_filename("Sunbelt Storage") == "Sunbelt_Storage"
+
+
+# ── Opt-in: the only test that re-validates the calibration ──────────
+
+@pytest.mark.skipif(shutil.which("soffice") is None,
+                    reason="LibreOffice not installed; the calibration check "
+                           "is opt-in and deliberately not a CI dependency")
+def test_real_render_is_two_pages(tmp_path):
+    docx = _generate(tmp_path)
+    subprocess.run(["soffice", "--headless", "--convert-to", "pdf",
+                    "--outdir", str(tmp_path), docx],
+                   check=True, capture_output=True, timeout=180)
+    pdf = next(p for p in tmp_path.iterdir() if p.suffix == ".pdf")
+    raw = pdf.read_bytes()
+    pages = raw.count(b"/Type /Page") or raw.count(b"/Type/Page")
+    assert pages == 2, f"rendered {pages} pages"
