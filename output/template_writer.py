@@ -7,6 +7,46 @@ Excel and formulas recalculate automatically.
 
 Place your .xlsm template in the project root and set TEMPLATE_FILENAME below
 (or override via the UW_TEMPLATE_PATH environment variable).
+
+## The template never decides a value (item E3b)
+
+Every number written below reads from the run's resolved assumption set
+(config + ConfigOverride + per-deal overrides) or from the run's computed
+results. It used to assert its own: 6.5% debt at 360-month amortization
+against a model running 6.25% over 25 years, a 6%-GP / 20%-promote
+waterfall read from environment variables, a flat 3% growth ladder, a
+0.10 stabilized vacancy against a 0.88 stabilized-occupancy assumption.
+Two deliverables quoting different terms on the same deal is the failure
+mode the transparency audit raised, and after item E3a wired levered
+returns on by default it shipped on every deal.
+
+`tests/test_template_writer.py::test_no_numeric_literals_in_write_paths`
+enforces this with an AST walk, not by inspection: no numeric literal may
+appear on the VALUE side of a cell write. Structural constants — a
+column index, an at-closing zero, the template's own year-1 convention —
+are named once below, which is what makes them reviewable.
+
+## What still does not reconcile, stated rather than hidden
+
+The XLSM computes its own returns from these inputs, and two of its
+conventions are not ours. Neither is reachable from an input cell, so
+E3b stamps them here instead of papering over them:
+
+1. **The pref is an IRR hurdle** (H257 "IRR Hurdle"; H258 feeds tiers
+   2-4 through `=+H258`). `model.waterfall` runs an ACCRUAL account on
+   contributed/unreturned capital. Same 8%, different construction, so
+   the promote dollars differ. Writing `pref_rate` into H258 makes the
+   two agree on the RATE, which is as far as an input cell reaches.
+2. **The AM fee is charged on LP equity** (H254 = `K60*G254/12`, and
+   K60 is LP equity). `config.AM_FEE_BASE` is `invested_equity` —
+   GP + LP — so at a 10% GP co-invest the workbook's fee runs ~10%
+   light. The dropdown has no invested-equity option. Grossing the rate
+   up to 1.11% would make the dollars tie while printing a fee rate the
+   fund does not charge, so the true rate is written and the gap is
+   recorded here.
+
+Both are item T's to reconcile. Do not "fix" either by editing a value
+into agreement — that trades a visible discrepancy for a hidden one.
 """
 
 import logging
@@ -15,6 +55,9 @@ import shutil
 from datetime import datetime
 
 import openpyxl
+
+import config as cfg
+from model.debt import MONTHS_PER_YEAR
 from registry import ScenarioType
 
 logger = logging.getLogger(__name__)
@@ -39,13 +82,105 @@ OPEX_ROW_MAP = {
     "ga":           (152, False),
     "advertising":  (153, False),
     "utilities":    (154, False),
-    # Row 155: Bank/Merchant fees — % of EGR, skip (not in our categories)
+    # Row 155: Bank/Merchant fees — % of EGR, written from config
     # Row 156: Miscellaneous — skip
     # Row 157: Management fee — % of EGR
     "insurance":    (158, False),
     "property_tax": (159, False),
     "cap_reserve":  (164, False),
 }
+
+# ── Structural constants ─────────────────────────────────────────────
+# Not assumptions — the template's own schema. Named so the AST gate can
+# be absolute ("no numeric literal on the value side of a write") and so
+# a reviewer can tell a layout fact from an underwriting opinion.
+
+_COL_IN_PLACE = 7        # G — the in-place column on every paired row
+_COL_STABILIZED = 9      # I — the stabilized column
+_COL_PROMOTE = 9         # I — promote share on the tier rows
+
+# Unit-mix columns.
+_COL_UNIT_LABEL = 2          # B
+_COL_UNIT_COUNT = 3          # C
+_COL_UNIT_SF = 4             # D
+_COL_UNIT_STABILIZED_PCT = 5  # E
+_COL_UNIT_CLIMATE = 13       # M
+
+# Rounding precision, in decimal places. Not assumptions — they keep
+# float noise out of a cell and nothing else. Rates carry more digits
+# than dollars because 6 dp on a cap rate is a hundredth of a basis
+# point, where 2 dp on a dollar is a cent.
+_DOLLARS_DP = 2
+_PERCENT_DP = 4
+_RATE_DP = 6
+
+# Growth ladder: rows 101-106, years 1-6 across columns C..H.
+_GROWTH_FIRST_COL = 3                    # C
+_GROWTH_YEARS = 6                        # C..H
+_REVENUE_GROWTH_ROWS = (101, 102, 103)   # in-place rent, stabilized rent, other income
+_EXPENSE_GROWTH_ROWS = (104, 105, 106)   # OpEx ex-taxes, property taxes, CapEx
+# B107 in the workbook reads "Growth is assumed to begin month 13", so the
+# year-1 column is the template's in-place year and carries no growth.
+# That is the template's convention, not our assumption — the app expresses
+# year 1 through `yr1_noi_bump`, which has no cell here.
+_GROWTH_BEGINS_YEAR = 2
+_NO_GROWTH = 0
+# `rev_cagr_yr1_3` applies through year 3 and `rev_cagr_yr4_5` year 4
+# onward — the banding `analysis.valuation.project_cash_flows` uses.
+_REV_CAGR_BAND_END_YEAR = 3
+
+_STABILIZATION_BEGIN_MONTH = 1     # K101 — lease-up starts immediately
+
+# Costs incurred at closing: start month 0, spread over 0 months.
+_AT_CLOSING_START_MONTH = 0
+_AT_CLOSING_DURATION = 0
+
+# Blank unit-mix row: {column: value}. "% stabilized" of 1 means fully
+# stabilized.
+_UNIT_STABILIZED = 1
+_UNIT_NOT_STABILIZED = 0
+_NO_UNITS = 0
+_NO_RENT = 0
+_BLANK_UNIT_ROW = {
+    _COL_UNIT_LABEL: "[Unit Type]",
+    _COL_UNIT_COUNT: _NO_UNITS,
+    _COL_UNIT_SF: _NO_UNITS,
+    _COL_UNIT_STABILIZED_PCT: _UNIT_STABILIZED,
+    _COL_IN_PLACE: _NO_RENT,
+    _COL_STABILIZED: _NO_RENT,
+    _COL_UNIT_CLIMATE: "Non-Climate",
+}
+_OTHER_INCOME_ROWS = (138, 139, 140, 141, 142, 143)
+_NO_INCOME = 0
+
+# We model ONE senior loan. Mezz/junior paper is out of scope (scoped
+# backlog item D), so H65 stays flat zero rather than reading a term.
+_NO_JUNIOR_DEBT = 0
+_NO_DEBT = 0
+
+# The current owner's reserve is whatever the CIM shows, and CIMs do not
+# show one; the stabilized reserve below it is the underwriting number.
+_NO_IN_PLACE_CAPITAL_RESERVE = 0
+
+# Waterfall block. We charge no GP acquisition or disposition fee, so the
+# promote structure is pref + promote only. (The disposition COST — the
+# broker — is K182, a different cell; writing it here would double-count
+# the sale. Recorded in `_write_reversion`.)
+_NO_GP_FEE = 0
+_PROMOTE_TIER_ROWS = (259, 260, 261)   # 2nd/3rd/4th tier; H259-261 chain to H258
+_YES = "Yes"
+# The only non-EGR option the H254 formula understands. See the module
+# docstring: the label is honest about the workbook, and the workbook
+# disagrees with `config.AM_FEE_BASE`.
+_AM_FEE_BASIS_LABEL = "% of LP Equity"
+
+_SUMMARY_NOTE_COL = 6              # F
+_SUMMARY_STRENGTH_ROWS = range(6, 11)
+_SUMMARY_WEAKNESS_ROWS = range(12, 17)
+
+# Benchmark bands are (low, high) tuples.
+_BAND_LOW = 0
+_BAND_HIGH = 1
 
 
 def generate_template(
@@ -58,6 +193,10 @@ def generate_template(
     hold_years: int = None,
     transaction_costs: dict = None,
     capex: float = None,
+    debt_terms=None,
+    waterfall_terms=None,
+    am_fee_pct: float = None,
+    sources_uses: dict = None,
 ) -> str:
     """
     Copy the XLSM template and populate input cells with CIM data.
@@ -77,14 +216,44 @@ def generate_template(
             back to reading `cim_data.capex_estimate` as dollars, which
             is right for every caller that has no basis selector — but
             wrong for a rate, so the engine passes the resolved figure
+        debt_terms: an already-RESOLVED `model.debt.DebtTerms`, not an
+            override dict. None resolves `config.DEBT_TERMS`.
+        waterfall_terms: an already-RESOLVED
+            `model.waterfall.WaterfallTerms`, not an override dict. None
+            resolves `config.WATERFALL_TERMS`.
+
+            Both take resolved objects deliberately. Re-resolving an
+            override dict here would need the deal's capital structure to
+            get `gp_coinvest_pct` right, and getting it wrong is silent:
+            a deal edited to 25% co-invest would print a Sources & Uses
+            stack split 25/75 in the .xlsx and a 10/90 waterfall in the
+            .xlsm. `resolve_waterfall_terms` argues the same point at
+            greater length. The engine resolves once and hands the result
+            to every writer.
+        am_fee_pct: resolved annual management fee rate. None uses
+            `config.AM_FEE_PCT`.
+        sources_uses: the run's Sources & Uses block. Supplies the loan's
+            share of total uses for the template's LTC cell (H64); without
+            it the workbook is written all-equity.
 
     Returns:
         Path to the generated .xlsm file
     """
     from analysis.valuation import (resolve_hold_years,
                                     resolve_transaction_costs)
+    from model.debt import resolve_debt_terms
+    from model.waterfall import resolve_waterfall_terms
+
     hold_years = resolve_hold_years(hold_years)
     costs = resolve_transaction_costs(transaction_costs)
+    # The CLI has no per-deal overrides, so config defaults are the whole
+    # resolved set there. The web path always passes resolved objects.
+    debt = debt_terms if debt_terms is not None else resolve_debt_terms()
+    waterfall = (waterfall_terms if waterfall_terms is not None
+                 else resolve_waterfall_terms())
+    am_fee = cfg.AM_FEE_PCT if am_fee_pct is None else am_fee_pct
+    params = _base_scenario_params(scenario_results)
+
     if not os.path.exists(TEMPLATE_PATH):
         raise FileNotFoundError(f"Template not found: {TEMPLATE_PATH}")
 
@@ -103,16 +272,16 @@ def generate_template(
     # Populate sections
     _write_property_description(ws, cim_data, hold_years)
     _write_investment_cf(ws, cim_data, costs, capex)
-    _write_financing_defaults(ws)
-    _write_growth_rates(ws)
-    _write_stabilization(ws, cim_data)
-    _write_unit_mix(ws, cim_data)
+    _write_financing(ws, debt, sources_uses)
+    _write_growth_rates(ws, params)
+    _write_stabilization(ws, cim_data, params)
+    _write_unit_mix(ws, cim_data, params)
     _write_other_income(ws, cim_data)
-    _write_vacancy(ws, cim_data)
+    _write_vacancy(ws, cim_data, params)
     _write_opex(ws, cim_data, financial_analysis)
-    _write_capex(ws, cim_data)
+    _write_capex(ws)
     _write_reversion(ws, cim_data, financial_analysis, costs, scenario_results)
-    _write_waterfall(ws)
+    _write_waterfall(ws, waterfall, am_fee)
     _write_summary_notes(ws_summary, cim_data)
 
     wb.save(out_path)
@@ -120,6 +289,56 @@ def generate_template(
 
     logger.info("  Template: %s", out_path)
     return out_path
+
+
+# ── Resolved-assumption helpers ──────────────────────────────────────
+
+def _base_scenario_params(scenario_results: dict = None) -> dict:
+    """The base case's resolved scenario parameters.
+
+    Prefers the RUN's own params over re-reading config: `scenario_results`
+    carries the values the projection actually used, and re-resolving
+    would answer with whatever config says now. Falls back to config only
+    when no scenario ran — the CLI's degraded path and tests.
+    """
+    base = (scenario_results or {}).get(ScenarioType.BASE) or {}
+    return base.get("params") or cfg.SCENARIO_DEFAULTS[ScenarioType.BASE]
+
+
+def _physical_occupancy(cim_data) -> float:
+    """Physical occupancy, or the config assumption with a warning.
+
+    The audit's complaint was not the 0.90 itself but that it was silent:
+    a deal whose CIM never states occupancy was underwritten at 90% and
+    nothing anywhere said so.
+    """
+    occ = cim_data.physical_occupancy
+    if occ:
+        return float(occ)
+    assumed = cfg.XLSM_TEMPLATE_INPUTS["assumed_physical_occupancy"]
+    logger.warning(
+        "Physical occupancy missing from CIM data — XLSM written against "
+        "the assumed %.0f%% in config.XLSM_TEMPLATE_INPUTS. Verify before "
+        "relying on the workbook's vacancy or stabilization timing.",
+        assumed * 100)
+    return float(assumed)
+
+
+def _vacancy_from(occupancy: float) -> float:
+    """Vacancy is the complement of occupancy — a definition, not an
+    assumption, which is why the arithmetic lives here and not in a
+    write path."""
+    return max(0.0, 1.0 - float(occupancy))
+
+
+def _is_stabilized(occupancy: float, params: dict) -> bool:
+    """Stabilized against the BASE case's stabilized-occupancy target.
+
+    `config.GATES["stabilized_occupancy"]` (0.85) is a different question
+    — the ramp test for post-2020 vintages — and reconciling the two is
+    item T's, per scoped-backlog rule 3.
+    """
+    return float(occupancy) >= float(params["stabilized_occ"])
 
 
 # ── Property Description (rows 7-18) ─────────────────────────────────
@@ -153,7 +372,7 @@ def _write_property_description(ws, cim_data, hold_years: int):
     ws["F17"] = start
 
     # Sale month — the hold period as the template expresses it.
-    ws["D182"] = hold_years * 12
+    ws["D182"] = hold_years * MONTHS_PER_YEAR
 
 
 # ── Investment Cash Flows (rows 20-47) ───────────────────────────────
@@ -171,14 +390,15 @@ def _write_investment_cf(ws, cim_data, costs: dict, capex: float = None):
     No double count with the Title/Legal soft-cost rows: those are
     formulas off HARD costs (K33), a different base.
     """
+    timing = cfg.XLSM_TEMPLATE_INPUTS
     if cim_data.asking_price:
         ws["K23"] = cim_data.asking_price
         acquisition_cost = (cim_data.asking_price
                             * costs["acquisition_closing_pct"])
         ws["B24"] = "Acquisition Closing Costs"
-        ws["K24"] = round(acquisition_cost, 2)
-        ws["E24"] = 0          # incurred at closing, same as the price row
-        ws["F24"] = 0
+        ws["K24"] = round(acquisition_cost, _DOLLARS_DP)
+        ws["E24"] = _AT_CLOSING_START_MONTH   # same timing as the price row
+        ws["F24"] = _AT_CLOSING_DURATION
 
     # `capex` arrives resolved when the caller knows the basis; a bare
     # cim_data read would write 0.02 into a dollar cell for a deal whose
@@ -187,81 +407,106 @@ def _write_investment_cf(ws, cim_data, costs: dict, capex: float = None):
     if capex > 0:
         ws["B30"] = "Deferred Maintenance"
         ws["K30"] = capex
-        ws["E30"] = 1
-        ws["F30"] = 6
+        ws["E30"] = timing["capex_start_month"]
+        ws["F30"] = timing["capex_duration_months"]
 
 
-# ── Financing Defaults ────────────────────────────────────────────────
+# ── Financing (rows 64-73) ────────────────────────────────────────────
 
-def _write_financing_defaults(ws):
-    """Set reasonable debt assumptions.
+def _write_financing(ws, terms, sources_uses: dict = None):
+    """Write the run's own loan into the template's debt block.
 
-    Defaults to 0% LTC (all equity) since the user hasn't specified
-    leverage. They can adjust in Excel.
+    **Why this is no longer all-equity.** The scoped backlog wrote its
+    rule when leverage was opt-in per deal ("LTC stays 0, but the terms
+    cells still carry the resolved values, so a user who flips LTC in
+    Excel gets the terms the app would have used"). Item E3a reversed
+    that on 2026-08-01: every deal is now sized at `config.DEBT_TERMS`
+    and carries an LP net IRR, so the opted-out state that rule
+    described no longer exists. Shipping an all-equity workbook beside a
+    levered memo would leave exactly the contradiction this item exists
+    to close, so H64 carries the run's actual leverage.
+
+    `sources_uses["ltv"]` is loan / TOTAL USES — despite the key name,
+    the denominator is the full cost stack, which is precisely what the
+    template's H64 means (K64 = H64 * K55, and K55 is Total Uses). The
+    workbook re-derives the dollar loan off its OWN K55, so the two agree
+    on the loan only insofar as the two cost stacks agree; the K24
+    closing-cost row above is what keeps them close.
+
+    With no Sources & Uses (the CLI, or a deal that never sized) the
+    block stays all-equity and the terms cells still carry the resolved
+    loan, which is the backlog's original "flips LTC in Excel" case.
     """
-    # LTC = 0 means no debt — formulas handle this
-    ws["H64"] = 0       # Senior loan LTC
-    ws["H65"] = 0       # Junior loan LTC (named range for K65)
-    # Loan terms are reasonable defaults already in template
-    ws["F73"] = 60      # Term (months)
-    ws["G73"] = 12      # IO period
-    ws["H73"] = 360     # Amort
-    ws["I73"] = 0.065   # Rate
+    ltc = (sources_uses or {}).get("ltv")
+    ws["H64"] = round(float(ltc), _RATE_DP) if ltc else _NO_DEBT
+    ws["H65"] = _NO_JUNIOR_DEBT
+    ws["F73"] = terms.term_years * MONTHS_PER_YEAR
+    ws["G73"] = terms.io_months
+    ws["H73"] = terms.amort_years * MONTHS_PER_YEAR
+    ws["I73"] = terms.all_in_rate()
 
 
 # ── Growth Rates (rows 100-106) ──────────────────────────────────────
 
-def _write_growth_rates(ws):
-    """Set annual growth assumptions.
+def _write_growth_rates(ws, params: dict):
+    """Write the base case's growth banding across years 1-6.
 
-    Year 1 = 0% (in-place), years 2+ = 3%.
+    Deliberate behavior change (scoped-backlog rule 4): this was a flat
+    0%-then-3% ladder on all six rows regardless of scenario. Revenue
+    rows now grow at the resolved revenue CAGR and expense rows at
+    `exp_growth`, so the workbook and the projection answer the same
+    question the same way.
+
+    Year 1 stays flat — see `_GROWTH_BEGINS_YEAR`. The app expresses
+    year 1 through `yr1_noi_bump`, which the template has no cell for.
     """
-    # Rows: 101=in-place rent, 102=stabilized rent, 103=other income,
-    #        104=OpEx, 105=property tax, 106=capex
-    for row in range(101, 107):
-        ws.cell(row=row, column=3).value = 0       # Year 1: 0%
-        ws.cell(row=row, column=4).value = 0.03    # Year 2
-        ws.cell(row=row, column=5).value = 0.03    # Year 3
-        ws.cell(row=row, column=6).value = 0.03    # Year 4
-        ws.cell(row=row, column=7).value = 0.03    # Year 5
-        ws.cell(row=row, column=8).value = 0.03    # Year 6
+    rev_early = params["rev_cagr_yr1_3"]
+    rev_late = params["rev_cagr_yr4_5"]
+    exp_growth = params["exp_growth"]
+
+    for row in _REVENUE_GROWTH_ROWS + _EXPENSE_GROWTH_ROWS:
+        is_revenue = row in _REVENUE_GROWTH_ROWS
+        for year in range(1, _GROWTH_YEARS + 1):
+            if year < _GROWTH_BEGINS_YEAR:
+                value = _NO_GROWTH
+            elif not is_revenue:
+                value = exp_growth
+            elif year <= _REV_CAGR_BAND_END_YEAR:
+                value = rev_early
+            else:
+                value = rev_late
+            column = _GROWTH_FIRST_COL + year - 1
+            ws.cell(row=row, column=column).value = value
 
 
 # ── Stabilization ────────────────────────────────────────────────────
 
-def _write_stabilization(ws, cim_data):
+def _write_stabilization(ws, cim_data, params: dict):
     """Set stabilization timing."""
-    occ = cim_data.physical_occupancy or 0.90
+    occ = _physical_occupancy(cim_data)
 
-    if occ >= 0.88:
-        # Already stabilized — month 1
-        ws["K101"] = 1   # Begin
-        ws["K102"] = 1   # Complete
+    ws["K101"] = _STABILIZATION_BEGIN_MONTH
+    if _is_stabilized(occ, params):
+        # Already stabilized — complete in the month it begins.
+        ws["K102"] = _STABILIZATION_BEGIN_MONTH
     else:
-        # Value-add — 24 month stabilization
-        ws["K101"] = 1
-        ws["K102"] = 24
+        ws["K102"] = cfg.VALUE_ADD_SCENARIOS[
+            ScenarioType.BASE]["months_to_stabilize"]
 
 
 # ── Unit Mix (rows 111-131) ──────────────────────────────────────────
 
-def _write_unit_mix(ws, cim_data):
+def _write_unit_mix(ws, cim_data, params: dict):
     """Populate unit mix rows from CIMData.unit_mix."""
     units = cim_data.unit_mix or []
 
     # Clear all unit mix rows first (rows 111-131)
     for row in range(UNIT_MIX_START_ROW, UNIT_MIX_END_ROW + 1):
-        ws.cell(row=row, column=2).value = "[Unit Type]"  # B: label
-        ws.cell(row=row, column=3).value = 0              # C: count
-        ws.cell(row=row, column=4).value = 0              # D: avg SF
-        ws.cell(row=row, column=5).value = 1              # E: % stabilized
-        ws.cell(row=row, column=7).value = 0              # G: in-place rent/unit/mo
-        ws.cell(row=row, column=9).value = 0              # I: stabilized rent/unit/mo
-        ws.cell(row=row, column=13).value = "Non-Climate"  # M: type
+        for column, blank in _BLANK_UNIT_ROW.items():
+            ws.cell(row=row, column=column).value = blank
 
     # Fill with actual data
-    occ = cim_data.physical_occupancy or 0.90
-    is_stabilized = occ >= 0.88
+    stabilized = _is_stabilized(_physical_occupancy(cim_data), params)
 
     for i, unit in enumerate(units):
         if i >= (UNIT_MIX_END_ROW - UNIT_MIX_START_ROW + 1):
@@ -271,22 +516,26 @@ def _write_unit_mix(ws, cim_data):
 
         row = UNIT_MIX_START_ROW + i
         label = unit.size_label or f"Type {i+1}"
+        rate = unit.rate or _BLANK_UNIT_ROW[_COL_IN_PLACE]
 
-        ws.cell(row=row, column=2).value = label                      # B: label
-        ws.cell(row=row, column=3).value = unit.count or 0            # C: count
-        ws.cell(row=row, column=4).value = unit.sf or 0               # D: avg SF
-        ws.cell(row=row, column=5).value = 1 if is_stabilized else 0  # E: % stabilized
-        ws.cell(row=row, column=7).value = unit.rate or 0             # G: in-place $/unit/mo
+        ws.cell(row=row, column=_COL_UNIT_LABEL).value = label
+        ws.cell(row=row, column=_COL_UNIT_COUNT).value = (
+            unit.count or _BLANK_UNIT_ROW[_COL_UNIT_COUNT])
+        ws.cell(row=row, column=_COL_UNIT_SF).value = (
+            unit.sf or _BLANK_UNIT_ROW[_COL_UNIT_SF])
+        ws.cell(row=row, column=_COL_UNIT_STABILIZED_PCT).value = (
+            _UNIT_STABILIZED if stabilized else _UNIT_NOT_STABILIZED)
+        ws.cell(row=row, column=_COL_IN_PLACE).value = rate
         # I column: stabilized rent — use in-place for now, user adjusts
         # Note: I{row} has formula =+G{row} in template for rows that had
         # data. For overwritten rows we set explicitly.
-        ws.cell(row=row, column=9).value = unit.rate or 0             # I: stabilized $/unit/mo
+        ws.cell(row=row, column=_COL_STABILIZED).value = rate
 
         # Climate type
         if unit.climate_controlled:
-            ws.cell(row=row, column=13).value = "Climate"
+            ws.cell(row=row, column=_COL_UNIT_CLIMATE).value = "Climate"
         else:
-            ws.cell(row=row, column=13).value = "Non-Climate"
+            ws.cell(row=row, column=_COL_UNIT_CLIMATE).value = "Non-Climate"
 
 
 # ── Other Income (rows 137-143) ──────────────────────────────────────
@@ -296,9 +545,9 @@ def _write_other_income(ws, cim_data):
     other = cim_data.other_income or 0
 
     # Clear defaults
-    for row in [138, 139, 140, 141, 142, 143]:
-        ws.cell(row=row, column=7).value = 0    # G: in-place
-        ws.cell(row=row, column=9).value = 0    # I: stabilized
+    for row in _OTHER_INCOME_ROWS:
+        ws.cell(row=row, column=_COL_IN_PLACE).value = _NO_INCOME
+        ws.cell(row=row, column=_COL_STABILIZED).value = _NO_INCOME
 
     if other > 0:
         # Put all other income into "Miscellaneous" parking row
@@ -310,23 +559,23 @@ def _write_other_income(ws, cim_data):
 
 # ── Vacancy (rows 146-147) ───────────────────────────────────────────
 
-def _write_vacancy(ws, cim_data):
-    """Set vacancy and credit loss assumptions."""
-    occ = cim_data.physical_occupancy or 0.90
+def _write_vacancy(ws, cim_data, params: dict):
+    """Set vacancy and credit loss assumptions.
 
-    # In-place vacancy
-    in_place_vacancy = max(0, 1.0 - occ)
-    ws["G146"] = round(in_place_vacancy, 4)
+    Stabilized vacancy is the complement of the base case's
+    `stabilized_occ`, not a standing 10%. At the 0.88 default that is
+    0.12 — which is also the template's own shipped default, so the
+    literal this replaced was the one value in the block that agreed with
+    neither the workbook nor the model.
+    """
+    inputs = cfg.XLSM_TEMPLATE_INPUTS
 
-    # Stabilized vacancy — target 10% for stabilized properties
-    if occ >= 0.88:
-        ws["I146"] = 0.10
-    else:
-        ws["I146"] = 0.10  # Target after stabilization
+    ws["G146"] = round(_vacancy_from(_physical_occupancy(cim_data)),
+                       _PERCENT_DP)
+    ws["I146"] = round(_vacancy_from(params["stabilized_occ"]), _PERCENT_DP)
 
-    # Credit loss
-    ws["G147"] = 0.01
-    ws["I147"] = 0.01
+    ws["G147"] = inputs["credit_loss_in_place"]
+    ws["I147"] = inputs["credit_loss_stabilized"]
 
 
 # ── Operating Expenses (rows 150-159, 164) ───────────────────────────
@@ -366,28 +615,36 @@ def _write_opex(ws, cim_data, financial_analysis: dict):
         else:
             stabilized_psf = in_place_psf
 
-        ws.cell(row=row, column=7).value = round(in_place_psf, 2)   # G: in-place
-        ws.cell(row=row, column=9).value = round(stabilized_psf, 2)  # I: stabilized
+        ws.cell(row=row, column=_COL_IN_PLACE).value = round(
+            in_place_psf, _DOLLARS_DP)
+        ws.cell(row=row, column=_COL_STABILIZED).value = round(
+            stabilized_psf, _DOLLARS_DP)
 
-    # Management fee — % of EGR (row 157)
-    mgmt_pct = cim_data.mgmt_fee_pct or 0.06
+    # Management fee — % of EGR (row 157). The CIM's own rate when it
+    # states one; otherwise the top of the benchmark band, which is the
+    # conservative end and the value this replaced. Which end is the
+    # right underwriting target is item T's (scoped-backlog rule 3).
+    mgmt_pct = (cim_data.mgmt_fee_pct
+                or cfg.EXPENSE_BENCHMARKS["mgmt_fee_pct"][_BAND_HIGH])
     ws["G157"] = mgmt_pct
     ws["I157"] = mgmt_pct
 
-    # Bank/merchant fees — small % of EGR (row 155)
-    ws["G155"] = 0.01
-    ws["I155"] = 0.0125
+    # Bank/merchant fees — % of EGR (row 155)
+    ws["G155"] = cfg.XLSM_TEMPLATE_INPUTS["bank_fee_pct_in_place"]
+    ws["I155"] = cfg.XLSM_TEMPLATE_INPUTS["bank_fee_pct_stabilized"]
 
 
 # ── Capital Expenditures (row 164) ───────────────────────────────────
 
-def _write_capex(ws, cim_data):
-    """Set capital reserve assumption."""
-    # Capital reserves $/SF/year — leave at template default or set
-    # In-place: 0 (current owner may not be reserving)
-    # Stabilized: $0.15/SF (conservative)
-    ws["G164"] = 0
-    ws["I164"] = 0.15
+def _write_capex(ws):
+    """Set capital reserve assumption.
+
+    In-place is zero because the CIM reports no reserve line; stabilized
+    is the bottom of the benchmark band, which is the underwriting
+    number and the value this replaced.
+    """
+    ws["G164"] = _NO_IN_PLACE_CAPITAL_RESERVE
+    ws["I164"] = cfg.EXPENSE_BENCHMARKS["cap_reserve"][_BAND_LOW]
 
 
 # ── Reversion / Sale Assumptions ─────────────────────────────────────
@@ -410,28 +667,38 @@ def _write_reversion(ws, cim_data, financial_analysis: dict, costs: dict,
     formula — `J224` (the interpolated cap at stabilization) and `K224`
     read its value, and `J224` still interpolates correctly between an
     anchor and a wider terminal cap, which is the drift model.
+
+    **The thin-data path writes nothing rather than inventing an anchor.**
+    It used to fall back to a 6.5% literal, and on a deal with no NOI and
+    no price that 6.5% was the template deciding its own cap rate. Now
+    K180 is written only from a resolved market anchor or a computed
+    entry cap; with neither, both cells keep the workbook's own defaults
+    — including K181's entry+50bp formula. That formula is the pre-#31
+    contradiction, so it survives ONLY where there is no resolved exit
+    cap for it to contradict, and a deal that reaches here produced no
+    scenarios and no returns at all. The warning says so.
     """
     noi = financial_analysis.get("adjusted_ttm_noi", {}).get("analyst_adjusted_noi")
     price = cim_data.asking_price
-
-    # Entry cap rate
-    if noi and price and price > 0:
-        entry_cap = noi / price
-    else:
-        entry_cap = 0.065
 
     base = (scenario_results or {}).get(ScenarioType.BASE) or {}
     detail = base.get("exit_cap_detail") or {}
     market_cap = detail.get("market_cap")
     exit_cap = base.get("exit_cap")
     if market_cap is not None and exit_cap is not None:
-        ws["K180"] = round(float(market_cap), 6)
-        ws["K181"] = round(float(exit_cap), 6)
+        ws["K180"] = round(float(market_cap), _RATE_DP)
+        ws["K181"] = round(float(exit_cap), _RATE_DP)
+    elif noi and price and price > 0:
+        # No scenario ran, so there is no resolved anchor. Write the entry
+        # cap and leave K181's own formula alone rather than inventing a
+        # terminal cap off a number that is not a market cap.
+        ws["K180"] = round(noi / price, _PERCENT_DP)
     else:
-        # No scenario ran, so there is no resolved anchor to write. Leave
-        # K181's own formula in place rather than inventing a terminal cap
-        # off a number that is not a market cap.
-        ws["K180"] = round(entry_cap, 4)
+        logger.warning(
+            "No resolved market cap and no entry cap (NOI=%r, price=%r) — "
+            "leaving the XLSM's own cap-rate defaults in place, including "
+            "its entry+50bp terminal formula, which the model does not use.",
+            noi, price)
     #
     # K182 is the template's cost of sale — the cell our disposition
     # assumption belongs in. (The scoped backlog pointed at F254 in the
@@ -439,57 +706,71 @@ def _write_reversion(ws, cim_data, financial_analysis: dict, costs: dict,
     # promote structure, correctly left at 0 because we model no GP fees.
     # Writing the broker cost there would leave this 3.5% still charging
     # and double-count the sale.)
-    ws["K182"] = round(costs["disposition_cost_pct"], 4)
+    ws["K182"] = round(costs["disposition_cost_pct"], _PERCENT_DP)
 
 
 # ── Distribution Waterfall (rows 251-261) ────────────────────────────
 
-def _write_waterfall(ws):
+def _write_waterfall(ws, terms, am_fee_pct: float):
+    """Write the fund's resolved partnership terms.
+
+    Replaces a GP_EQUITY_SHARE / GP_AM_FEE_RATE / GP_PROMOTE_PCT
+    environment-variable block that defaulted to 6% GP equity against a
+    `GP_COINVEST_PCT` of 10%. The env vars are deleted, not re-defaulted
+    (scoped-backlog rule 2): an assumption nobody can find in config is
+    not an auditable assumption.
+
+    **Tier mapping.** The template has four hurdle rows, which is not
+    four hurdles: H259/H260/H261 each chain to the row above
+    (`=+H258`), so writing the pref rate into H258 sets all four to the
+    same rate and the structure collapses to the single hurdle
+    `model.waterfall` implements. The three promote cells therefore all
+    take one `promote_split`. J259 = `I259+(1-I259)*$J$253` — promote
+    plus the GP's pari-passu share of the residual — which is the same
+    construction as ours, promote computed on the LP-attributable
+    residual only.
+
+    What the mapping does NOT fix is that H257 is labelled "IRR Hurdle"
+    while our pref is an accrual account. Same rate, different math; see
+    the module docstring.
     """
-    Set fund structure defaults. Override via environment variables:
-      GP_NAME, GP_EQUITY_SHARE, GP_AM_FEE_RATE, GP_PROMOTE_PCT
-    """
-    gp_name = os.environ.get("GP_NAME", "GP")
-    gp_equity = float(os.environ.get("GP_EQUITY_SHARE", "0.06"))
-    am_fee = float(os.environ.get("GP_AM_FEE_RATE", "0.01"))
-    promote = float(os.environ.get("GP_PROMOTE_PCT", "0.20"))
+    ws["H59"] = terms.gp_coinvest_pct
 
-    # GP equity share
-    ws["H59"] = gp_equity
+    ws["C253"] = cfg.GP_ENTITY_NAME
+    ws["C254"] = cfg.LP_ENTITY_NAME
 
-    # GP name
-    ws["C253"] = gp_name
-    ws["C254"] = "LP Group"
-
-    # GP fees
-    ws["F253"] = 0        # Acquisition fee
-    ws["F254"] = 0        # Disposition fee
+    # GP fees — we charge neither.
+    ws["F253"] = _NO_GP_FEE        # Acquisition fee
+    ws["F254"] = _NO_GP_FEE        # Disposition fee
 
     # Asset management fee
-    ws["G253"] = "% of LP Equity"
-    ws["G254"] = am_fee
-    ws["I254"] = "Yes"    # Fees accrue
+    ws["G253"] = _AM_FEE_BASIS_LABEL
+    ws["G254"] = am_fee_pct
+    ws["I254"] = _YES              # Fees accrue
 
     # Include GP fees in analysis
-    ws["I251"] = "Yes"
+    ws["I251"] = _YES
 
-    # Promote tiers
-    ws["I259"] = promote   # 2nd tier promote
-    ws["I260"] = promote   # 3rd tier promote
-    ws["I261"] = promote   # 4th tier promote
+    # Preferred return. Overwrites `IF(H64>0, 0.08, IF(H64=0, 0.06,"n/a"))`
+    # with a value — the same precedent as K181. That formula made the
+    # pref depend on whether the deal was levered, which is not a term in
+    # the LPA, and returned 6% for an all-equity case the model no longer
+    # runs at all.
+    ws["H258"] = terms.pref_rate
 
-    # Pref return: H258 is formula = IF(H64>0, 0.08, IF(H64=0, 0.06, "n/a"))
-    # This auto-sets 8% with debt, 6% without — leave as formula
+    # Promote tiers 2-4, all sitting at the single hurdle above.
+    for row in _PROMOTE_TIER_ROWS:
+        ws.cell(row=row, column=_COL_PROMOTE).value = terms.promote_split
 
 
 # ── Summary Sheet Notes ──────────────────────────────────────────────
 
 def _write_summary_notes(ws, cim_data):
     """Clear deal-specific strengths/weaknesses for user to fill."""
-    for row in range(6, 11):
-        ws.cell(row=row, column=6).value = ""   # F6:F10 = strengths
-    for row in range(12, 17):
-        ws.cell(row=row, column=6).value = ""   # F12:F16 = weaknesses
+    for row in _SUMMARY_STRENGTH_ROWS:
+        ws.cell(row=row, column=_SUMMARY_NOTE_COL).value = ""
+    for row in _SUMMARY_WEAKNESS_ROWS:
+        ws.cell(row=row, column=_SUMMARY_NOTE_COL).value = ""
 
     # Label headers remain
     ws["F5"] = "STRENGTHS"

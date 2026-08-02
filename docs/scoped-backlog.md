@@ -31,7 +31,7 @@ projection that D, E and G all read from.
 | G | LP-facing 2-page investor summary | D to build, **E4 to ship** | Small-medium | Standard |
 | E1 | Debt layer (`model/debt.py`) | B | Medium | **High-risk** |
 | E2 | Single-tier waterfall (`model/waterfall.py`) | E1 | Medium | **High-risk** |
-| E3 | Levered wiring — E3a levered seam ⚑ shipped; E3b surfaces + XLSM de-literalization | E2, D | Medium-large | **High-risk** |
+| E3 | Levered wiring — E3a seam ⚑ shipped; E3b surfaces ⚑ shipped; E3b XLSM de-literalization ⚑ shipped | E2, D | Medium-large | **High-risk** |
 | E4 | Solver retargeted to LP net IRR | E3 | Small | **High-risk** |
 | T | Transparency consolidation (audit remediation) | E4 | Large | **High-risk** (live literals) |
 
@@ -288,7 +288,14 @@ memo section; Excel sheet. Reads the Sources & Uses block from D for equity.
 Leverage is **opt-in per deal**: with no debt terms entered there is no
 levered lens and every unlevered surface stays byte-identical.
 
-**E3b also owns `output/template_writer.py` de-literalization** (folded in
+**E3b also owns `output/template_writer.py` de-literalization** ⚑ **SHIPPED
+2026-08-01 (#35)** — plan:
+[item E3b — template writer](superpowers/plans/2026-08-01-item-e3b-template-writer.md).
+Two deviations from the rules below, both argued in that plan and in the PR:
+rule 4's "LTC stays 0" described a leverage-opt-out state that E3a had already
+removed, so H64 carries the run's sized loan; and the K181/entry-cap items in
+the list below were already fixed by #31 and #23 before this item started.
+(Folded in
 2026-08-01 from the transparency audit — the one piece of item T with a hard
 sequencing dependency on item E). The XLSM writer is a parallel assumptions
 system, and E3a made its literals live contradictions: the app now computes
