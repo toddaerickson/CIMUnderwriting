@@ -536,7 +536,6 @@ def run_analysis(result: AnalysisResult, progress: Callable = None,
             gate_results=result.gate_results,
             sources_uses=result.sources_uses,
             levered=result.levered,
-            debt=result.debt,
             output_dir=output_dir,
         )
     except Exception as e:

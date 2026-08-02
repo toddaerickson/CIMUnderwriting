@@ -7,6 +7,7 @@ Follows the exact section structure of the SS Investment Memo Template.
 import os
 
 import config as cfg
+from output import safe_filename
 from docx import Document
 from docx.shared import Inches, Pt, RGBColor
 from docx.enum.text import WD_ALIGN_PARAGRAPH
@@ -36,7 +37,7 @@ def generate_memo(property_name: str, cim_data, gate_results: list,
     font.name = "Calibri"
     font.size = Pt(11)
 
-    safe_name = _safe_filename(property_name or "Unknown_Property")
+    safe_name = safe_filename(property_name or "Unknown_Property")
     filename = f"SS_Investment_Memo_{safe_name}.docx"
     filepath = os.path.join(output_dir, filename)
 
@@ -1015,7 +1016,7 @@ def generate_investor_summary(property_name: str, cim_data,
                               scenario_results: dict, risk_analysis: dict,
                               gate_results: list = None,
                               sources_uses: dict = None,
-                              levered: dict = None, debt: dict = None,
+                              levered: dict = None,
                               output_dir: str = ".") -> str:
     """Generate the 2-page LP-facing investor summary .docx.
 
@@ -1039,7 +1040,7 @@ def generate_investor_summary(property_name: str, cim_data,
         section.left_margin = Inches(_SUMMARY_PAGE_MARGIN_IN)
         section.right_margin = Inches(_SUMMARY_PAGE_MARGIN_IN)
 
-    safe_name = _safe_filename(property_name or "Unknown_Property")
+    safe_name = safe_filename(property_name or "Unknown_Property")
     filepath = os.path.join(output_dir, f"Investor_Summary_{safe_name}.docx")
 
     # ── Page 1 ──────────────────────────────────────────────────
@@ -1056,6 +1057,7 @@ def generate_investor_summary(property_name: str, cim_data,
     _summary_scenarios(doc, scenario_results, levered)
     _summary_market(doc, market_analysis, gate_results)
     _summary_risks(doc, risk_analysis)
+    _summary_levered_stamp(doc, levered)
     _summary_legend(doc)
 
     doc.save(filepath)
@@ -1127,9 +1129,15 @@ def _summary_thesis_bullets(cim_data, physical_analysis, scenario_results,
             f"{_fmt_currency(pvr.get('replacement_cost'))} replacement-cost "
             f"estimate — below the cost to build the competition.")
 
+    # `is not None`, not truthiness: a 0% economic occupancy is a
+    # property collecting nothing, which is the LOUDEST version of the
+    # mismanagement profile this bullet exists to surface, and `and`
+    # would silently drop it. `_add_occupancy_spread_note` above makes
+    # the same distinction on the same two fields.
     phys, econ = cim_data.physical_occupancy, cim_data.economic_occupancy
     spread_flag = cfg.GATES.get("econ_phys_spread_flag")
-    if phys and econ and spread_flag and (phys - econ) >= spread_flag:
+    if (phys is not None and econ is not None and spread_flag
+            and (phys - econ) >= spread_flag):
         out.append(
             f"Operational upside: {_fmt_pct(phys)} physical against "
             f"{_fmt_pct(econ)} economic occupancy — a "
@@ -1180,6 +1188,15 @@ def _summary_key_metrics(doc, cim_data, scenario_results, sources_uses,
     if sources_uses:
         rows.append(("Equity Required",
                      _fmt_currency(sources_uses.get("total_equity"))))
+
+    # Same contract as the sections around it: a metric the run could not
+    # produce is dropped, not printed as N/A. On a thin early-look CIM
+    # that leaves a short honest table rather than a column of blanks,
+    # and if nothing at all resolved there is no table.
+    rows = [(label, value) for label, value in rows
+            if set(value.split(" / ")) != {"N/A"}]
+    if not rows:
+        return
 
     doc.add_heading("Key Metrics", level=2)
     table = doc.add_table(rows=len(rows), cols=2)
@@ -1254,6 +1271,12 @@ def _summary_market(doc, market_analysis, gate_results):
     demos = (market_analysis or {}).get("demographics") or {}
     msa = (market_analysis or {}).get("msa_info") or {}
     by_gate = {g.get("gate"): g for g in (gate_results or [])}
+    # Same contract as every other section here: omitted when there is
+    # nothing to say, never a table of N/A. An invented-looking market
+    # snapshot is worse on this document than a missing one.
+    if not any((demos.get("population_3mi"), demos.get("median_hhi_3mi"),
+                by_gate.get(5), msa.get("msa_name"))):
+        return
 
     rows = [("Population (3-mile)", _fmt_number(demos.get("population_3mi"))),
             ("Median HHI (3-mile)",
@@ -1262,7 +1285,7 @@ def _summary_market(doc, market_analysis, gate_results):
     if oversupply:
         rows.append(("Supply",
                      f"{oversupply.get('actual')} (equilibrium ~7-8)"))
-    rows.append(("Market", (msa.get("msa") or "MSA not identified")
+    rows.append(("Market", (msa.get("msa_name") or "Not identified")
                  + (" — top-50 MSA" if msa.get("is_top_50") else "")))
 
     doc.add_heading("Market Snapshot", level=2)
@@ -1308,6 +1331,39 @@ def _summary_risks(doc, risk_analysis):
             f"severe first. The full risk register is in the investment "
             f"memo.")
         note.runs[0].italic = True
+
+
+def _summary_levered_stamp(doc, levered):
+    """The resolved LPA conventions behind the LP net IRR.
+
+    CLAUDE.md key design decision 7: "No LP net IRR without its
+    assumption stamp ... all three surfaces render it beside every
+    levered figure". This is the FOURTH surface and the only one that
+    leaves the firm, so the rule binds hardest here — a reader outside
+    the firm has no memo section 6 and no Returns tab to cross-check
+    which conventions produced the number.
+
+    Rendered compactly rather than as the memo's bulleted list: the
+    labels carry the resolved values (including the AM fee's rate and
+    base, which is what makes "net" mean anything), and the open
+    questions behind them are an internal matter. Absent entirely when
+    no levered figure was printed, so an unlevered deal gains no
+    orphaned disclosure.
+    """
+    stamp = ((levered or {}).get("base") or {}).get("assumption_stamp") or []
+    if not stamp:
+        return
+    labels = " · ".join(row.get("label", "") for row in stamp
+                        if row.get("label"))
+    if not labels:
+        return
+    para = doc.add_paragraph()
+    run = para.add_run(f"LP net returns are computed under: {labels}. "
+                       f"These are the fund's proposed terms and remain "
+                       f"subject to the final partnership agreement.")
+    run.italic = True
+    run.font.size = Pt(8)
+    run.font.color.rgb = RGBColor(0x55, 0x55, 0x55)
 
 
 def _summary_legend(doc):
@@ -1384,14 +1440,4 @@ def _fmt_x(val) -> str:
     return f"{val:.2f}x"
 
 
-def _safe_filename(name: str) -> str:
-    """Sanitize and CAP. The cap is not cosmetic: most filesystems stop at
-    255 bytes, and a CIM whose property name runs long enough produced a
-    path that `Document.save` could not open — an OSError that surfaced
-    as a failed memo with no obvious cause. `output/template_writer.py`
-    has always truncated at 60; this matches it rather than inventing a
-    second limit. Caught by the investor summary's maximal-content test
-    (item G), but `generate_memo` had the same defect."""
-    safe = "".join(c if c.isalnum() or c in (" ", "-", "_") else "_"
-                   for c in name).strip().replace(" ", "_")
-    return safe[:60]
+

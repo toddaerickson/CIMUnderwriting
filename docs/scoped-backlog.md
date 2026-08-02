@@ -394,7 +394,9 @@ regression-tested, since the unlevered screen remains the primary gate.
 **Status 2026-08-02: the GENERATOR is shipped; the download button is not.**
 `generate_investor_summary` lives in `output/memo_writer.py` and is wired into
 both the engine and the CLI, so the .docx lands in the deal folder on every
-run. Exposing it on the results page needs a new `summary_filename` column on
+run. The CLI's copy carries no LP net IRR: `AnalysisContext` has never held a
+`levered`/`debt` payload and `run.py` never computes one, which is a
+pre-existing CLI gap the memo shares, not something this item introduced. Exposing it on the results page needs a new `summary_filename` column on
 `AnalysisRun` plus a `DOWNLOAD_KINDS` entry — a migration, which is a
 different review tier from a rendering change and is deliberately not bundled
 with one. That is the immediate follow-up, not a dropped requirement.

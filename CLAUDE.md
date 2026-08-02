@@ -111,7 +111,7 @@ model/
   solver.py                # Bisection solvers: max price for a 10% UNLEVERED IRR and
                            #   (item E4) for a 15% LP NET IRR — both kept, both shown
 output/
-  memo_writer.py           # Generates .docx from analysis outputs — the 9-section IC memo
+  memo_writer.py           # Generates .docx from analysis outputs — the 10-section IC memo
                            #   AND `generate_investor_summary`, the LP-facing 2-page
                            #   condensation (item G). The summary is a second RENDERING
                            #   of the same result dicts, never a second computation, and

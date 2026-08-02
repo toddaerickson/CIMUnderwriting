@@ -47,22 +47,42 @@ _PRINTABLE_IN = _PAGE_HEIGHT_IN - 2 * _SUMMARY_PAGE_MARGIN_IN
 # expressed in inches so the budget is in the same unit as the page.
 _LINE_IN = (_SUMMARY_BODY_PT * 1.2) / 72.0
 _BLOCK_SPACING_IN = 8.0 / 72.0
-# Characters per line at 10pt Calibri across a 7.1in text column.
+# Characters per line at 10pt Calibri across the 7.1in text column, and
+# the same density expressed per inch so table cells can be measured
+# against their own (much narrower) column width.
+_TEXT_COLUMN_IN = 8.5 - 2 * _SUMMARY_PAGE_MARGIN_IN
 _CHARS_PER_LINE = 110
-# Table rows are single-line here (short labels and formatted numbers),
-# but cell padding makes each row taller than a bare text line.
-_TABLE_ROW_IN = _LINE_IN * 1.35
+_CHARS_PER_IN = _CHARS_PER_LINE / _TEXT_COLUMN_IN
+# Cell padding, on top of however many lines the cell text wraps to.
+_TABLE_ROW_PAD_IN = _LINE_IN * 0.35
+
+
+def _wrapped_lines(text, width_in) -> int:
+    return max(1, -(-len(text or "") // max(1, int(_CHARS_PER_IN * width_in))))
 
 
 def _estimated_height_in(blocks) -> float:
-    """Estimated rendered height, in inches, of a list of docx blocks."""
+    """Estimated rendered height, in inches, of a list of docx blocks.
+
+    Table rows are measured by the TALLEST cell, wrapped against that
+    cell's own column width — not assumed to be one line. The risks
+    table puts up to `_SUMMARY_MAX_RISK_CHARS` into a ~2.4in column,
+    which wraps to four or five lines; pricing that row as one line
+    would let the estimate pass while the real page overflowed, which
+    is precisely the failure this test exists to catch.
+    """
     total = 0.0
     for kind, payload in blocks:
         if kind == "table":
-            total += payload * _TABLE_ROW_IN + _BLOCK_SPACING_IN
+            rows, cols = payload
+            col_in = _TEXT_COLUMN_IN / max(1, cols)
+            for cells in rows:
+                tallest = max(_wrapped_lines(c, col_in) for c in cells)
+                total += tallest * _LINE_IN + _TABLE_ROW_PAD_IN
+            total += _BLOCK_SPACING_IN
         else:
             text, size_pt = payload
-            lines = max(1, -(-len(text) // _CHARS_PER_LINE))
+            lines = _wrapped_lines(text, _TEXT_COLUMN_IN)
             total += lines * (size_pt * 1.2) / 72.0 + _BLOCK_SPACING_IN
     return total
 
@@ -92,7 +112,10 @@ def _pages(path):
                 continue
             current.append(("p", (para.text, size)))
         elif child.tag.endswith("}tbl"):
-            current.append(("table", len(Table(child, doc).rows)))
+            table = Table(child, doc)
+            rows = [[c.text for c in row.cells] for row in table.rows]
+            cols = max((len(r) for r in rows), default=1)
+            current.append(("table", (rows, cols)))
     pages.append(current)
     return pages
 
@@ -133,7 +156,19 @@ def _scenarios(**over):
             "bull": one(0.211, 2.44, 0.0585)}
 
 
-LEVERED = {"base": {"lp_net_irr": 0.1567, "lp_moic": 2.03},
+# `assumption_stamp` shape mirrors model.levered._stamp — label carries
+# the RESOLVED convention, which is what has to reach the reader.
+STAMP = [
+    {"key": "pref_rate", "label": "8.00% preferred return, annually "
+                                  "compounded on unreturned capital"},
+    {"key": "promote_split", "label": "20% promote on the LP residual"},
+    {"key": "am_fee_treatment", "label": "Asset-management fee charged above "
+                                         "the waterfall — 1.00% of invested "
+                                         "equity, measured at the start of "
+                                         "each period"},
+]
+LEVERED = {"base": {"lp_net_irr": 0.1567, "lp_moic": 2.03,
+                    "assumption_stamp": STAMP},
            "bear": {"lp_net_irr": 0.012, "lp_moic": 1.05},
            "bull": {"lp_net_irr": 0.2891, "lp_moic": 2.99}}
 
@@ -147,7 +182,7 @@ PHYSICAL = {"price_vs_replacement": {
 
 MARKET = {"demographics": {"population_3mi": 87_450,
                            "median_hhi_3mi": 64_300},
-          "msa_info": {"msa": "Abilene", "is_top_50": False}}
+          "msa_info": {"msa_name": "Abilene", "is_top_50": False}}
 
 GATES = [{"gate": 5, "name": "No Oversupply Flag",
           "actual": "6.2 SF/capita", "result": "PASS"}]
@@ -169,7 +204,7 @@ def _generate(tmp_path, **over):
               market_analysis=MARKET, physical_analysis=PHYSICAL,
               scenario_results=_scenarios(), risk_analysis=RISKS,
               gate_results=GATES, sources_uses=SOURCES_USES,
-              levered=LEVERED, debt={}, output_dir=str(tmp_path))
+              levered=LEVERED, output_dir=str(tmp_path))
     kw.update(over)
     return generate_investor_summary(**kw)
 
@@ -292,7 +327,7 @@ def test_thin_deal_still_produces_a_document(tmp_path):
                                                  economic_occupancy=None),
         market_analysis={}, physical_analysis={}, scenario_results={},
         risk_analysis={}, gate_results=None, sources_uses=None,
-        levered=None, debt=None, output_dir=str(tmp_path))
+        levered=None, output_dir=str(tmp_path))
 
     assert os.path.isfile(path)
     body = _text(path)
@@ -313,3 +348,83 @@ def test_every_document_carries_the_securities_legend(tmp_path):
         body = _text(path)
         assert "not an offer to sell" in body
         assert "not investment advice" in body
+
+
+# ── CLAUDE.md decision 7: no LP net IRR without its assumption stamp ──
+
+def test_levered_figures_carry_their_assumption_stamp(tmp_path):
+    """The rule binds hardest on THIS surface: it is the only one that
+    leaves the firm, and a reader outside it has no memo section 6 and
+    no Returns tab to cross-check which conventions produced the number.
+    """
+    body = _text(_generate(tmp_path))
+    assert "15.7%" in body                       # the LP net IRR is printed
+    for row in STAMP:                            # ...so the stamp must be too
+        assert row["label"] in body
+    assert "subject to the final partnership agreement" in body
+
+
+def test_unlevered_deal_gains_no_orphaned_stamp(tmp_path):
+    body = _text(_generate(tmp_path, levered=None))
+    assert "LP net returns are computed under" not in body
+
+
+# ── Regressions found in review ──────────────────────────────────────
+
+def test_msa_is_read_from_the_key_market_analysis_actually_emits(tmp_path):
+    """`analysis.market._assess_msa` emits `msa_name`, never `msa`.
+    Reading the wrong key printed "Not identified" on every deal — and
+    on a top-50 deal, the self-contradicting "Not identified — top-50
+    MSA". The original fixture used the wrong key too, so the unit tests
+    could not see it; this asserts against the real schema."""
+    from analysis.market import _assess_msa
+
+    class _M:
+        msa = "Dallas"
+        city = "Dallas"
+    real = _assess_msa(_M())
+    assert "msa_name" in real
+
+    body = _text(_generate(tmp_path, market_analysis={
+        "demographics": {"population_3mi": 87_450}, "msa_info": real}))
+    assert "Dallas — top-50 MSA" in body
+    assert "Not identified" not in body
+
+
+def test_spread_bullet_survives_a_zero_economic_occupancy(tmp_path):
+    """A property collecting nothing is the LOUDEST mismanagement case,
+    and truthiness on the pair silently dropped it."""
+    body = _text(_generate(tmp_path, cim_data=_CIM(physical_occupancy=0.85,
+                                                   economic_occupancy=0.0)))
+    assert "85-point spread" in body
+
+
+def test_thin_deal_omits_the_market_snapshot(tmp_path):
+    """Same contract as every other section: omitted when empty, never a
+    table of N/A rows. An invented-looking market snapshot is worse on
+    an LP-facing document than a missing one."""
+    body = _text(generate_investor_summary(
+        property_name="Thin Deal", cim_data=_CIM(),
+        market_analysis={}, physical_analysis={}, scenario_results={},
+        risk_analysis={}, gate_results=None, sources_uses=None,
+        levered=None, output_dir=str(tmp_path)))
+    assert "Market Snapshot" not in body
+    assert "N/A" not in body
+
+
+# ── The filename helper is now shared, and disambiguates ─────────────
+
+def test_long_names_do_not_collide_across_the_writers(tmp_path):
+    """`output.safe_filename` is one definition for all three writers.
+    `excel_writer`'s private copy was uncapped, and `generate_excel` is
+    called UNWRAPPED, so a long property name aborted the whole run one
+    line after the memo succeeded."""
+    from output import MAX_FILENAME_STEM, safe_filename
+
+    a = "Fund IV Self-Storage Portfolio - " + "X" * 60 + " - Abilene, TX"
+    b = "Fund IV Self-Storage Portfolio - " + "X" * 60 + " - Waco, TX"
+    assert len(safe_filename(a)) <= MAX_FILENAME_STEM
+    assert safe_filename(a) != safe_filename(b)
+    # Names that already fit are untouched, so nothing that works today
+    # gets a new filename.
+    assert safe_filename("Sunbelt Storage") == "Sunbelt_Storage"

@@ -14,6 +14,7 @@ Tabs:
   9. Checks — the model error-check register (analysis/checks.py)
 """
 
+from output import safe_filename
 import os
 
 import config as cfg
@@ -57,7 +58,7 @@ def generate_excel(property_name: str, cim_data, financial_analysis: dict,
     Returns: path to generated file.
     """
     wb = Workbook()
-    safe_name = _safe_filename(property_name or "Unknown_Property")
+    safe_name = safe_filename(property_name or "Unknown_Property")
 
     # Tab 1: Inputs
     _build_inputs_tab(wb.active, cim_data, financial_analysis,
@@ -1035,5 +1036,3 @@ def _write_input_row(ws, row: int, label: str, value, fmt=None, editable=False) 
     return row + 1
 
 
-def _safe_filename(name: str) -> str:
-    return "".join(c if c.isalnum() or c in (" ", "-", "_") else "_" for c in name).strip().replace(" ", "_")
