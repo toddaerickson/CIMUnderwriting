@@ -49,7 +49,12 @@
   </div>
   {% endif %}
 
-  <div class="grid grid-cols-2 gap-2 max-w-lg">
+  {% comment %} Three-across on md+ so the levered offer (item E4) sits
+     beside the two unlevered ones and can be compared without scrolling;
+     two-across below that, where a third column would clip the labels.
+     Each card keeps its full label — the density rule stops at legibility.
+     {% endcomment %}
+  <div class="grid grid-cols-2 md:grid-cols-3 gap-2 max-w-3xl">
     <div class="rounded-md border border-slate-200 bg-white px-3 py-2">
       <div class="text-xs uppercase tracking-wide text-slate-500">Max Offer — Static</div>
       {% comment %} The bisection returns a price no matter what; without
@@ -63,6 +68,18 @@
       <div class="text-xs uppercase tracking-wide text-slate-500">Max Offer — Value-Add</div>
       <div class="text-sm font-semibold">{{ va_max_offer }}{% if va_max_offer_unconverged %}
         <span class="ml-1 rounded px-1.5 py-0.5 text-xs font-semibold bg-amber-100 text-amber-800" title="The solver hit its iteration limit without reaching the target IRR at any price in range — this is a bound, not a solved price.">DID NOT CONVERGE</span>{% endif %}</div>
+    </div>
+    {% endif %}
+    {% comment %} Item E4. The target is printed on the card because it is
+       NOT the unlevered target — two prices solved to different bars, and
+       a reader must be able to see that without opening the workbook.
+       {% endcomment %}
+    {% if has_levered_max_offer %}
+    <div class="rounded-md border border-slate-200 bg-white px-3 py-2">
+      <div class="text-xs uppercase tracking-wide text-slate-500">Max Offer — LP Net {{ levered_max_offer_target }}</div>
+      <div class="text-sm font-semibold">{{ levered_max_offer }}{% if levered_max_offer_unconverged %}
+        <span class="ml-1 rounded px-1.5 py-0.5 text-xs font-semibold bg-amber-100 text-amber-800" title="The solver hit its iteration limit without reaching the target LP net IRR at any price in range — this is a bound, not a solved price.">DID NOT CONVERGE</span>{% endif %}{% if levered_max_offer_warning %}
+        <span class="ml-1 rounded px-1.5 py-0.5 text-xs font-semibold bg-amber-100 text-amber-800" title="{{ levered_max_offer_warning }}">CHECK EXIT CAP</span>{% endif %}</div>
     </div>
     {% endif %}
   </div>

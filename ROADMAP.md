@@ -77,7 +77,13 @@ upfront, x% promote above a y% pref. No catch-up, no clawback, no tier builder.
       forward loop; 5 LPA questions remain open and ship as named, stamped defaults
 - [ ] **E3.** Levered wiring — assumptions / results / memo / xlsx; unlevered
       screen stays primary, levered is the second lens
-- [ ] **E4.** Solver targets LP net IRR (15%+) instead of unlevered IRR
+- [x] **E4.** Levered max offer — `solve_max_price_levered` targets a 15%
+      LP net IRR. Shipped BESIDE the 10% unlevered max offer rather than
+      instead of it (operator, 2026-08-01): the unlevered price is what the
+      primary gate is read against, so both are computed and both are shown,
+      each labelled with the target it was solved to. Monotonicity is
+      CI-guarded by a sweep across the exit-cap-coerced region, and an
+      observed inversion is reported on all three surfaces.
 - [ ] **G.** LP-facing 2-page investor summary (.docx) — **ships last**, after
       E4, so it can quote LP net IRR rather than unlevered property IRR. Its
       build dependency is D; its *ordering* dependency is E4. GC gate before any

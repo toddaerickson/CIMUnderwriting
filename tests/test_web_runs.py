@@ -149,6 +149,26 @@ def test_engine_end_to_end_with_overrides(tmp_path, monkeypatch):
     assert os.path.isfile(result.excel_path)
     assert result.gate_summary["recommendation"]
 
+    # Item E4: the levered max offer is a SECOND LENS, so the unlevered
+    # answer above must be untouched by its presence — and the two targets
+    # must not bleed into each other. `solver_target_irr=0.12` is the
+    # UNLEVERED target; the levered solver keeps its own 15% LP net
+    # target, because one number cannot be both and forwarding the
+    # unlevered one would silently re-price the levered answer whenever
+    # an analyst edited the unlevered one.
+    import config as cfg
+    levered_offer = result.levered_max_offer
+    assert levered_offer["max_price"] > 0
+    assert levered_offer["target_irr"] == cfg.SOLVER_TARGET_LP_NET_IRR
+    assert levered_offer["target_irr"] != 0.12
+    assert levered_offer["lp_net_irr"] == pytest.approx(
+        cfg.SOLVER_TARGET_LP_NET_IRR, abs=0.005)
+    # Priced on the SAME deal terms the results page shows, so the loan
+    # it reports is one this deal could actually raise.
+    assert levered_offer["senior_debt"] > 0
+    assert levered_offer["total_equity"] > 0
+    assert levered_offer["assumption_stamp"]
+
     # Anti-drift guard: webapp/results.py (returns_context) and
     # output/excel_writer.py both read these exact sensitivity keys from
     # the real engine output — pin the shape so a fixture can never

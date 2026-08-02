@@ -50,6 +50,12 @@ class AnalysisResult:
     # Solver
     max_offer: dict = field(default_factory=dict)
     va_max_offer: dict = field(default_factory=dict)
+    # The levered max offer (item E4): the price at which the deal still
+    # clears the fund's LP NET IRR target, after debt service, the AM fee
+    # and the promote. A SECOND LENS beside `max_offer`, never a
+    # replacement — `max_offer` is the price the primary unlevered gate is
+    # measured against, and the two answer different questions.
+    levered_max_offer: dict = field(default_factory=dict)
     # Value-add & risks
     value_add: dict = field(default_factory=dict)
     risk_analysis: dict = field(default_factory=dict)
@@ -387,18 +393,45 @@ def run_analysis(result: AnalysisResult, progress: Callable = None,
 
         # Step 7: Max price solver
         _progress(7, 9, "Solving for maximum offer price...")
-        from model.solver import solve_max_price, solve_max_price_value_add
+        from model.solver import (solve_max_price, solve_max_price_levered,
+                                  solve_max_price_value_add)
+        # Shared by all three solvers. `target_irr` is deliberately NOT in
+        # here — it is the UNLEVERED target and the levered solver takes a
+        # different one under a different name, so it is added per call.
         solver_kwargs = {"hold_years": hold_years,
                          "transaction_costs": transaction_costs,
                          "reserve": reserve,
                          "capex_pct_of_price": capex_pct_of_price,
                          "market_cap": market_cap}
+        unlevered_kwargs = dict(solver_kwargs)
         if solver_target_irr:
-            solver_kwargs["target_irr"] = solver_target_irr
+            unlevered_kwargs["target_irr"] = solver_target_irr
         result.max_offer = solve_max_price(
             adjusted_ttm_noi=result.adjusted_noi,
             capex=capex,
             expense_ratio=result.expense_ratio,
+            **unlevered_kwargs,
+        )
+
+        # The levered max offer (item E4). It takes the DEAL's resolved
+        # levered assumption set — the same objects `build_returns_model`
+        # was handed above — so the price it solves for is priced on the
+        # terms the results page shows. Re-resolving them here from config
+        # would answer for a deal nobody is looking at.
+        #
+        # `solver_target_irr` is deliberately NOT forwarded: it is the
+        # UNLEVERED target (10% by default, per-deal editable), and this
+        # solver targets LP net (15%). One number cannot be both, and
+        # passing the unlevered target here would quietly re-price the
+        # levered answer whenever an analyst edited the unlevered one.
+        result.levered_max_offer = solve_max_price_levered(
+            adjusted_ttm_noi=result.adjusted_noi,
+            capex=capex,
+            expense_ratio=result.expense_ratio,
+            debt_terms=resolved_debt_terms,
+            waterfall_terms=resolved_waterfall_terms,
+            am_fee_pct=am_fee_pct,
+            gp_coinvest_pct=capital["gp_coinvest_pct"],
             **solver_kwargs,
         )
         if result.va_results:
@@ -406,7 +439,10 @@ def run_analysis(result: AnalysisResult, progress: Callable = None,
                 cim_data=cim_data,
                 financial_analysis=result.financial_analysis,
                 capex=capex,
-                **solver_kwargs,
+                # `unlevered_kwargs`, not `solver_kwargs`: the VA solver
+                # targets the same unlevered IRR as `solve_max_price` and
+                # must keep honouring a per-deal `solver_target_irr`.
+                **unlevered_kwargs,
             )
     else:
         result.errors.append("Cannot run scenarios — missing NOI or asking price")
@@ -471,6 +507,7 @@ def run_analysis(result: AnalysisResult, progress: Callable = None,
         # no loan, and the memo and workbook must still build.
         levered=result.levered,
         debt=result.debt,
+        levered_max_offer=result.levered_max_offer,
         output_dir=output_dir,
     )
 
@@ -487,6 +524,7 @@ def run_analysis(result: AnalysisResult, progress: Callable = None,
         sources_uses=result.sources_uses,
         levered=result.levered,
         debt=result.debt,
+        levered_max_offer=result.levered_max_offer,
         output_dir=output_dir,
     )
 

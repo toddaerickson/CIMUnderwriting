@@ -900,6 +900,11 @@ def _analysis_worker(run_pk):
             "va_results": result.va_results,
             "max_offer": result.max_offer,
             "va_max_offer": result.va_max_offer,
+            # The levered max offer (item E4). Persisted beside the
+            # unlevered one, never instead of it: the two are priced to
+            # different targets on different cash-flow streams, and the
+            # unlevered figure is what the primary gate is read against.
+            "levered_max_offer": result.levered_max_offer,
             "financial_analysis": result.financial_analysis,
             "market_analysis": result.market_analysis,
             "physical_analysis": result.physical_analysis,
