@@ -338,6 +338,12 @@ def run_analysis(result: AnalysisResult, progress: Callable = None,
             market_cap=market_cap_rate)
     result.market_cap = market_cap
 
+    # Bound here, not only inside the branch: the template writer reads
+    # them at step 9 and a deal that never sized (no NOI, or no price)
+    # would otherwise raise NameError instead of writing a workbook.
+    resolved_debt_terms = None
+    resolved_waterfall_terms = None
+
     if result.adjusted_noi and asking > 0:
         from model.debt import resolve_debt_terms
         from model.returns_model import build_returns_model
@@ -541,6 +547,16 @@ def run_analysis(result: AnalysisResult, progress: Callable = None,
             hold_years=hold_years,
             transaction_costs=transaction_costs,
             capex=capex,
+            # Resolved ONCE above and handed down, never re-resolved here
+            # — `resolve_waterfall_terms` needs the deal's capital
+            # structure for `gp_coinvest_pct`, and a second resolution
+            # without it prints a waterfall the run never used. These are
+            # None only when the deal never sized (no NOI or no price),
+            # in which case the writer falls back to config defaults.
+            debt_terms=resolved_debt_terms,
+            waterfall_terms=resolved_waterfall_terms,
+            am_fee_pct=am_fee_pct,
+            sources_uses=result.sources_uses,
         )
     except Exception as e:
         result.errors.append(f"Template generation failed: {e}")

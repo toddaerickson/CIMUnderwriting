@@ -113,6 +113,10 @@ model/
 output/
   memo_writer.py           # Generates .docx from analysis outputs
   excel_writer.py          # Generates .xlsx returns model
+  template_writer.py       # Pre-fills the XLSM underwriting template's INPUT cells.
+                           #   Decides no value of its own — every number reads from the
+                           #   resolved assumption set or the run's results, CI-gated by
+                           #   an AST walk over its write paths (item E3b)
 ```
 
 ## Investment criteria (non-negotiable)

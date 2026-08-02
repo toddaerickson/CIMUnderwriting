@@ -191,6 +191,57 @@ def test_engine_end_to_end_with_overrides(tmp_path, monkeypatch):
         assert item["severity"] in {"High", "Medium", "Low"}
 
 
+def test_engine_end_to_end_writes_the_template_with_resolved_terms(
+        tmp_path, monkeypatch):
+    """Drives the REAL `run_analysis` through to the XLSM writer.
+
+    `generate_template` is called inside a bare `except Exception` that
+    appends to `result.errors`, so a broken kwarg, a renamed parameter or
+    an unbound `resolved_debt_terms` would be swallowed and the rest of
+    the suite would stay green — the same blind spot that let the
+    floating-rate bug (#28) and the market-cap double-resolve (#31) ship.
+    Every other template test calls `generate_template` directly and so
+    cannot see the engine's wiring at all. This one asserts the file is
+    produced, that nothing was swallowed, and that the terms which
+    arrived are the ones the run resolved rather than config defaults.
+    """
+    import openpyxl
+    from output import template_writer
+    from tests.test_template_writer import build_stub_template
+
+    monkeypatch.setattr("data.comp_db.COMP_DB_PATH", str(tmp_path / "comps.db"))
+    monkeypatch.setattr(template_writer, "TEMPLATE_PATH",
+                        str(build_stub_template(tmp_path / "stub.xlsm")))
+    from engine import AnalysisResult, run_analysis
+
+    result = AnalysisResult(pdf_path=str(tmp_path / "expo.pdf"))
+    result.cim_data = _sample_cim()
+    result = run_analysis(result, output_dir=str(tmp_path),
+                          debt_terms={"rate": 0.077, "term_years": 7},
+                          waterfall_terms={"pref_rate": 0.09},
+                          am_fee_pct=0.015)
+
+    assert not [e for e in result.errors if "Template" in e], result.errors
+    assert os.path.isfile(result.template_path)
+
+    wb = openpyxl.load_workbook(result.template_path, keep_vba=True)
+    try:
+        ws = wb["Underwriting"]
+        # The per-deal overrides reached the workbook, not config's
+        # 6.25% / 10yr / 8% pref / 1% fee.
+        assert ws["I73"].value == 0.077
+        assert ws["F73"].value == 84
+        assert ws["H258"].value == 0.09
+        assert ws["G254"].value == 0.015
+        # Leverage is on by default (E3a), so the run sized a loan and
+        # the workbook is not all-equity.
+        assert ws["H64"].value == pytest.approx(
+            result.sources_uses["ltv"], abs=1e-6)
+        assert ws["H64"].value > 0
+    finally:
+        wb.close()
+
+
 def test_run_analysis_enrich_true_refills_missing_demographics(tmp_path,
                                                                monkeypatch):
     """enrich=True re-runs Census enrichment when a demographic field is

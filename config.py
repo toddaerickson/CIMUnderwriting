@@ -515,6 +515,45 @@ WATERFALL_TERMS = {
 AM_FEE_PCT = 0.01
 AM_FEE_BASE = "invested_equity"     # the only base implemented; others raise
 
+# ── Partnership entity labels ───────────────────────────────────────
+# Names written into the XLSM's partnership block (C253 / C254). Labels,
+# not math. They live here because `output/template_writer.py` read
+# GP_NAME from the environment, and an env var is not an assumption
+# anybody can audit — the same objection that retired GP_EQUITY_SHARE,
+# GP_AM_FEE_RATE and GP_PROMOTE_PCT in item E3b.
+GP_ENTITY_NAME = os.environ.get("GP_NAME", "Marathon CRE")
+LP_ENTITY_NAME = "LP Group"
+
+# ── XLSM Underwriting Template Inputs (item E3b) ────────────────────
+# Assumptions the .xlsm underwriting template asks for that the Python
+# model has no equivalent of. They are here, and not literals inside
+# `output/template_writer.py`, because a number the template picks for
+# itself is a second underwriting opinion that nothing reconciles — the
+# defect the transparency audit raised and item E3b closed.
+#
+# Every value below EQUALS the literal it replaced, so shipping this
+# block moved no XLSM cell. Revisiting the values is item T's call, not
+# this block's (scoped-backlog rule 1: behavior-preserving).
+#
+# `assumed_physical_occupancy` is the one that is not merely a template
+# input: it is what gets underwritten when the CIM never states
+# occupancy. `template_writer._physical_occupancy` logs a warning every
+# time it is used, so a deal priced on an assumption instead of a fact
+# says so — silence was the audit's actual complaint.
+#
+# Out of _PATCHED_DICTS for the reason recorded above the capital block:
+# a patched dict is mutated IN PLACE for one deal's run, so anything
+# resolving it outside that run's lock reads another deal's values.
+XLSM_TEMPLATE_INPUTS = {
+    "credit_loss_in_place":     0.01,    # G147 — % of potential income
+    "credit_loss_stabilized":   0.01,    # I147
+    "bank_fee_pct_in_place":    0.0100,  # G155 — merchant fees, % of EGR
+    "bank_fee_pct_stabilized":  0.0125,  # I155
+    "capex_start_month":        1,       # E30 — deferred-maintenance timing
+    "capex_duration_months":    6,       # F30 — spread evenly over N months
+    "assumed_physical_occupancy": 0.90,  # only when the CIM omits it
+}
+
 # ── Regional Expense Adjustments ──────────────────────────────────
 # Multipliers applied to national EXPENSE_BENCHMARKS by region.
 # Derived from ISS Self-Storage Expense Guidebook and SSA Operating
