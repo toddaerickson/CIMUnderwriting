@@ -22,9 +22,12 @@ returns on by default it shipped on every deal.
 
 `tests/test_template_writer.py::test_no_numeric_literals_in_write_paths`
 enforces this with an AST walk, not by inspection: no numeric literal may
-appear on the VALUE side of a cell write. Structural constants — a
-column index, an at-closing zero, the template's own year-1 convention —
-are named once below, which is what makes them reviewable.
+appear on the VALUE side of a cell write. The walk FOLLOWS LOCAL NAMES,
+so parking a literal in a variable one line above the write does not
+evade it — that hole was found in review and the gate now has its own
+test proving it fails when it should. Structural constants — a column
+index, an at-closing zero, the template's own year-1 convention — are
+named once below, which is what makes them reviewable.
 
 ## What still does not reconcile, stated rather than hidden
 
@@ -152,6 +155,14 @@ _BLANK_UNIT_ROW = {
 }
 _OTHER_INCOME_ROWS = (138, 139, 140, 141, 142, 143)
 _NO_INCOME = 0
+
+# Absence-of-data fallbacks. A CIM that reports no CapEx, no other
+# income and no expense line for a category gets zero, not a guess.
+_NO_CAPEX = 0
+_NO_EXPENSE = 0
+# Divide-by-zero guard for the $/SF conversions, not an area estimate:
+# a deal with no NRSF has no per-SF expense to write either way.
+_NRSF_FALLBACK = 1
 
 # We model ONE senior loan. Mezz/junior paper is out of scope (scoped
 # backlog item D), so H65 stays flat zero rather than reading a term.
@@ -313,7 +324,13 @@ def _physical_occupancy(cim_data) -> float:
     nothing anywhere said so.
     """
     occ = cim_data.physical_occupancy
-    if occ:
+    # `is not None`, not truthiness: `physical_occupancy` defaults to None
+    # when the parser finds nothing, so None is genuinely "missing" — but
+    # a CIM that STATES 0% is a fully vacant building, and `or` would
+    # overwrite that fact with 90% while logging that it was absent. A
+    # warning that misreports its own trigger is worse than the silence
+    # this helper exists to end.
+    if occ is not None:
         return float(occ)
     assumed = cfg.XLSM_TEMPLATE_INPUTS["assumed_physical_occupancy"]
     logger.warning(
@@ -322,6 +339,20 @@ def _physical_occupancy(cim_data) -> float:
         "relying on the workbook's vacancy or stabilization timing.",
         assumed * 100)
     return float(assumed)
+
+
+def _next_month_start(today: datetime) -> datetime:
+    """First of the month after `today` — the template's analysis begin
+    date. Calendar arithmetic, not an assumption, which is why the month
+    and day components live here and not in a write path."""
+    if today.month == 12:
+        return datetime(today.year + 1, 1, 1)
+    return datetime(today.year, today.month + 1, 1)
+
+
+def _unit_label(unit, index: int) -> str:
+    """The unit type's own label, or a 1-based positional stand-in."""
+    return unit.size_label or f"Type {index + 1}"
 
 
 def _vacancy_from(occupancy: float) -> float:
@@ -364,12 +395,7 @@ def _write_property_description(ws, cim_data, hold_years: int):
         ws["F16"] = cim_data.year_built
 
     # Analysis begin date: first of next month
-    today = datetime.now()
-    if today.month == 12:
-        start = datetime(today.year + 1, 1, 1)
-    else:
-        start = datetime(today.year, today.month + 1, 1)
-    ws["F17"] = start
+    ws["F17"] = _next_month_start(datetime.now())
 
     # Sale month — the hold period as the template expresses it.
     ws["D182"] = hold_years * MONTHS_PER_YEAR
@@ -403,7 +429,8 @@ def _write_investment_cf(ws, cim_data, costs: dict, capex: float = None):
     # `capex` arrives resolved when the caller knows the basis; a bare
     # cim_data read would write 0.02 into a dollar cell for a deal whose
     # CapEx was entered as a percentage of price.
-    capex = (cim_data.capex_estimate or 0) if capex is None else capex
+    capex = ((cim_data.capex_estimate or _NO_CAPEX) if capex is None
+             else capex)
     if capex > 0:
         ws["B30"] = "Deferred Maintenance"
         ws["K30"] = capex
@@ -515,7 +542,7 @@ def _write_unit_mix(ws, cim_data, params: dict):
             break
 
         row = UNIT_MIX_START_ROW + i
-        label = unit.size_label or f"Type {i+1}"
+        label = _unit_label(unit, i)
         rate = unit.rate or _BLANK_UNIT_ROW[_COL_IN_PLACE]
 
         ws.cell(row=row, column=_COL_UNIT_LABEL).value = label
@@ -542,7 +569,7 @@ def _write_unit_mix(ws, cim_data, params: dict):
 
 def _write_other_income(ws, cim_data):
     """Populate other income lines."""
-    other = cim_data.other_income or 0
+    other = cim_data.other_income or _NO_INCOME
 
     # Clear defaults
     for row in _OTHER_INCOME_ROWS:
@@ -587,7 +614,7 @@ def _write_opex(ws, cim_data, financial_analysis: dict):
     In-Place column (G): CIM actual $/SF/year
     Stabilized column (I): analyst-adjusted $/SF/year
     """
-    nrsf = cim_data.nrsf or 1
+    nrsf = cim_data.nrsf or _NRSF_FALLBACK
     expense_analysis = financial_analysis.get("expense_analysis", {})
     expense_lines = expense_analysis.get("lines", [])
 
@@ -607,7 +634,7 @@ def _write_opex(ws, cim_data, financial_analysis: dict):
         if cim_value is not None:
             in_place_psf = cim_value / nrsf
         else:
-            in_place_psf = 0
+            in_place_psf = _NO_EXPENSE
 
         # Stabilized: analyst-adjusted as $/SF/year
         if adjusted_value is not None:
@@ -624,8 +651,10 @@ def _write_opex(ws, cim_data, financial_analysis: dict):
     # states one; otherwise the top of the benchmark band, which is the
     # conservative end and the value this replaced. Which end is the
     # right underwriting target is item T's (scoped-backlog rule 3).
-    mgmt_pct = (cim_data.mgmt_fee_pct
-                or cfg.EXPENSE_BENCHMARKS["mgmt_fee_pct"][_BAND_HIGH])
+    # `is not None` for the same reason as `_physical_occupancy`: a
+    # self-managed property stating a 0% fee is data, not a blank.
+    mgmt_pct = (cim_data.mgmt_fee_pct if cim_data.mgmt_fee_pct is not None
+                else cfg.EXPENSE_BENCHMARKS["mgmt_fee_pct"][_BAND_HIGH])
     ws["G157"] = mgmt_pct
     ws["I157"] = mgmt_pct
 

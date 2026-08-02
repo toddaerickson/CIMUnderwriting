@@ -33,30 +33,73 @@ WRITER_SOURCE = Path(template_writer.__file__)
 
 # ── Gate 1: no numeric literal decides a cell value ──────────────────
 
-def _cell_write_values(tree):
-    """Yield the VALUE expression of every cell write in the module.
+def _is_cell_write(node):
+    """True for `ws["A1"] = ...` and `ws.cell(...).value = ...`.
 
-    A cell write is `ws["A1"] = <value>` or
-    `ws.cell(row=.., column=..).value = <value>`. Row and column
-    arguments sit on the TARGET side and are deliberately not checked:
-    a column index is the template's schema, not an underwriting
-    assumption. What the rule forbids is the writer choosing the number
-    that lands in the cell.
+    Row and column arguments sit on the TARGET side and are deliberately
+    not checked: a column index is the template's schema, not an
+    underwriting assumption. What the rule forbids is the writer
+    choosing the number that lands in the cell.
     """
-    for node in ast.walk(tree):
-        if not isinstance(node, ast.Assign):
-            continue
-        for target in node.targets:
-            is_subscript = isinstance(target, ast.Subscript)
-            is_cell_value = (
-                isinstance(target, ast.Attribute)
+    for target in node.targets:
+        if isinstance(target, ast.Subscript):
+            return True
+        if (isinstance(target, ast.Attribute)
                 and target.attr == "value"
                 and isinstance(target.value, ast.Call)
                 and isinstance(target.value.func, ast.Attribute)
-                and target.value.func.attr == "cell"
-            )
-            if is_subscript or is_cell_value:
-                yield node, node.value
+                and target.value.func.attr == "cell"):
+            return True
+    return False
+
+
+def _local_assignments(func):
+    """name -> [expressions assigned to it] inside one function."""
+    out = {}
+    for node in ast.walk(func):
+        targets = []
+        if isinstance(node, ast.Assign):
+            targets = [t for t in node.targets if isinstance(t, ast.Name)]
+        elif (isinstance(node, (ast.AnnAssign, ast.AugAssign))
+                and isinstance(node.target, ast.Name) and node.value):
+            targets = [node.target]
+        for target in targets:
+            out.setdefault(target.id, []).append(node.value)
+    return out
+
+
+def _reachable_literals(expr, locals_, seen=None):
+    """Numeric literals reachable from `expr`, following local names.
+
+    A bare `ws["K180"] = value` where `value = 0.065` two lines earlier
+    is the same defect as writing the literal inline, so the walk does
+    not stop at the name — it follows every expression assigned to that
+    name within the function. `seen` guards the self-referential case
+    (`capex = ... if capex is None else capex`).
+    """
+    seen = set() if seen is None else seen
+    found = []
+    for node in ast.walk(expr):
+        if (isinstance(node, ast.Constant)
+                and isinstance(node.value, (int, float))
+                and not isinstance(node.value, bool)):
+            found.append(node.value)
+        elif isinstance(node, ast.Name) and node.id not in seen:
+            seen.add(node.id)
+            for assigned in locals_.get(node.id, []):
+                found += _reachable_literals(assigned, locals_, seen)
+    return found
+
+
+def _cell_write_values(tree):
+    """Yield (function, assign-node, value-expr, local-assignment map)."""
+    for func in ast.walk(tree):
+        if not isinstance(func, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        locals_ = _local_assignments(func)
+        for node in ast.walk(func):
+            if isinstance(node, ast.Assign) and _is_cell_write(node):
+                yield func, node, node.value, locals_
 
 
 def test_no_numeric_literals_in_write_paths():
@@ -76,12 +119,10 @@ def test_no_numeric_literals_in_write_paths():
     tree = ast.parse(WRITER_SOURCE.read_text())
     offenders = []
 
-    for assign, value in _cell_write_values(tree):
-        for node in ast.walk(value):
-            if isinstance(node, ast.Constant) and isinstance(
-                    node.value, (int, float)) and not isinstance(
-                    node.value, bool):
-                offenders.append(f"line {assign.lineno}: {node.value!r}")
+    for func, assign, value, locals_ in _cell_write_values(tree):
+        for literal in _reachable_literals(value, locals_):
+            offenders.append(
+                f"{func.name} line {assign.lineno}: {literal!r}")
 
     assert not offenders, (
         "numeric literals decide a cell value in template_writer.py:\n  "
@@ -89,6 +130,36 @@ def test_no_numeric_literals_in_write_paths():
         + "\nName it as a structural constant, or read it from config / "
           "the resolved terms / the run's results."
     )
+
+
+def test_the_literal_gate_catches_a_literal_behind_a_variable():
+    """The gate is only worth having if it fails when it should.
+
+    A literal parked in a local and written a line later is the same
+    defect as writing it inline, and the obvious implementation — check
+    only the RHS of the cell-write statement — misses it silently. This
+    pins that the walk follows local names, so a future simplification
+    of `_reachable_literals` cannot quietly reopen the hole.
+    """
+    hidden = ast.parse(
+        "def f(ws):\n"
+        "    value = 0.065\n"
+        "    ws['K180'] = value\n"
+    )
+    caught = [lit
+              for _f, _a, value, locals_ in _cell_write_values(hidden)
+              for lit in _reachable_literals(value, locals_)]
+    assert caught == [0.065]
+
+    # ...and does not fire on a value that traces to config.
+    clean = ast.parse(
+        "def f(ws):\n"
+        "    value = cfg.DEBT_TERMS['rate']\n"
+        "    ws['K180'] = value\n"
+    )
+    assert not [lit
+                for _f, _a, value, locals_ in _cell_write_values(clean)
+                for lit in _reachable_literals(value, locals_)]
 
 
 def test_no_environment_reads_outside_the_template_path():
@@ -123,10 +194,12 @@ REAL_H258_FORMULA = '=IF(H64>0,0.08,IF(H64=0,0.06,"n/a"))'
 REAL_H259_FORMULA = "=+H258"
 
 
-@pytest.fixture
-def stub_template(tmp_path, monkeypatch):
-    """A minimal .xlsm standing in for the proprietary template."""
-    path = tmp_path / "stub_template.xlsm"
+def build_stub_template(path):
+    """Write a minimal .xlsm standing in for the proprietary template.
+
+    Shared with `tests/test_web_runs.py`, which drives the real
+    `engine.run_analysis` against it.
+    """
     wb = openpyxl.Workbook()
     ws = wb.active
     ws.title = "Underwriting"
@@ -136,6 +209,12 @@ def stub_template(tmp_path, monkeypatch):
     ws["H259"] = REAL_H259_FORMULA
     wb.save(path)
     wb.close()
+    return path
+
+
+@pytest.fixture
+def stub_template(tmp_path, monkeypatch):
+    path = build_stub_template(tmp_path / "stub_template.xlsm")
     monkeypatch.setattr(template_writer, "TEMPLATE_PATH", str(path))
     return path
 
