@@ -532,15 +532,25 @@ def solve_max_price_levered(adjusted_ttm_noi: float,
             "levered max-offer solver found no price with a convergent LP "
             "net IRR between $%.0f and $%.0f — reporting no answer rather "
             "than a bound.", low, high)
+        # EVERY key the success branch returns, or none of them. A branch
+        # that omits keys makes `levered_max_offer` a different shape
+        # depending on whether it found an answer, so a consumer reading
+        # `offer["exit_cap"]` works on most deals and KeyErrors on the
+        # ones that failed to solve — the worst possible distribution of
+        # a crash. Today all three consumers gate on `max_price` first,
+        # which is why this is fragility rather than a live bug; keeping
+        # the shapes identical means the next consumer cannot reopen it.
         return {
             "max_price": None, "implied_entry_cap": None,
             "achieved_irr": None, "lp_net_irr": None, "lp_moic": None,
             "target_irr": target_lp_irr, "iterations": iterations,
-            "converged": False, "capex": capex_at(0) or (capex or 0.0),
+            "converged": False, "capex": capex_at(0.0),
             "acquisition_cost": None, "transaction_costs": costs,
-            "reserve": reserve, "total_basis": None,
+            "reserve": reserve, "total_basis": None, "total_uses": None,
             "senior_debt": None, "financing_costs": None,
-            "total_equity": None, "binding_constraint": None,
+            "total_equity": None, "ltv": None, "binding_constraint": None,
+            "unlevered_irr": None, "exit_cap": None,
+            "exit_cap_coerced": False,
             "coerced_region": coerced_region,
             "monotonicity_warning": warning,
             "assumption_stamp": [],

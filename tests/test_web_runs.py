@@ -340,6 +340,16 @@ def fake_run(monkeypatch):
                             "converged": True}
         result.va_max_offer = {"max_price": 3_300_000.0, "achieved_irr": 0.10,
                                "converged": True}
+        # Item E4, built by the REAL solver for the same reason the stack
+        # and the levered lens above are: this payload is what the
+        # persistence test asserts round-trips through JSONB, and a
+        # hand-rolled dict would keep that test green past a change that
+        # broke the actual shape. The two dicts above predate that rule
+        # and are only ever read for `max_price`.
+        from model.solver import solve_max_price_levered
+        result.levered_max_offer = solve_max_price_levered(
+            adjusted_ttm_noi=250_000, capex=100_000, expense_ratio=0.40,
+            reserve=50_000)
         result.financial_analysis = {
             "adjusted_ttm_noi": {"cim_ttm_noi": 250_000.0,
                                  "analyst_adjusted_noi": 230_000.0},
@@ -722,6 +732,35 @@ def test_run_payload_carries_the_levered_lens(client, operator, deals_dir,
                   if r["key"] == "am_fee_treatment")
     assert am_row["base"] == "invested_equity"
     assert "1.00%" in am_row["label"]
+
+    # Item E4's payload, held to the same round-trip contract. This goes
+    # through a REAL run and a real DB fetch, because the failure it
+    # guards is invisible in memory: `json_safe` falls back to `str(obj)`
+    # on anything it does not recognise, so a frozen dataclass reaching
+    # JSONB persists as "DebtTerms(rate=0.0625, ...)" — unqueryable, and
+    # a consumer reading ["terms"]["rate"] gets "string indices must be
+    # integers". That is exactly how E3a lost `debt["terms"]`, and a new
+    # persisted payload is where it would happen again.
+    offer = payload["levered_max_offer"]
+    assert offer["max_price"] > 0
+    assert offer["lp_net_irr"] is not None
+    assert offer["senior_debt"] > 0
+    assert offer["total_equity"] > 0
+    # Solved to the LP NET target, NOT the unlevered one.
+    import config as cfg
+    assert offer["target_irr"] == cfg.SOLVER_TARGET_LP_NET_IRR
+    # Plain JSON types all the way down — no stringified dataclass.
+    assert isinstance(offer["transaction_costs"], dict)
+    assert isinstance(offer["assumption_stamp"], list)
+    assert isinstance(offer["binding_constraint"], str)
+    # The stamp survives the round trip, so the stored price can be
+    # displayed later without recomputing what it assumed.
+    assert {r["key"] for r in offer["assumption_stamp"]} == {
+        "pref_compounding", "accrual_base", "ordering", "am_fee_treatment",
+        "promote_basis"}
+    # The unlevered max offer is untouched beside it — second lens, not a
+    # replacement.
+    assert payload["max_offer"]["max_price"] > 0
 
 
 @pytest.mark.django_db
