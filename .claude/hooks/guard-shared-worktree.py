@@ -62,6 +62,20 @@ version; rounds 2-5 each found real holes in what the previous round called done
   * `--help` exempts only as the LEADING argument. `git commit -m --help`
     COMMITS, with "--help" as the message — verified against real git — so
     scanning the whole arg list for it exempts a real mutation.
+  * v5 NARROWED two rules that were denying safe work and offering advice that
+    did not help. `worktree remove`/`prune` and `branch -d`/`-D` cannot reach
+    the primary WORKING TREE at all — they drop a worktree dir or a ref, and
+    git itself refuses each of them on the shapes that would hurt: the main
+    tree is not removable, a dirty worktree needs `--force`, and a branch
+    checked out in ANY worktree cannot be deleted or force-moved (all four
+    verified against real git, not inferred). They are also the documented
+    post-merge cleanup in CLAUDE.md rule 3. Crucially, the remedy the deny
+    message offered — isolate into a worktree — makes neither command safer,
+    because it is the identical ref/dir deletion from a different cwd. A
+    check whose fix does not reduce the risk it names is friction, not
+    defence. `worktree remove --force`, `worktree move`/`repair` and
+    `branch -m`/`-f`/`--set-upstream-to` stay denied: each defeats one of
+    git's own protections or persists in the shared .git.
   * Scoped to THIS clone via $CLAUDE_PROJECT_DIR — other repos are never guarded.
   * A git mutation whose target can't be resolved (unexpanded $VAR / missing dir)
     FAILS CLOSED (deny).
@@ -231,12 +245,68 @@ def _restore_mut(args):
 
 
 def _branch_mut(args):
-    # delete/rename/force (not list/create), plus the upstream rewrites — those
-    # touch no file but persist in .git/config for every later session.
-    return any(a in ("-d", "-D", "--delete", "-m", "-M", "--move", "-f", "--force",
+    # rename/force/upstream rewrites — those touch no file but persist in
+    # .git/config, or repoint a ref, for every later session.
+    #
+    # DELETING a branch is ALLOWED, and that is a deliberate narrowing (see
+    # `_worktree_mut` for the same argument at more length). Two reasons:
+    #
+    #   1. It cannot reach the primary WORKING TREE, which is the only thing
+    #      this guard exists to protect. It removes a ref; it writes no
+    #      tracked file and moves no HEAD.
+    #   2. Git itself refuses to delete a branch checked out in ANY worktree
+    #      — verified: `error: cannot delete branch 'feat' used by worktree
+    #      at '/tmp/gx/wt'`. So it can only drop a ref that no live session
+    #      is sitting on.
+    #
+    # It was also blocking the post-merge cleanup CLAUDE.md rule 3 names as a
+    # ship step ("local ref delete via `git branch -D`"), and the remedy the
+    # deny message offered — isolate into a worktree — does not make the
+    # command any safer, because it is the same ref deletion from a different
+    # cwd. A check whose fix does not reduce the risk it names is friction,
+    # not defence.
+    #
+    # `--delete --force` is the long spelling of `-D`, so it lands here too
+    # rather than tripping the `--force` arm below.
+    if _helpish(args):
+        return False
+    if any(a in ("-d", "-D", "--delete") for a in args):
+        return False
+    return any(a in ("-m", "-M", "--move", "-f", "--force",
                      "-u", "--unset-upstream", "--edit-description")
                or a.startswith("--set-upstream-to")
                for a in args)
+
+
+def _worktree_mut(args):
+    """Worktree admin, judged by whether it can reach the primary tree.
+
+    `remove` and `prune` are ALLOWED because git makes them unable to do the
+    damage this guard is for — verified, not assumed:
+
+      * `git worktree remove <main>` → `fatal: '<path>' is a main working
+        tree`. The primary tree is not removable by this command at all.
+      * `git worktree remove <dirty>` → `fatal: contains modified or
+        untracked files, use --force to delete it`. Uncommitted work in a
+        CONCURRENT session's worktree is therefore safe from the plain form,
+        which is the cross-session hazard worth caring about here.
+      * `prune` only drops bookkeeping for worktree dirs that are already
+        gone from disk.
+
+    `--force` defeats the second protection, so it stays denied — that is the
+    one spelling that can delete another session's uncommitted work.
+
+    `move` and `repair` stay denied: both rewrite worktree metadata in the
+    shared .git for every session, and neither is part of any routine flow.
+    """
+    if _helpish(args) or not args:
+        return False
+    sub = args[0]
+    if sub == "remove":
+        return any(a in ("-f", "--force") for a in args)
+    if sub == "prune":
+        return False
+    return sub in ("move", "repair")
 
 
 def _helpish(args):
@@ -391,7 +461,7 @@ def _is_mutation(sub, args):
     if sub == "reflog":
         return bool(args) and args[0] in ("delete", "expire")
     if sub == "worktree":
-        return bool(args) and args[0] in ("remove", "prune", "move", "repair")
+        return _worktree_mut(args)
     if sub == "remote":
         # set-url/add/rename rewrite .git/config — where every session pushes.
         return _second_word_mut(args, ("show", "get-url", "-v", "--verbose"))
@@ -482,6 +552,18 @@ def _reason(target, sub=""):
             f"here. Either `git fetch origin --prune` (moves remote-tracking refs only, "
             f"never the working tree — new worktrees branch from origin/main anyway), or, "
             f"once no other session is live, re-launch with CIM_SOLO=1 and pull --ff-only."
+        )
+    if sub in ("worktree", "branch"):
+        return (
+            f"BLOCKED: this `git {sub}` form can disturb a CONCURRENT session's work "
+            f"in the shared clone. Deleting a worktree or a branch is allowed — git "
+            f"refuses those on the main tree, on a dirty worktree, and on a branch "
+            f"anyone has checked out. This form defeats one of those protections: "
+            f"`worktree remove --force` deletes uncommitted work, `worktree "
+            f"move`/`repair` rewrite shared .git metadata, and `branch "
+            f"-m`/`-f`/`--set-upstream-to` repoint a ref or persist config for every "
+            f"later session. Confirm no other session owns it, then re-launch with "
+            f"CIM_SOLO=1, or use the non-forcing spelling."
         )
     return (
         f"BLOCKED: this mutation targets the PRIMARY working tree of the shared clone "

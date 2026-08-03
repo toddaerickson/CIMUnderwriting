@@ -422,3 +422,72 @@ def test_guard_still_denies_a_file_edit_in_the_primary_tree(repo):
                        capture_output=True, text=True, env=e, timeout=30)
     assert p.returncode == 0
     assert json.loads(p.stdout)["hookSpecificOutput"]["permissionDecision"] == "deny"
+
+
+# ── v5: worktree/branch admin that cannot reach the primary tree ─────
+# Each "allowed" case below is allowed because GIT refuses the dangerous
+# shape itself, verified against real git:
+#   worktree remove <main>   -> fatal: '<path>' is a main working tree
+#   worktree remove <dirty>  -> fatal: contains modified or untracked files
+#   branch -D <checked out>  -> error: cannot delete branch 'x' used by worktree
+#   branch -f <checked out>  -> fatal: cannot force update the branch 'x'
+# So the guard is not the thing standing between these and a collision.
+
+
+def test_guard_allows_removing_and_pruning_a_worktree(repo, tmp_path):
+    """The post-merge cleanup in CLAUDE.md rule 3. `worktree remove` cannot
+    touch the main tree and refuses a dirty worktree, so denying it bought
+    nothing — and 'isolate into a worktree' is not even coherent advice for
+    a command that removes one."""
+    wt = tmp_path / "wt"
+    git(repo, "worktree", "add", "-q", str(wt), "-b", "feature")
+    assert run_guard(f"git -C {repo} worktree remove {wt}", repo, repo) is None
+    assert run_guard(f"git -C {repo} worktree prune", repo, repo) is None
+    assert run_guard(f"git -C {repo} worktree list", repo, repo) is None
+    assert run_guard(f"git -C {repo} worktree add {tmp_path}/x -b y", repo, repo) is None
+
+
+def test_guard_still_denies_the_forcing_worktree_forms(repo, tmp_path):
+    """`--force` is the one spelling that deletes a concurrent session's
+    uncommitted work; move/repair rewrite shared .git metadata."""
+    wt = tmp_path / "wt"
+    assert run_guard(f"git -C {repo} worktree remove --force {wt}", repo, repo) == "deny"
+    assert run_guard(f"git -C {repo} worktree remove -f {wt}", repo, repo) == "deny"
+    assert run_guard(f"git -C {repo} worktree move {wt} {tmp_path}/z", repo, repo) == "deny"
+    assert run_guard(f"git -C {repo} worktree repair", repo, repo) == "deny"
+
+
+def test_guard_allows_deleting_a_branch(repo):
+    """A ref deletion writes no tracked file and moves no HEAD, and git
+    refuses it outright for a branch any worktree has checked out."""
+    assert run_guard(f"git -C {repo} branch -d feature", repo, repo) is None
+    assert run_guard(f"git -C {repo} branch -D feature", repo, repo) is None
+    assert run_guard(f"git -C {repo} branch --delete feature", repo, repo) is None
+    # The long spelling of -D must not trip the --force arm.
+    assert run_guard(f"git -C {repo} branch --delete --force feature", repo, repo) is None
+
+
+def test_guard_still_denies_branch_rewrites(repo):
+    """Rename repoints another worktree's HEAD; force-move can drop the only
+    handle on unmerged commits; upstream/description persist in .git/config
+    for every later session."""
+    assert run_guard(f"git -C {repo} branch -m old new", repo, repo) == "deny"
+    assert run_guard(f"git -C {repo} branch -M old new", repo, repo) == "deny"
+    assert run_guard(f"git -C {repo} branch -f feature HEAD", repo, repo) == "deny"
+    assert run_guard(f"git -C {repo} branch --set-upstream-to=origin/x", repo, repo) == "deny"
+    assert run_guard(f"git -C {repo} branch --unset-upstream", repo, repo) == "deny"
+
+
+def test_guard_still_allows_listing_branches(repo):
+    assert run_guard(f"git -C {repo} branch", repo, repo) is None
+    assert run_guard(f"git -C {repo} branch -a", repo, repo) is None
+    assert run_guard(f"git -C {repo} branch --help", repo, repo) is None
+    assert run_guard(f"git -C {repo} worktree --help", repo, repo) is None
+
+
+def test_the_narrowed_forms_still_deny_a_real_tree_mutation(repo):
+    """Regression fence: narrowing branch/worktree must not have loosened
+    anything else in the same classifier."""
+    assert run_guard(f"git -C {repo} checkout main", repo, repo) == "deny"
+    assert run_guard(f"git -C {repo} reset --hard", repo, repo) == "deny"
+    assert run_guard(f"git -C {repo} commit -m x", repo, repo) == "deny"
