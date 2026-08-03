@@ -300,9 +300,13 @@ def _branch_mut(args):
         return False
     short, longs = _short_flags(args)
 
-    # Rename, or force-copy over an existing ref.
-    if short & set("mMC") or longs & {"--move", "--unset-upstream",
-                                      "--edit-description", "--set-upstream-to"}:
+    # Rename, force-copy over an existing ref, or write branch.* into the
+    # shared .git/config. `u` is in the short set because the rewrite to
+    # `_short_flags` dropped it and only kept `--set-upstream-to` — caught
+    # on re-review, and exactly the "carried the long form, forgot the
+    # short one" slip that `_short_flags` exists to make impossible.
+    if short & set("mMCu") or longs & {"--move", "--copy", "--unset-upstream",
+                                       "--edit-description", "--set-upstream-to"}:
         return True
     forced = bool(short & set("fD")) or "--force" in longs
     deleting = bool(short & set("dD")) or "--delete" in longs

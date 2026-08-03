@@ -488,6 +488,12 @@ def test_guard_still_denies_the_other_branch_rewrites(repo):
     assert run_guard(f"git -C {repo} branch -C old new", repo, repo) == "deny"
     assert run_guard(f"git -C {repo} branch --set-upstream-to=origin/x", repo, repo) == "deny"
     assert run_guard(f"git -C {repo} branch --unset-upstream", repo, repo) == "deny"
+    # The SHORT spelling too: `-u` writes branch.<n>.remote/.merge into the
+    # shared .git/config just as the long form does, and a rewrite of this
+    # function once carried the long form and dropped it.
+    assert run_guard(f"git -C {repo} branch -u origin/main", repo, repo) == "deny"
+    assert run_guard(f"git -C {repo} branch -u main feature", repo, repo) == "deny"
+    assert run_guard(f"git -C {repo} branch --copy --force old new", repo, repo) == "deny"
 
 
 def test_guard_still_allows_listing_and_creating_branches(repo):
