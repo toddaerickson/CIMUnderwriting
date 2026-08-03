@@ -422,3 +422,91 @@ def test_guard_still_denies_a_file_edit_in_the_primary_tree(repo):
                        capture_output=True, text=True, env=e, timeout=30)
     assert p.returncode == 0
     assert json.loads(p.stdout)["hookSpecificOutput"]["permissionDecision"] == "deny"
+
+
+# ── v6: worktree/branch admin, after an adversarial pass reverted half
+#        of v5 ─────────────────────────────────────────────────────────
+# Every "allowed" case is allowed because GIT refuses the destructive
+# shape itself — verified against real git, and the cases v5 got WRONG
+# are pinned here too so the argument cannot be re-made from memory:
+#   worktree remove <main>       fatal: is a main working tree
+#   worktree remove <visible-dirt> fatal: contains modified or untracked files
+#   branch -d <unmerged>         error: the branch is not fully merged
+#   branch -D <unmerged>         DELETES IT — which is why -D stays denied
+
+
+def test_guard_allows_removing_a_worktree(repo, tmp_path):
+    """The post-merge cleanup CLAUDE.md rule 3 names. Git will not run this
+    on the main tree at all, so it cannot reach what the hook protects."""
+    wt = tmp_path / "wt"
+    git(repo, "worktree", "add", "-q", str(wt), "-b", "feature")
+    assert run_guard(f"git -C {repo} worktree remove {wt}", repo, repo) is None
+    assert run_guard(f"git -C {repo} worktree list", repo, repo) is None
+    assert run_guard(f"git -C {repo} worktree add {tmp_path}/x -b y", repo, repo) is None
+
+
+def test_guard_denies_the_destructive_worktree_forms(repo, tmp_path):
+    """`--force` deletes a concurrent session's uncommitted work. `prune`
+    decides "already gone" from whether the path resolves RIGHT NOW, and
+    permanently breaks a worktree that was only temporarily moved."""
+    wt = tmp_path / "wt"
+    assert run_guard(f"git -C {repo} worktree remove --force {wt}", repo, repo) == "deny"
+    assert run_guard(f"git -C {repo} worktree remove -f {wt}", repo, repo) == "deny"
+    assert run_guard(f"git -C {repo} worktree prune", repo, repo) == "deny"
+    assert run_guard(f"git -C {repo} worktree move {wt} {tmp_path}/z", repo, repo) == "deny"
+    assert run_guard(f"git -C {repo} worktree repair", repo, repo) == "deny"
+
+
+def test_guard_allows_a_safe_branch_delete_but_never_a_forced_one(repo):
+    """`-d` is safe because git refuses it on an unmerged branch. `-D`
+    exists to bypass exactly that check, and after a worktree is removed
+    the ref is the only durable copy of the work (CLAUDE.md rule 1) — so
+    it is the branch equivalent of `worktree remove --force`."""
+    assert run_guard(f"git -C {repo} branch -d feature", repo, repo) is None
+    assert run_guard(f"git -C {repo} branch --delete feature", repo, repo) is None
+
+    assert run_guard(f"git -C {repo} branch -D feature", repo, repo) == "deny"
+    assert run_guard(f"git -C {repo} branch --delete --force feature", repo, repo) == "deny"
+    assert run_guard(f"git -C {repo} branch -df feature", repo, repo) == "deny"
+
+
+def test_bundled_short_flags_cannot_launder_a_branch_rewrite(repo):
+    """The hole seven hardening rounds walked past: git accepts `-fm` for
+    `-f -m`, and exact-token matching never saw it, so a FORCE RENAME was
+    allowed while the unbundled spelling denied. Verified against real git
+    that `branch -fm src dst` actually performs the rename."""
+    for bundled in ("-fm", "-mf", "-Mf", "-fM"):
+        assert run_guard(f"git -C {repo} branch {bundled} old new", repo, repo) == "deny", bundled
+    # The unbundled controls must still deny, or the test proves nothing.
+    assert run_guard(f"git -C {repo} branch -f -m old new", repo, repo) == "deny"
+    assert run_guard(f"git -C {repo} branch -m old new", repo, repo) == "deny"
+
+
+def test_guard_still_denies_the_other_branch_rewrites(repo):
+    assert run_guard(f"git -C {repo} branch -M old new", repo, repo) == "deny"
+    assert run_guard(f"git -C {repo} branch -f feature HEAD", repo, repo) == "deny"
+    assert run_guard(f"git -C {repo} branch -C old new", repo, repo) == "deny"
+    assert run_guard(f"git -C {repo} branch --set-upstream-to=origin/x", repo, repo) == "deny"
+    assert run_guard(f"git -C {repo} branch --unset-upstream", repo, repo) == "deny"
+    # The SHORT spelling too: `-u` writes branch.<n>.remote/.merge into the
+    # shared .git/config just as the long form does, and a rewrite of this
+    # function once carried the long form and dropped it.
+    assert run_guard(f"git -C {repo} branch -u origin/main", repo, repo) == "deny"
+    assert run_guard(f"git -C {repo} branch -u main feature", repo, repo) == "deny"
+    assert run_guard(f"git -C {repo} branch --copy --force old new", repo, repo) == "deny"
+
+
+def test_guard_still_allows_listing_and_creating_branches(repo):
+    assert run_guard(f"git -C {repo} branch", repo, repo) is None
+    assert run_guard(f"git -C {repo} branch -a", repo, repo) is None
+    assert run_guard(f"git -C {repo} branch newbranch", repo, repo) is None
+    assert run_guard(f"git -C {repo} branch --help", repo, repo) is None
+    assert run_guard(f"git -C {repo} worktree --help", repo, repo) is None
+
+
+def test_the_narrowed_forms_still_deny_a_real_tree_mutation(repo):
+    """Regression fence: narrowing branch/worktree must not have loosened
+    anything else in the same classifier."""
+    assert run_guard(f"git -C {repo} checkout main", repo, repo) == "deny"
+    assert run_guard(f"git -C {repo} reset --hard", repo, repo) == "deny"
+    assert run_guard(f"git -C {repo} commit -m x", repo, repo) == "deny"
