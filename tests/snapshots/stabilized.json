@@ -1,0 +1,3828 @@
+{
+  "adjusted_noi": 660900.0,
+  "check_summary": {
+    "advisory_failed": 6,
+    "blocking_failed": 0,
+    "failed": 6,
+    "passed": 7,
+    "skipped": 0,
+    "total": 13
+  },
+  "checks": [
+    [
+      "egr_le_gpr",
+      "blocking",
+      "pass"
+    ],
+    [
+      "exit_cap_coercion",
+      "advisory",
+      "fail"
+    ],
+    [
+      "expense_line_floor",
+      "advisory",
+      "fail"
+    ],
+    [
+      "income_identity",
+      "blocking",
+      "pass"
+    ],
+    [
+      "loan_matures_before_exit",
+      "advisory",
+      "pass"
+    ],
+    [
+      "market_exit_cap",
+      "advisory",
+      "pass"
+    ],
+    [
+      "occupancy_sanity",
+      "blocking",
+      "pass"
+    ],
+    [
+      "opex_per_nrsf_band",
+      "advisory",
+      "fail"
+    ],
+    [
+      "opex_ratio_band",
+      "advisory",
+      "pass"
+    ],
+    [
+      "price_vs_replacement",
+      "advisory",
+      "fail"
+    ],
+    [
+      "sources_uses_ties",
+      "blocking",
+      "pass"
+    ],
+    [
+      "unit_mix_gpr",
+      "advisory",
+      "fail"
+    ],
+    [
+      "unit_mix_sf",
+      "advisory",
+      "fail"
+    ]
+  ],
+  "debt": {
+    "binding_constraint": "ltv",
+    "dscr_year_1": 1.498517,
+    "financing_costs": 58500.0,
+    "loan": 5850000.0,
+    "origination_fee": 58500.0
+  },
+  "documents": {
+    "excel": {
+      "Base Case": {
+        "A1": {
+          "fill": "00003366",
+          "v": "Base Case \u2014 5-Year Unlevered Returns"
+        },
+        "A11": {
+          "v": "Revenue"
+        },
+        "A12": {
+          "v": "Expenses"
+        },
+        "A13": {
+          "v": "Net Operating Income"
+        },
+        "A14": {
+          "v": "NOI / SF"
+        },
+        "A16": {
+          "fill": "00003366",
+          "v": "Exit & Returns"
+        },
+        "A17": {
+          "v": "Year 5 NOI"
+        },
+        "A18": {
+          "v": "Market Cap Rate"
+        },
+        "A19": {
+          "v": "  Scenario Spread (bp)"
+        },
+        "A2": {
+          "v": "Total Basis"
+        },
+        "A20": {
+          "v": "  Obsolescence Drift (7.5 bp/yr \u00d7 5 yrs)"
+        },
+        "A21": {
+          "v": "  Derived Exit Cap (before floor)"
+        },
+        "A22": {
+          "v": "Exit Cap Rate (raised to entry cap)"
+        },
+        "A23": {
+          "v": "Exit Value (gross)"
+        },
+        "A24": {
+          "v": "Disposition Costs"
+        },
+        "A25": {
+          "v": "Net Sale Proceeds"
+        },
+        "A27": {
+          "v": "5-Year Unlevered IRR"
+        },
+        "A28": {
+          "v": "5-Year MOIC"
+        },
+        "A29": {
+          "v": "Year 1 Yield on Cost"
+        },
+        "A3": {
+          "v": "Asking Price"
+        },
+        "A31": {
+          "fill": "00003366",
+          "v": "Cash Flow Summary"
+        },
+        "A33": {
+          "v": "Cash Flow"
+        },
+        "A4": {
+          "v": "CapEx"
+        },
+        "A5": {
+          "v": "Acquisition Closing Costs"
+        },
+        "A6": {
+          "v": "Hold Period (yrs)"
+        },
+        "A7": {
+          "v": "Entry Cap Rate"
+        },
+        "A8": {
+          "v": "Exit Cap Rate"
+        },
+        "B10": {
+          "fill": "00003366",
+          "v": "Year 1"
+        },
+        "B11": {
+          "v": 1152900
+        },
+        "B12": {
+          "v": 458955
+        },
+        "B13": {
+          "v": 693945
+        },
+        "B14": {
+          "v": 11.56575
+        },
+        "B17": {
+          "v": 756027.985708
+        },
+        "B18": {
+          "v": 0.0625
+        },
+        "B19": {
+          "v": 0
+        },
+        "B2": {
+          "v": 9090000
+        },
+        "B20": {
+          "v": 37.5
+        },
+        "B21": {
+          "v": 0.06625
+        },
+        "B22": {
+          "v": 0.073433
+        },
+        "B23": {
+          "v": 10295433.305148
+        },
+        "B24": {
+          "v": 154431.499577
+        },
+        "B25": {
+          "v": 10141001.80557
+        },
+        "B27": {
+          "v": 0.098402
+        },
+        "B28": {
+          "v": 1.514232
+        },
+        "B29": {
+          "v": 0.076342
+        },
+        "B3": {
+          "v": 9000000
+        },
+        "B32": {
+          "fill": "00003366",
+          "v": "Year 0 (Invest)"
+        },
+        "B33": {
+          "v": -9090000
+        },
+        "B4": {
+          "v": 0
+        },
+        "B5": {
+          "v": 90000
+        },
+        "B6": {
+          "v": 5
+        },
+        "B7": {
+          "v": 0.073433
+        },
+        "B8": {
+          "v": 0.073433
+        },
+        "C10": {
+          "fill": "00003366",
+          "v": "Year 2"
+        },
+        "C11": {
+          "v": 1181722.5
+        },
+        "C12": {
+          "v": 472723.65
+        },
+        "C13": {
+          "v": 708998.85
+        },
+        "C14": {
+          "v": 11.816648
+        },
+        "C32": {
+          "fill": "00003366",
+          "v": "Year 1"
+        },
+        "C33": {
+          "v": 693945
+        },
+        "D10": {
+          "fill": "00003366",
+          "v": "Year 3"
+        },
+        "D11": {
+          "v": 1211265.5625
+        },
+        "D12": {
+          "v": 486905.3595
+        },
+        "D13": {
+          "v": 724360.203
+        },
+        "D14": {
+          "v": 12.07267
+        },
+        "D32": {
+          "fill": "00003366",
+          "v": "Year 2"
+        },
+        "D33": {
+          "v": 708998.85
+        },
+        "E10": {
+          "fill": "00003366",
+          "v": "Year 4"
+        },
+        "E11": {
+          "v": 1241547.201563
+        },
+        "E12": {
+          "v": 501512.520285
+        },
+        "E13": {
+          "v": 740034.681277
+        },
+        "E14": {
+          "v": 12.333911
+        },
+        "E32": {
+          "fill": "00003366",
+          "v": "Year 3"
+        },
+        "E33": {
+          "v": 724360.203
+        },
+        "F10": {
+          "fill": "00003366",
+          "v": "Year 5"
+        },
+        "F11": {
+          "v": 1272585.881602
+        },
+        "F12": {
+          "v": 516557.895894
+        },
+        "F13": {
+          "v": 756027.985708
+        },
+        "F14": {
+          "v": 12.600466
+        },
+        "F32": {
+          "fill": "00003366",
+          "v": "Year 4"
+        },
+        "F33": {
+          "v": 740034.681277
+        },
+        "G32": {
+          "fill": "00003366",
+          "v": "Year 5"
+        },
+        "G33": {
+          "v": 10897029.791278
+        }
+      },
+      "Bear Case": {
+        "A1": {
+          "fill": "00003366",
+          "v": "Bear Case \u2014 5-Year Unlevered Returns"
+        },
+        "A11": {
+          "v": "Revenue"
+        },
+        "A12": {
+          "v": "Expenses"
+        },
+        "A13": {
+          "v": "Net Operating Income"
+        },
+        "A14": {
+          "v": "NOI / SF"
+        },
+        "A16": {
+          "fill": "00003366",
+          "v": "Exit & Returns"
+        },
+        "A17": {
+          "v": "Year 5 NOI"
+        },
+        "A18": {
+          "v": "Market Cap Rate"
+        },
+        "A19": {
+          "v": "  Scenario Spread (bp)"
+        },
+        "A2": {
+          "v": "Total Basis"
+        },
+        "A20": {
+          "v": "  Obsolescence Drift (10.0 bp/yr \u00d7 5 yrs)"
+        },
+        "A21": {
+          "v": "Exit Cap Rate"
+        },
+        "A22": {
+          "v": "Exit Value (gross)"
+        },
+        "A23": {
+          "v": "Disposition Costs"
+        },
+        "A24": {
+          "v": "Net Sale Proceeds"
+        },
+        "A26": {
+          "v": "5-Year Unlevered IRR"
+        },
+        "A27": {
+          "v": "5-Year MOIC"
+        },
+        "A28": {
+          "v": "Year 1 Yield on Cost"
+        },
+        "A3": {
+          "v": "Asking Price"
+        },
+        "A30": {
+          "fill": "00003366",
+          "v": "Cash Flow Summary"
+        },
+        "A32": {
+          "v": "Cash Flow"
+        },
+        "A4": {
+          "v": "CapEx"
+        },
+        "A5": {
+          "v": "Acquisition Closing Costs"
+        },
+        "A6": {
+          "v": "Hold Period (yrs)"
+        },
+        "A7": {
+          "v": "Entry Cap Rate"
+        },
+        "A8": {
+          "v": "Exit Cap Rate"
+        },
+        "B10": {
+          "fill": "00003366",
+          "v": "Year 1"
+        },
+        "B11": {
+          "v": 1098000
+        },
+        "B12": {
+          "v": 437100
+        },
+        "B13": {
+          "v": 660900
+        },
+        "B14": {
+          "v": 11.015
+        },
+        "B17": {
+          "v": 673417.277735
+        },
+        "B18": {
+          "v": 0.0625
+        },
+        "B19": {
+          "v": 100
+        },
+        "B2": {
+          "v": 9090000
+        },
+        "B20": {
+          "v": 50
+        },
+        "B21": {
+          "v": 0.0775
+        },
+        "B22": {
+          "v": 8689255.196584
+        },
+        "B23": {
+          "v": 130338.827949
+        },
+        "B24": {
+          "v": 8558916.368635
+        },
+        "B26": {
+          "v": 0.063069
+        },
+        "B27": {
+          "v": 1.308634
+        },
+        "B28": {
+          "v": 0.072706
+        },
+        "B3": {
+          "v": 9000000
+        },
+        "B31": {
+          "fill": "00003366",
+          "v": "Year 0 (Invest)"
+        },
+        "B32": {
+          "v": -9090000
+        },
+        "B4": {
+          "v": 0
+        },
+        "B5": {
+          "v": 90000
+        },
+        "B6": {
+          "v": 5
+        },
+        "B7": {
+          "v": 0.073433
+        },
+        "B8": {
+          "v": 0.0775
+        },
+        "C10": {
+          "fill": "00003366",
+          "v": "Year 2"
+        },
+        "C11": {
+          "v": 1114470
+        },
+        "C12": {
+          "v": 450213
+        },
+        "C13": {
+          "v": 664257
+        },
+        "C14": {
+          "v": 11.07095
+        },
+        "C31": {
+          "fill": "00003366",
+          "v": "Year 1"
+        },
+        "C32": {
+          "v": 660900
+        },
+        "D10": {
+          "fill": "00003366",
+          "v": "Year 3"
+        },
+        "D11": {
+          "v": 1131187.05
+        },
+        "D12": {
+          "v": 463719.39
+        },
+        "D13": {
+          "v": 667467.66
+        },
+        "D14": {
+          "v": 11.124461
+        },
+        "D31": {
+          "fill": "00003366",
+          "v": "Year 2"
+        },
+        "D32": {
+          "v": 664257
+        },
+        "E10": {
+          "fill": "00003366",
+          "v": "Year 4"
+        },
+        "E11": {
+          "v": 1148154.85575
+        },
+        "E12": {
+          "v": 477630.9717
+        },
+        "E13": {
+          "v": 670523.88405
+        },
+        "E14": {
+          "v": 11.175398
+        },
+        "E31": {
+          "fill": "00003366",
+          "v": "Year 3"
+        },
+        "E32": {
+          "v": 667467.66
+        },
+        "F10": {
+          "fill": "00003366",
+          "v": "Year 5"
+        },
+        "F11": {
+          "v": 1165377.178586
+        },
+        "F12": {
+          "v": 491959.900851
+        },
+        "F13": {
+          "v": 673417.277735
+        },
+        "F14": {
+          "v": 11.223621
+        },
+        "F31": {
+          "fill": "00003366",
+          "v": "Year 4"
+        },
+        "F32": {
+          "v": 670523.88405
+        },
+        "G31": {
+          "fill": "00003366",
+          "v": "Year 5"
+        },
+        "G32": {
+          "v": 9232333.64637
+        }
+      },
+      "Bull Case": {
+        "A1": {
+          "fill": "00003366",
+          "v": "Bull Case \u2014 5-Year Unlevered Returns"
+        },
+        "A11": {
+          "v": "Revenue"
+        },
+        "A12": {
+          "v": "Expenses"
+        },
+        "A13": {
+          "v": "Net Operating Income"
+        },
+        "A14": {
+          "v": "NOI / SF"
+        },
+        "A16": {
+          "fill": "00003366",
+          "v": "Exit & Returns"
+        },
+        "A17": {
+          "v": "Year 5 NOI"
+        },
+        "A18": {
+          "v": "Market Cap Rate"
+        },
+        "A19": {
+          "v": "  Scenario Spread (bp)"
+        },
+        "A2": {
+          "v": "Total Basis"
+        },
+        "A20": {
+          "v": "  Obsolescence Drift (5.0 bp/yr \u00d7 5 yrs)"
+        },
+        "A21": {
+          "v": "Exit Cap Rate"
+        },
+        "A22": {
+          "v": "Exit Value (gross)"
+        },
+        "A23": {
+          "v": "Disposition Costs"
+        },
+        "A24": {
+          "v": "Net Sale Proceeds"
+        },
+        "A26": {
+          "v": "5-Year Unlevered IRR"
+        },
+        "A27": {
+          "v": "5-Year MOIC"
+        },
+        "A28": {
+          "v": "Year 1 Yield on Cost"
+        },
+        "A3": {
+          "v": "Asking Price"
+        },
+        "A30": {
+          "fill": "00003366",
+          "v": "Cash Flow Summary"
+        },
+        "A32": {
+          "v": "Cash Flow"
+        },
+        "A4": {
+          "v": "CapEx"
+        },
+        "A5": {
+          "v": "Acquisition Closing Costs"
+        },
+        "A6": {
+          "v": "Hold Period (yrs)"
+        },
+        "A7": {
+          "v": "Entry Cap Rate"
+        },
+        "A8": {
+          "v": "Exit Cap Rate"
+        },
+        "B10": {
+          "fill": "00003366",
+          "v": "Year 1"
+        },
+        "B11": {
+          "v": 1207800
+        },
+        "B12": {
+          "v": 480810.0
+        },
+        "B13": {
+          "v": 726990.0
+        },
+        "B14": {
+          "v": 12.1165
+        },
+        "B17": {
+          "v": 858245.829352
+        },
+        "B18": {
+          "v": 0.0625
+        },
+        "B19": {
+          "v": -100
+        },
+        "B2": {
+          "v": 9090000
+        },
+        "B20": {
+          "v": 25
+        },
+        "B21": {
+          "v": 0.055
+        },
+        "B22": {
+          "v": 15604469.62458
+        },
+        "B23": {
+          "v": 234067.044369
+        },
+        "B24": {
+          "v": 15370402.580211
+        },
+        "B26": {
+          "v": 0.182273
+        },
+        "B27": {
+          "v": 2.127554
+        },
+        "B28": {
+          "v": 0.079977
+        },
+        "B3": {
+          "v": 9000000
+        },
+        "B31": {
+          "fill": "00003366",
+          "v": "Year 0 (Invest)"
+        },
+        "B32": {
+          "v": -9090000
+        },
+        "B4": {
+          "v": 0
+        },
+        "B5": {
+          "v": 90000
+        },
+        "B6": {
+          "v": 5
+        },
+        "B7": {
+          "v": 0.073433
+        },
+        "B8": {
+          "v": 0.055
+        },
+        "C10": {
+          "fill": "00003366",
+          "v": "Year 2"
+        },
+        "C11": {
+          "v": 1256112
+        },
+        "C12": {
+          "v": 495234.3
+        },
+        "C13": {
+          "v": 760877.7
+        },
+        "C14": {
+          "v": 12.681295
+        },
+        "C31": {
+          "fill": "00003366",
+          "v": "Year 1"
+        },
+        "C32": {
+          "v": 726990.0
+        },
+        "D10": {
+          "fill": "00003366",
+          "v": "Year 3"
+        },
+        "D11": {
+          "v": 1306356.48
+        },
+        "D12": {
+          "v": 510091.329
+        },
+        "D13": {
+          "v": 796265.151
+        },
+        "D14": {
+          "v": 13.271086
+        },
+        "D31": {
+          "fill": "00003366",
+          "v": "Year 2"
+        },
+        "D32": {
+          "v": 760877.7
+        },
+        "E10": {
+          "fill": "00003366",
+          "v": "Year 4"
+        },
+        "E11": {
+          "v": 1352078.9568
+        },
+        "E12": {
+          "v": 525394.06887
+        },
+        "E13": {
+          "v": 826684.88793
+        },
+        "E14": {
+          "v": 13.778081
+        },
+        "E31": {
+          "fill": "00003366",
+          "v": "Year 3"
+        },
+        "E32": {
+          "v": 796265.151
+        },
+        "F10": {
+          "fill": "00003366",
+          "v": "Year 5"
+        },
+        "F11": {
+          "v": 1399401.720288
+        },
+        "F12": {
+          "v": 541155.890936
+        },
+        "F13": {
+          "v": 858245.829352
+        },
+        "F14": {
+          "v": 14.304097
+        },
+        "F31": {
+          "fill": "00003366",
+          "v": "Year 4"
+        },
+        "F32": {
+          "v": 826684.88793
+        },
+        "G31": {
+          "fill": "00003366",
+          "v": "Year 5"
+        },
+        "G32": {
+          "v": 16228648.409563
+        }
+      },
+      "Checks": {
+        "A1": {
+          "fill": "00003366",
+          "v": "Model Error-Check Register"
+        },
+        "A10": {
+          "fill": "00DDF3E4",
+          "v": "Exit cap derivation"
+        },
+        "A11": {
+          "fill": "00DDF3E4",
+          "v": "Loan term vs hold period"
+        },
+        "A12": {
+          "fill": "00DDF3E4",
+          "v": "Occupancy coherence"
+        },
+        "A13": {
+          "fill": "00DDF3E4",
+          "v": "OpEx / Revenue band"
+        },
+        "A14": {
+          "fill": "00DDF3E4",
+          "v": "Revenue \u2212 Expenses = NOI"
+        },
+        "A15": {
+          "fill": "00DDF3E4",
+          "v": "Sources & Uses ties to DCF basis"
+        },
+        "A2": {
+          "v": "Check"
+        },
+        "A3": {
+          "fill": "00FFD9D9",
+          "v": "Exit cap \u2265 entry cap"
+        },
+        "A4": {
+          "fill": "00FFD9D9",
+          "v": "Expense line floors"
+        },
+        "A5": {
+          "fill": "00FFD9D9",
+          "v": "Price vs replacement cost"
+        },
+        "A6": {
+          "fill": "00FFD9D9",
+          "v": "Total OpEx $/NRSF band"
+        },
+        "A7": {
+          "fill": "00FFD9D9",
+          "v": "Unit mix SF vs NRSF"
+        },
+        "A8": {
+          "fill": "00FFD9D9",
+          "v": "Unit mix rents vs GPR"
+        },
+        "A9": {
+          "fill": "00DDF3E4",
+          "v": "EGR \u2264 GPR"
+        },
+        "B10": {
+          "fill": "00DDF3E4",
+          "v": "Advisory"
+        },
+        "B11": {
+          "fill": "00DDF3E4",
+          "v": "Advisory"
+        },
+        "B12": {
+          "fill": "00DDF3E4",
+          "v": "Blocking"
+        },
+        "B13": {
+          "fill": "00DDF3E4",
+          "v": "Advisory"
+        },
+        "B14": {
+          "fill": "00DDF3E4",
+          "v": "Blocking"
+        },
+        "B15": {
+          "fill": "00DDF3E4",
+          "v": "Blocking"
+        },
+        "B2": {
+          "v": "Severity"
+        },
+        "B3": {
+          "fill": "00FFD9D9",
+          "v": "Advisory"
+        },
+        "B4": {
+          "fill": "00FFD9D9",
+          "v": "Advisory"
+        },
+        "B5": {
+          "fill": "00FFD9D9",
+          "v": "Advisory"
+        },
+        "B6": {
+          "fill": "00FFD9D9",
+          "v": "Advisory"
+        },
+        "B7": {
+          "fill": "00FFD9D9",
+          "v": "Advisory"
+        },
+        "B8": {
+          "fill": "00FFD9D9",
+          "v": "Advisory"
+        },
+        "B9": {
+          "fill": "00DDF3E4",
+          "v": "Blocking"
+        },
+        "C10": {
+          "fill": "00DDF3E4",
+          "v": "PASS"
+        },
+        "C11": {
+          "fill": "00DDF3E4",
+          "v": "PASS"
+        },
+        "C12": {
+          "fill": "00DDF3E4",
+          "v": "PASS"
+        },
+        "C13": {
+          "fill": "00DDF3E4",
+          "v": "PASS"
+        },
+        "C14": {
+          "fill": "00DDF3E4",
+          "v": "PASS"
+        },
+        "C15": {
+          "fill": "00DDF3E4",
+          "v": "PASS"
+        },
+        "C2": {
+          "v": "Status"
+        },
+        "C3": {
+          "fill": "00FFD9D9",
+          "v": "FAIL"
+        },
+        "C4": {
+          "fill": "00FFD9D9",
+          "v": "FAIL"
+        },
+        "C5": {
+          "fill": "00FFD9D9",
+          "v": "FAIL"
+        },
+        "C6": {
+          "fill": "00FFD9D9",
+          "v": "FAIL"
+        },
+        "C7": {
+          "fill": "00FFD9D9",
+          "v": "FAIL"
+        },
+        "C8": {
+          "fill": "00FFD9D9",
+          "v": "FAIL"
+        },
+        "C9": {
+          "fill": "00DDF3E4",
+          "v": "PASS"
+        },
+        "D10": {
+          "fill": "00DDF3E4",
+          "v": "Self Storage in the mid band anchors at 6.250% (table as of 2026-Q3). Derived caps \u2014 Bear 7.750% = 6.250% +100 bp spread +50 bp drift over 5 yrs; Base 6.625% = 6.250% +0 bp spread +37.5 bp drift over 5 yrs; Bull 5.500% = 6.250% -100 bp spread +25 bp drift over 5 yrs."
+        },
+        "D11": {
+          "fill": "00DDF3E4",
+          "v": "The loan's 10-year term outlasts the 5-year hold."
+        },
+        "D12": {
+          "fill": "00DDF3E4",
+          "v": "Occupancy inputs are in range and economic does not exceed physical."
+        },
+        "D13": {
+          "fill": "00DDF3E4",
+          "v": "OpEx/Revenue of 39.8% is inside the 35.0%\u201355.0% band."
+        },
+        "D14": {
+          "fill": "00DDF3E4",
+          "v": "Revenue $1,098,000 \u2212 Expenses $428,000 = $670,000, matching TTM NOI within the $10,980 tolerance."
+        },
+        "D15": {
+          "fill": "00DDF3E4",
+          "v": "Uses, Sources and the DCF basis all equal $9,148,500 (DCF basis $9,090,000 + financing costs $58,500)."
+        },
+        "D2": {
+          "v": "Finding"
+        },
+        "D3": {
+          "fill": "00FFD9D9",
+          "v": "Exit cap was raised to the entry cap to satisfy the exit \u2265 entry rule \u2014 Base raised from 6.625% to 7.343%. The scenario's returns are computed on the raised cap, not on the one entered."
+        },
+        "D4": {
+          "fill": "00FFD9D9",
+          "v": "Expense lines that cannot be taken at face value \u2014 not stated in the CIM: Capital Reserve. Each is adjusted up to the benchmark floor before NOI, but a line this far off is usually an extraction or entry error worth fixing at the source."
+        },
+        "D5": {
+          "fill": "00FFD9D9",
+          "v": "Asking price exceeds estimated replacement cost \u2014 $150.00/SF asking vs $119.42/SF replacement, a 25.6% premium."
+        },
+        "D6": {
+          "fill": "00FFD9D9",
+          "v": "Total OpEx of $7.29/SF is above the $2.22/SF\u2013$4.57/SF benchmark band."
+        },
+        "D7": {
+          "fill": "00FFD9D9",
+          "v": "Unit mix totals 48,000 SF but NRSF is stated as 60,000 \u2014 off by 12,000 SF (20.0%, tolerance 2%). Usually a partially extracted unit mix; confirm before trusting any per-SF figure."
+        },
+        "D8": {
+          "fill": "00FFD9D9",
+          "v": "Unit mix at asking rates annualizes to $614,880 but GPR is stated as $1,180,000 \u2014 off by $565,120 (47.9%, tolerance 3%). Both figures are gross potential, so vacancy and concessions do not explain the gap."
+        },
+        "D9": {
+          "fill": "00DDF3E4",
+          "v": "EGR $1,062,000 sits at or below GPR $1,180,000 (vacancy loss $118,000)."
+        },
+        "E10": {
+          "fill": "00DDF3E4",
+          "v": "market_cap, scenario_results[*].exit_cap_detail, va_results[*].exit_cap_detail"
+        },
+        "E11": {
+          "fill": "00DDF3E4",
+          "v": "debt.terms.term_years, debt.annual_debt_service"
+        },
+        "E12": {
+          "fill": "00DDF3E4",
+          "v": "physical_occupancy, economic_occupancy"
+        },
+        "E13": {
+          "fill": "00DDF3E4",
+          "v": "financial_analysis.expense_ratio_check.opex_revenue_ratio"
+        },
+        "E14": {
+          "fill": "00DDF3E4",
+          "v": "ttm_total_revenue, ttm_total_expenses, ttm_noi"
+        },
+        "E15": {
+          "fill": "00DDF3E4",
+          "v": "sources_uses, scenario_results[*].total_basis"
+        },
+        "E2": {
+          "v": "Source"
+        },
+        "E3": {
+          "fill": "00FFD9D9",
+          "v": "scenario_results[*].requested_exit_cap, va_results[*].requested_exit_cap"
+        },
+        "E4": {
+          "fill": "00FFD9D9",
+          "v": "financial_analysis.expense_analysis.lines"
+        },
+        "E5": {
+          "fill": "00FFD9D9",
+          "v": "physical_analysis.price_vs_replacement"
+        },
+        "E6": {
+          "fill": "00FFD9D9",
+          "v": "financial_analysis.expense_ratio_check.opex_per_nrsf"
+        },
+        "E7": {
+          "fill": "00FFD9D9",
+          "v": "unit_mix, nrsf"
+        },
+        "E8": {
+          "fill": "00FFD9D9",
+          "v": "unit_mix, ttm_gpr"
+        },
+        "E9": {
+          "fill": "00DDF3E4",
+          "v": "ttm_gpr, ttm_egr"
+        }
+      },
+      "Inputs": {
+        "A1": {
+          "fill": "00003366",
+          "v": "Property Information"
+        },
+        "A10": {
+          "v": "CC %"
+        },
+        "A11": {
+          "v": "Year Built"
+        },
+        "A12": {
+          "v": "Price / SF"
+        },
+        "A14": {
+          "fill": "00003366",
+          "v": "Financial Summary"
+        },
+        "A15": {
+          "v": "TTM NOI (CIM)"
+        },
+        "A16": {
+          "v": "Analyst-Adjusted TTM NOI"
+        },
+        "A17": {
+          "v": "TTM Total Revenue"
+        },
+        "A18": {
+          "v": "TTM Total Expenses"
+        },
+        "A19": {
+          "v": "TTM GPR"
+        },
+        "A2": {
+          "v": "Property Name"
+        },
+        "A20": {
+          "v": "TTM EGR"
+        },
+        "A21": {
+          "v": "Other Income"
+        },
+        "A23": {
+          "fill": "00003366",
+          "v": "Scenario Assumptions"
+        },
+        "A24": {
+          "v": "\u2500\u2500 Bear Case \u2500\u2500"
+        },
+        "A25": {
+          "v": "  Yr1 Noi Bump"
+        },
+        "A26": {
+          "v": "  Stabilized Occ"
+        },
+        "A27": {
+          "v": "  Rev Cagr Yr1 3"
+        },
+        "A28": {
+          "v": "  Rev Cagr Yr4 5"
+        },
+        "A29": {
+          "v": "  Exp Growth"
+        },
+        "A3": {
+          "v": "Address"
+        },
+        "A31": {
+          "v": "\u2500\u2500 Base Case \u2500\u2500"
+        },
+        "A32": {
+          "v": "  Yr1 Noi Bump"
+        },
+        "A33": {
+          "v": "  Stabilized Occ"
+        },
+        "A34": {
+          "v": "  Rev Cagr Yr1 3"
+        },
+        "A35": {
+          "v": "  Rev Cagr Yr4 5"
+        },
+        "A36": {
+          "v": "  Exp Growth"
+        },
+        "A38": {
+          "v": "\u2500\u2500 Bull Case \u2500\u2500"
+        },
+        "A39": {
+          "v": "  Yr1 Noi Bump"
+        },
+        "A4": {
+          "v": "City, State"
+        },
+        "A40": {
+          "v": "  Stabilized Occ"
+        },
+        "A41": {
+          "v": "  Rev Cagr Yr1 3"
+        },
+        "A42": {
+          "v": "  Rev Cagr Yr4 5"
+        },
+        "A43": {
+          "v": "  Exp Growth"
+        },
+        "A46": {
+          "fill": "00003366",
+          "v": "Exit Cap Derivation"
+        },
+        "A47": {
+          "v": "Asset Class"
+        },
+        "A48": {
+          "v": "Age Band"
+        },
+        "A49": {
+          "v": "Market Cap Rate"
+        },
+        "A5": {
+          "v": "Asking Price"
+        },
+        "A50": {
+          "v": "Market Cap Source"
+        },
+        "A51": {
+          "v": "Table Market Cap"
+        },
+        "A52": {
+          "v": "Table As Of"
+        },
+        "A54": {
+          "v": "Exit cap = market cap + scenario spread + obsolescence drift \u00d7 hold"
+        },
+        "A55": {
+          "v": "  Bear Spread (bp)"
+        },
+        "A56": {
+          "v": "  Bear Drift (10.0 bp/yr \u00d7 5 yrs)"
+        },
+        "A57": {
+          "v": "  Bear Derived Exit Cap"
+        },
+        "A58": {
+          "v": "  Base Spread (bp)"
+        },
+        "A59": {
+          "v": "  Base Drift (7.5 bp/yr \u00d7 5 yrs)"
+        },
+        "A6": {
+          "v": "NRSF"
+        },
+        "A60": {
+          "v": "  Base Derived Exit Cap"
+        },
+        "A61": {
+          "v": "  Base Applied (raised to entry cap)"
+        },
+        "A62": {
+          "v": "  Bull Spread (bp)"
+        },
+        "A63": {
+          "v": "  Bull Drift (5.0 bp/yr \u00d7 5 yrs)"
+        },
+        "A64": {
+          "v": "  Bull Derived Exit Cap"
+        },
+        "A7": {
+          "v": "Total Units"
+        },
+        "A8": {
+          "v": "Physical Occupancy"
+        },
+        "A9": {
+          "v": "Economic Occupancy"
+        },
+        "B10": {
+          "fill": "00FFFFCC",
+          "v": 0.45
+        },
+        "B11": {
+          "fill": "00FFFFCC",
+          "v": 2015
+        },
+        "B12": {
+          "fill": "00FFFFCC",
+          "v": 150
+        },
+        "B15": {
+          "v": 670000
+        },
+        "B16": {
+          "v": 660900
+        },
+        "B17": {
+          "v": 1098000
+        },
+        "B18": {
+          "v": 428000
+        },
+        "B19": {
+          "v": 1180000
+        },
+        "B2": {
+          "fill": "00FFFFCC",
+          "v": "Characterization Stabilized"
+        },
+        "B20": {
+          "v": 1062000
+        },
+        "B21": {
+          "v": 36000
+        },
+        "B25": {
+          "fill": "00FFFFCC",
+          "v": 0
+        },
+        "B26": {
+          "fill": "00FFFFCC",
+          "v": 0.82
+        },
+        "B27": {
+          "fill": "00FFFFCC",
+          "v": 0.015
+        },
+        "B28": {
+          "fill": "00FFFFCC",
+          "v": 0.015
+        },
+        "B29": {
+          "fill": "00FFFFCC",
+          "v": 0.03
+        },
+        "B3": {
+          "fill": "00FFFFCC",
+          "v": "1 Stabilized Way"
+        },
+        "B32": {
+          "fill": "00FFFFCC",
+          "v": 0.05
+        },
+        "B33": {
+          "fill": "00FFFFCC",
+          "v": 0.88
+        },
+        "B34": {
+          "fill": "00FFFFCC",
+          "v": 0.025
+        },
+        "B35": {
+          "fill": "00FFFFCC",
+          "v": 0.025
+        },
+        "B36": {
+          "fill": "00FFFFCC",
+          "v": 0.03
+        },
+        "B39": {
+          "fill": "00FFFFCC",
+          "v": 0.1
+        },
+        "B4": {
+          "fill": "00FFFFCC",
+          "v": "Abilene, TX"
+        },
+        "B40": {
+          "fill": "00FFFFCC",
+          "v": 0.93
+        },
+        "B41": {
+          "fill": "00FFFFCC",
+          "v": 0.04
+        },
+        "B42": {
+          "fill": "00FFFFCC",
+          "v": 0.035
+        },
+        "B43": {
+          "fill": "00FFFFCC",
+          "v": 0.03
+        },
+        "B47": {
+          "v": "Self Storage"
+        },
+        "B48": {
+          "v": "mid"
+        },
+        "B49": {
+          "v": 0.0625
+        },
+        "B5": {
+          "fill": "00FFFFCC",
+          "v": 9000000
+        },
+        "B50": {
+          "v": "table as of 2026-Q3"
+        },
+        "B51": {
+          "v": 0.0625
+        },
+        "B52": {
+          "v": "2026-Q3"
+        },
+        "B55": {
+          "v": 100
+        },
+        "B56": {
+          "v": 50
+        },
+        "B57": {
+          "v": 0.0775
+        },
+        "B58": {
+          "v": 0
+        },
+        "B59": {
+          "v": 37.5
+        },
+        "B6": {
+          "fill": "00FFFFCC",
+          "v": 60000
+        },
+        "B60": {
+          "v": 0.06625
+        },
+        "B61": {
+          "v": 0.073433
+        },
+        "B62": {
+          "v": -100
+        },
+        "B63": {
+          "v": 25
+        },
+        "B64": {
+          "v": 0.055
+        },
+        "B7": {
+          "fill": "00FFFFCC",
+          "v": 480
+        },
+        "B8": {
+          "fill": "00FFFFCC",
+          "v": 0.93
+        },
+        "B9": {
+          "fill": "00FFFFCC",
+          "v": 0.9
+        }
+      },
+      "Levered Returns": {
+        "A1": {
+          "fill": "00003366",
+          "v": "Senior Loan (sized once, base case)"
+        },
+        "A10": {
+          "v": "Debt Yield"
+        },
+        "A11": {
+          "v": "Origination Fee"
+        },
+        "A12": {
+          "v": "Exit Fee"
+        },
+        "A13": {
+          "v": "Payoff Balance at Exit"
+        },
+        "A14": {
+          "v": "Matures Before Exit"
+        },
+        "A16": {
+          "fill": "00003366",
+          "v": "LP Net Returns by Scenario"
+        },
+        "A18": {
+          "v": "LP Net IRR"
+        },
+        "A19": {
+          "v": "LP MOIC"
+        },
+        "A2": {
+          "v": "Loan Amount"
+        },
+        "A20": {
+          "v": "GP Promote"
+        },
+        "A21": {
+          "v": "AM Fee (total)"
+        },
+        "A22": {
+          "v": "Capital Called After Close"
+        },
+        "A23": {
+          "v": "Equity Required"
+        },
+        "A24": {
+          "v": "Leverage Is Dilutive In"
+        },
+        "A26": {
+          "fill": "00003366",
+          "v": "Base-Case Equity Cash Flow"
+        },
+        "A27": {
+          "v": "Year"
+        },
+        "A28": {
+          "v": 1
+        },
+        "A29": {
+          "v": 2
+        },
+        "A3": {
+          "v": "Bound By"
+        },
+        "A30": {
+          "v": 3
+        },
+        "A31": {
+          "v": 4
+        },
+        "A32": {
+          "v": 5
+        },
+        "A34": {
+          "fill": "00003366",
+          "v": "Levered Assumptions"
+        },
+        "A35": {
+          "v": "Pref simple or compounded, and at what frequency"
+        },
+        "A36": {
+          "v": "Accrual base: contributed/unreturned or committed"
+        },
+        "A37": {
+          "v": "Return of capital before pref, or pref first"
+        },
+        "A38": {
+          "v": "AM fee above the waterfall or netted from LP"
+        },
+        "A39": {
+          "v": "Promote on 100% of residual or LP-attributable only"
+        },
+        "A4": {
+          "v": "All-In Rate"
+        },
+        "A5": {
+          "v": "Amortization (yrs)"
+        },
+        "A6": {
+          "v": "Interest-Only (mos)"
+        },
+        "A7": {
+          "v": "Loan Term (yrs)"
+        },
+        "A8": {
+          "v": "LTV"
+        },
+        "A9": {
+          "v": "Year-1 DSCR"
+        },
+        "B10": {
+          "v": 0.118623
+        },
+        "B11": {
+          "v": 58500
+        },
+        "B12": {
+          "v": 0
+        },
+        "B13": {
+          "v": 5279678.428866
+        },
+        "B14": {
+          "v": "No"
+        },
+        "B17": {
+          "v": "Bear"
+        },
+        "B18": {
+          "v": 0.050765
+        },
+        "B19": {
+          "v": 1.253733
+        },
+        "B2": {
+          "v": 5850000
+        },
+        "B20": {
+          "v": 0
+        },
+        "B21": {
+          "v": 164925
+        },
+        "B22": {
+          "v": 0
+        },
+        "B23": {
+          "v": 3298500
+        },
+        "B24": {
+          "v": "Bear \u2014 LP net below the unlevered IRR (loan constant above yield on cost)"
+        },
+        "B27": {
+          "v": "NOI"
+        },
+        "B28": {
+          "v": 693945
+        },
+        "B29": {
+          "v": 708998.85
+        },
+        "B3": {
+          "v": "Max LTV"
+        },
+        "B30": {
+          "v": 724360.203
+        },
+        "B31": {
+          "v": 740034.681277
+        },
+        "B32": {
+          "v": 756027.985708
+        },
+        "B35": {
+          "v": "8.00% pref, annually compounded"
+        },
+        "B36": {
+          "v": "Contributed / unreturned capital"
+        },
+        "B37": {
+          "v": "Return of capital first (presentation only: the pref compounds, so no dollar moves)"
+        },
+        "B38": {
+          "v": "Above the waterfall (deal expense) \u2014 1.00% of invested equity, measured at the start of each period"
+        },
+        "B39": {
+          "v": "20% promote on the LP-attributable residual (90% of it)"
+        },
+        "B4": {
+          "v": 0.0625
+        },
+        "B5": {
+          "v": 25
+        },
+        "B6": {
+          "v": 0
+        },
+        "B7": {
+          "v": 10
+        },
+        "B8": {
+          "v": 0.65
+        },
+        "B9": {
+          "v": 1.498517
+        },
+        "C17": {
+          "v": "Base"
+        },
+        "C18": {
+          "v": 0.128867
+        },
+        "C19": {
+          "v": 1.738957
+        },
+        "C20": {
+          "v": 241538.579274
+        },
+        "C21": {
+          "v": 164925
+        },
+        "C22": {
+          "v": 0
+        },
+        "C23": {
+          "v": 3298500
+        },
+        "C27": {
+          "v": "Debt Service"
+        },
+        "C28": {
+          "v": 463087.903577
+        },
+        "C29": {
+          "v": 463087.903577
+        },
+        "C30": {
+          "v": 463087.903577
+        },
+        "C31": {
+          "v": 463087.903577
+        },
+        "C32": {
+          "v": 463087.903577
+        },
+        "D17": {
+          "v": "Bull"
+        },
+        "D18": {
+          "v": 0.27539
+        },
+        "D19": {
+          "v": 3.088425
+        },
+        "D20": {
+          "v": 1253027.076545
+        },
+        "D21": {
+          "v": 164925
+        },
+        "D22": {
+          "v": 0
+        },
+        "D23": {
+          "v": 3298500
+        },
+        "D27": {
+          "v": "AM Fee"
+        },
+        "D28": {
+          "v": 32985
+        },
+        "D29": {
+          "v": 32985
+        },
+        "D30": {
+          "v": 32985
+        },
+        "D31": {
+          "v": 32985
+        },
+        "D32": {
+          "v": 32985
+        },
+        "E27": {
+          "v": "Levered CF"
+        },
+        "E28": {
+          "v": 197872.096423
+        },
+        "E29": {
+          "v": 212925.946423
+        },
+        "E30": {
+          "v": 228287.299423
+        },
+        "E31": {
+          "v": 243961.7777
+        },
+        "E32": {
+          "v": 5121278.458835
+        },
+        "F27": {
+          "v": "Distribution"
+        },
+        "F28": {
+          "v": 197872.096423
+        },
+        "F29": {
+          "v": 212925.946423
+        },
+        "F30": {
+          "v": 228287.299423
+        },
+        "F31": {
+          "v": 243961.7777
+        },
+        "F32": {
+          "v": 5121278.458835
+        },
+        "G27": {
+          "v": "Capital Call"
+        },
+        "G28": {
+          "v": 0
+        },
+        "G29": {
+          "v": 0
+        },
+        "G30": {
+          "v": 0
+        },
+        "G31": {
+          "v": 0
+        },
+        "G32": {
+          "v": 0
+        },
+        "H27": {
+          "v": "DSCR"
+        },
+        "H28": {
+          "v": 1.498517
+        },
+        "H29": {
+          "v": 1.531024
+        },
+        "H30": {
+          "v": 1.564196
+        },
+        "H31": {
+          "v": 1.598044
+        },
+        "H32": {
+          "v": 1.63258
+        }
+      },
+      "Max Offer": {
+        "A1": {
+          "fill": "00003366",
+          "v": "Maximum Offer Price Derivation (Unlevered)"
+        },
+        "A10": {
+          "v": "Acquisition Closing Costs"
+        },
+        "A11": {
+          "v": "Total Basis at Max Price"
+        },
+        "A12": {
+          "v": "Achieved IRR"
+        },
+        "A14": {
+          "fill": "00003366",
+          "v": "Comparison to Asking"
+        },
+        "A15": {
+          "v": "Asking Price"
+        },
+        "A16": {
+          "v": "Max Offer Price"
+        },
+        "A17": {
+          "v": "Discount to Asking"
+        },
+        "A18": {
+          "v": "Dollar Difference"
+        },
+        "A20": {
+          "fill": "00003366",
+          "v": "Maximum Offer Price Derivation (Levered \u2014 LP Net)"
+        },
+        "A21": {
+          "v": "Target LP Net IRR"
+        },
+        "A22": {
+          "v": "Solver Converged"
+        },
+        "A23": {
+          "v": "Iterations"
+        },
+        "A25": {
+          "v": "Maximum Purchase Price"
+        },
+        "A26": {
+          "v": "Implied Entry Cap Rate"
+        },
+        "A27": {
+          "v": "Achieved LP Net IRR"
+        },
+        "A28": {
+          "v": "Achieved LP MOIC"
+        },
+        "A3": {
+          "v": "Target IRR"
+        },
+        "A30": {
+          "v": "Senior Debt at Max Price"
+        },
+        "A31": {
+          "v": "LTV at Max Price"
+        },
+        "A32": {
+          "v": "Binding Constraint"
+        },
+        "A33": {
+          "v": "Financing Costs"
+        },
+        "A34": {
+          "v": "Equity Required"
+        },
+        "A35": {
+          "v": "Total Basis (excl. financing)"
+        },
+        "A36": {
+          "v": "Total Uses (incl. financing)"
+        },
+        "A37": {
+          "v": "Unlevered IRR at This Price"
+        },
+        "A39": {
+          "fill": "00003366",
+          "v": "Levered Assumptions Applied"
+        },
+        "A4": {
+          "v": "Solver Converged"
+        },
+        "A40": {
+          "v": "Pref simple or compounded, and at what frequency"
+        },
+        "A41": {
+          "v": "Accrual base: contributed/unreturned or committed"
+        },
+        "A42": {
+          "v": "Return of capital before pref, or pref first"
+        },
+        "A43": {
+          "v": "AM fee above the waterfall or netted from LP"
+        },
+        "A44": {
+          "v": "Promote on 100% of residual or LP-attributable only"
+        },
+        "A5": {
+          "v": "Iterations"
+        },
+        "A7": {
+          "v": "Maximum Purchase Price"
+        },
+        "A8": {
+          "v": "Implied Entry Cap Rate"
+        },
+        "A9": {
+          "v": "CapEx Budget"
+        },
+        "B10": {
+          "v": 88636.328125
+        },
+        "B11": {
+          "v": 8952269.140625
+        },
+        "B12": {
+          "v": 0.099575
+        },
+        "B15": {
+          "v": 9000000
+        },
+        "B16": {
+          "v": 8863632.8125
+        },
+        "B17": {
+          "v": 0.015152
+        },
+        "B18": {
+          "v": 136367.1875
+        },
+        "B21": {
+          "v": 0.15
+        },
+        "B22": {
+          "v": "Yes"
+        },
+        "B23": {
+          "v": 2
+        },
+        "B25": {
+          "v": 7985875
+        },
+        "B26": {
+          "v": 0.082759
+        },
+        "B27": {
+          "v": 0.149193
+        },
+        "B28": {
+          "v": 1.845827
+        },
+        "B3": {
+          "v": 0.1
+        },
+        "B30": {
+          "v": 5190818.75
+        },
+        "B31": {
+          "v": 0.639449
+        },
+        "B32": {
+          "v": "Max LTV"
+        },
+        "B33": {
+          "v": 51908.1875
+        },
+        "B34": {
+          "v": 2926823.1875
+        },
+        "B35": {
+          "v": 8065733.75
+        },
+        "B36": {
+          "v": 8117641.9375
+        },
+        "B37": {
+          "v": 0.108089
+        },
+        "B4": {
+          "v": "Yes"
+        },
+        "B40": {
+          "v": "8.00% pref, annually compounded"
+        },
+        "B41": {
+          "v": "Contributed / unreturned capital"
+        },
+        "B42": {
+          "v": "Return of capital first (presentation only: the pref compounds, so no dollar moves)"
+        },
+        "B43": {
+          "v": "Above the waterfall (deal expense) \u2014 1.00% of invested equity, measured at the start of each period"
+        },
+        "B44": {
+          "v": "20% promote on the LP-attributable residual (90% of it)"
+        },
+        "B5": {
+          "v": 6
+        },
+        "B7": {
+          "v": 8863632.8125
+        },
+        "B8": {
+          "v": 0.074563
+        },
+        "B9": {
+          "v": 0
+        }
+      },
+      "Sensitivity": {
+        "A1": {
+          "fill": "00003366",
+          "v": "IRR Sensitivity: Purchase Price vs Exit Cap Rate"
+        },
+        "A10": {
+          "v": "+5.0% ($9,450,000)"
+        },
+        "A11": {
+          "v": "+7.5% ($9,675,000)"
+        },
+        "A12": {
+          "v": "+10.0% ($9,900,000)"
+        },
+        "A15": {
+          "v": "Legend:"
+        },
+        "A16": {
+          "fill": "00C6EFCE",
+          "v": "  \u2265 12% IRR"
+        },
+        "A17": {
+          "fill": "00FFEB9C",
+          "v": "  10-12% IRR"
+        },
+        "A18": {
+          "fill": "00FFC7CE",
+          "v": "  < 10% IRR"
+        },
+        "A3": {
+          "v": "Price \\ Exit Cap"
+        },
+        "A4": {
+          "v": "-10.0% ($8,100,000)"
+        },
+        "A5": {
+          "v": "-7.5% ($8,325,000)"
+        },
+        "A6": {
+          "v": "-5.0% ($8,550,000)"
+        },
+        "A7": {
+          "v": "-2.5% ($8,775,000)"
+        },
+        "A8": {
+          "v": "+0.0% ($9,000,000)"
+        },
+        "A9": {
+          "v": "+2.5% ($9,225,000)"
+        },
+        "B10": {
+          "fill": "00C6EFCE",
+          "v": 0.134695
+        },
+        "B11": {
+          "fill": "00C6EFCE",
+          "v": 0.128675
+        },
+        "B12": {
+          "fill": "00C6EFCE",
+          "v": 0.122835
+        },
+        "B3": {
+          "fill": "00003366",
+          "v": "5.62%"
+        },
+        "B4": {
+          "fill": "00C6EFCE",
+          "v": 0.175212
+        },
+        "B5": {
+          "fill": "00C6EFCE",
+          "v": 0.16787
+        },
+        "B6": {
+          "fill": "00C6EFCE",
+          "v": 0.160782
+        },
+        "B7": {
+          "fill": "00C6EFCE",
+          "v": 0.153935
+        },
+        "B8": {
+          "fill": "00C6EFCE",
+          "v": 0.147313
+        },
+        "B9": {
+          "fill": "00C6EFCE",
+          "v": 0.140904
+        },
+        "C10": {
+          "fill": "00C6EFCE",
+          "v": 0.126515
+        },
+        "C11": {
+          "fill": "00C6EFCE",
+          "v": 0.120528
+        },
+        "C12": {
+          "fill": "00FFEB9C",
+          "v": 0.114719
+        },
+        "C3": {
+          "fill": "00003366",
+          "v": "5.88%"
+        },
+        "C4": {
+          "fill": "00C6EFCE",
+          "v": 0.166818
+        },
+        "C5": {
+          "fill": "00C6EFCE",
+          "v": 0.159513
+        },
+        "C6": {
+          "fill": "00C6EFCE",
+          "v": 0.152463
+        },
+        "C7": {
+          "fill": "00C6EFCE",
+          "v": 0.145652
+        },
+        "C8": {
+          "fill": "00C6EFCE",
+          "v": 0.139065
+        },
+        "C9": {
+          "fill": "00C6EFCE",
+          "v": 0.13269
+        },
+        "D10": {
+          "fill": "00FFEB9C",
+          "v": 0.118773
+        },
+        "D11": {
+          "fill": "00FFEB9C",
+          "v": 0.112817
+        },
+        "D12": {
+          "fill": "00FFEB9C",
+          "v": 0.107039
+        },
+        "D3": {
+          "fill": "00003366",
+          "v": "6.13%"
+        },
+        "D4": {
+          "fill": "00C6EFCE",
+          "v": 0.158874
+        },
+        "D5": {
+          "fill": "00C6EFCE",
+          "v": 0.151606
+        },
+        "D6": {
+          "fill": "00C6EFCE",
+          "v": 0.144591
+        },
+        "D7": {
+          "fill": "00C6EFCE",
+          "v": 0.137813
+        },
+        "D8": {
+          "fill": "00C6EFCE",
+          "v": 0.13126
+        },
+        "D9": {
+          "fill": "00C6EFCE",
+          "v": 0.124917
+        },
+        "E10": {
+          "fill": "00FFEB9C",
+          "v": 0.111431
+        },
+        "E11": {
+          "fill": "00FFEB9C",
+          "v": 0.105504
+        },
+        "E12": {
+          "fill": "00FFC7CE",
+          "v": 0.099754
+        },
+        "E3": {
+          "fill": "00003366",
+          "v": "6.38%"
+        },
+        "E4": {
+          "fill": "00C6EFCE",
+          "v": 0.151341
+        },
+        "E5": {
+          "fill": "00C6EFCE",
+          "v": 0.144107
+        },
+        "E6": {
+          "fill": "00C6EFCE",
+          "v": 0.137125
+        },
+        "E7": {
+          "fill": "00C6EFCE",
+          "v": 0.13038
+        },
+        "E8": {
+          "fill": "00C6EFCE",
+          "v": 0.123858
+        },
+        "E9": {
+          "fill": "00FFEB9C",
+          "v": 0.117545
+        },
+        "F10": {
+          "fill": "00FFEB9C",
+          "v": 0.104454
+        },
+        "F11": {
+          "fill": "00FFC7CE",
+          "v": 0.098555
+        },
+        "F12": {
+          "fill": "00FFC7CE",
+          "v": 0.092831
+        },
+        "F3": {
+          "fill": "00003366",
+          "v": "6.62%"
+        },
+        "F4": {
+          "fill": "00C6EFCE",
+          "v": 0.144184
+        },
+        "F5": {
+          "fill": "00C6EFCE",
+          "v": 0.136982
+        },
+        "F6": {
+          "fill": "00C6EFCE",
+          "v": 0.130031
+        },
+        "F7": {
+          "fill": "00C6EFCE",
+          "v": 0.123316
+        },
+        "F8": {
+          "fill": "00FFEB9C",
+          "v": 0.116824
+        },
+        "F9": {
+          "fill": "00FFEB9C",
+          "v": 0.11054
+        },
+        "G10": {
+          "fill": "00FFC7CE",
+          "v": 0.097812
+        },
+        "G11": {
+          "fill": "00FFC7CE",
+          "v": 0.091939
+        },
+        "G12": {
+          "fill": "00FFC7CE",
+          "v": 0.086241
+        },
+        "G3": {
+          "fill": "00003366",
+          "v": "6.88%"
+        },
+        "G4": {
+          "fill": "00C6EFCE",
+          "v": 0.137371
+        },
+        "G5": {
+          "fill": "00C6EFCE",
+          "v": 0.130199
+        },
+        "G6": {
+          "fill": "00C6EFCE",
+          "v": 0.123278
+        },
+        "G7": {
+          "fill": "00FFEB9C",
+          "v": 0.116592
+        },
+        "G8": {
+          "fill": "00FFEB9C",
+          "v": 0.110128
+        },
+        "G9": {
+          "fill": "00FFEB9C",
+          "v": 0.103872
+        },
+        "H10": {
+          "fill": "00FFC7CE",
+          "v": 0.091479
+        },
+        "H11": {
+          "fill": "00FFC7CE",
+          "v": 0.085629
+        },
+        "H12": {
+          "fill": "00FFC7CE",
+          "v": 0.079955
+        },
+        "H3": {
+          "fill": "00003366",
+          "v": "7.13%"
+        },
+        "H4": {
+          "fill": "00C6EFCE",
+          "v": 0.130875
+        },
+        "H5": {
+          "fill": "00C6EFCE",
+          "v": 0.123732
+        },
+        "H6": {
+          "fill": "00FFEB9C",
+          "v": 0.116839
+        },
+        "H7": {
+          "fill": "00FFEB9C",
+          "v": 0.11018
+        },
+        "H8": {
+          "fill": "00FFEB9C",
+          "v": 0.103743
+        },
+        "H9": {
+          "fill": "00FFC7CE",
+          "v": 0.097513
+        },
+        "I10": {
+          "fill": "00FFC7CE",
+          "v": 0.085429
+        },
+        "I11": {
+          "fill": "00FFC7CE",
+          "v": 0.079604
+        },
+        "I12": {
+          "fill": "00FFC7CE",
+          "v": 0.073953
+        },
+        "I3": {
+          "fill": "00003366",
+          "v": "7.38%"
+        },
+        "I4": {
+          "fill": "00C6EFCE",
+          "v": 0.124671
+        },
+        "I5": {
+          "fill": "00FFEB9C",
+          "v": 0.117556
+        },
+        "I6": {
+          "fill": "00FFEB9C",
+          "v": 0.110689
+        },
+        "I7": {
+          "fill": "00FFEB9C",
+          "v": 0.104057
+        },
+        "I8": {
+          "fill": "00FFC7CE",
+          "v": 0.097645
+        },
+        "I9": {
+          "fill": "00FFC7CE",
+          "v": 0.091439
+        },
+        "J10": {
+          "fill": "00FFC7CE",
+          "v": 0.079643
+        },
+        "J11": {
+          "fill": "00FFC7CE",
+          "v": 0.07384
+        },
+        "J12": {
+          "fill": "00FFC7CE",
+          "v": 0.068211
+        },
+        "J3": {
+          "fill": "00003366",
+          "v": "7.62%"
+        },
+        "J4": {
+          "fill": "00FFEB9C",
+          "v": 0.118738
+        },
+        "J5": {
+          "fill": "00FFEB9C",
+          "v": 0.111649
+        },
+        "J6": {
+          "fill": "00FFEB9C",
+          "v": 0.104808
+        },
+        "J7": {
+          "fill": "00FFC7CE",
+          "v": 0.0982
+        },
+        "J8": {
+          "fill": "00FFC7CE",
+          "v": 0.091812
+        },
+        "J9": {
+          "fill": "00FFC7CE",
+          "v": 0.08563
+        }
+      },
+      "Sources & Uses": {
+        "A1": {
+          "fill": "00003366",
+          "v": "Uses of Funds"
+        },
+        "A10": {
+          "v": "Senior Debt"
+        },
+        "A11": {
+          "v": "GP Co-Invest (10% of equity)"
+        },
+        "A12": {
+          "v": "LP Equity"
+        },
+        "A13": {
+          "v": "Total Sources"
+        },
+        "A15": {
+          "v": "Total Equity"
+        },
+        "A16": {
+          "v": "Loan-to-Cost"
+        },
+        "A17": {
+          "v": "Sources \u2212 Uses"
+        },
+        "A2": {
+          "v": "Purchase Price"
+        },
+        "A3": {
+          "v": "Acquisition Closing Costs"
+        },
+        "A4": {
+          "v": "Upfront CapEx"
+        },
+        "A5": {
+          "v": "Operating Reserve"
+        },
+        "A6": {
+          "v": "Financing Costs"
+        },
+        "A7": {
+          "v": "Total Uses"
+        },
+        "A9": {
+          "fill": "00003366",
+          "v": "Sources of Funds"
+        },
+        "B10": {
+          "v": 5850000
+        },
+        "B11": {
+          "v": 329850
+        },
+        "B12": {
+          "v": 2968650
+        },
+        "B13": {
+          "v": 9148500
+        },
+        "B15": {
+          "v": 3298500
+        },
+        "B16": {
+          "v": 0.639449
+        },
+        "B17": {
+          "v": "In balance"
+        },
+        "B2": {
+          "v": 9000000
+        },
+        "B3": {
+          "v": 90000
+        },
+        "B4": {
+          "v": 0
+        },
+        "B5": {
+          "v": 0
+        },
+        "B6": {
+          "v": 58500
+        },
+        "B7": {
+          "v": 9148500
+        },
+        "C10": {
+          "v": 0.639449
+        },
+        "C11": {
+          "v": 0.036055
+        },
+        "C12": {
+          "v": 0.324496
+        },
+        "C2": {
+          "v": 0.983768
+        },
+        "C3": {
+          "v": 0.009838
+        },
+        "C4": {
+          "v": 0
+        },
+        "C5": {
+          "v": 0
+        },
+        "C6": {
+          "v": 0.006394
+        }
+      }
+    },
+    "investor_summary": {
+      "paragraphs": [
+        "Characterization Stabilized",
+        "Abilene, TX - Built 2015 - 60,000 NRSF - 480 units - 45% climate-controlled",
+        "Occupancy: 93.0% physical / 90.0% economic  (3-point spread)",
+        "TARGET RETURN",
+        "Leverage effect: +305 bps (accretive). Debt is accretive to the LP at the modelled terms.",
+        "LP net returns are computed under: 8.00% pref, annually compounded - Contributed / unreturned capital - Return of capital first (presentation only: the pref compounds, so no dollar moves) - Above the waterfall (deal expense) - 1.00% of invested equity, measured at the start of each period - 20% promote on the LP-attributable residual (90% of it). These are proposed terms, subject to the final partnership agreement.",
+        "Investment Thesis",
+        "* In-place rents sit 3% below market, closable through the existing tenant base rather than new lease-up.",
+        "* Revenue Management / ECRI: Implement systematic existing-customer rate increases (ECRI) targeting 8-10% annual increases for tenants > 6 months. Confirm street rates are flat-to...",
+        "* 78,000 people within three miles.",
+        "Key Metrics",
+        "Capital Stack",
+        "Plan to Achieve the Return",
+        "Identified NOI uplift: $173,800 per year at stabilization.",
+        "Scenario Returns (5-Year Hold)",
+        "Principal Risks & Mitigants",
+        "High - Failed Gate 3: Price \u2264 Replacement Cost",
+        "Mitigant: This gate failure requires specific justification to proceed.",
+        "High - Failed Gate 4: 5-Yr Unlevered IRR \u2265 10%",
+        "Mitigant: This gate failure requires specific justification to proceed.",
+        "High - Premium to replacement cost",
+        "Mitigant: Negotiate price below replacement cost or demonstrate irreplaceable location/market value.",
+        "Primary failure mode: {'category': 'Screening Gate', 'risk': 'Failed Gate 3: Price \u2264 Replacement Cost', 'description': 'Actual: $9,000,000 vs threshold: \u2264 $7,165,125. Asking $150/SF vs replacement $119/SF', 'severity': 'High', 'mitigation': 'This gate failure requires specific justification to proceed.'}",
+        "Market Snapshot",
+        "Screening result: DECLINE",
+        "Prepared by CIM Analyst from the seller's Confidential Information Memorandum supplemented by benchmark assumptions. Figures are underwriting estimates, not results, and are subject to due diligence. Past or projected performance is not a guarantee of future results. This document is for internal and prospect discussion only. It is not an offer to sell or a solicitation of an offer to buy any security, and it is not investment advice."
+      ],
+      "tables": [
+        [
+          [
+            "",
+            "Unlevered (property)",
+            "LP Net (after fees & promote)"
+          ],
+          [
+            "IRR",
+            "9.8%",
+            "12.9%"
+          ],
+          [
+            "MOIC",
+            "1.51x",
+            "1.74x"
+          ],
+          [
+            "Bear to Bull",
+            "6.3% to 18.2%",
+            "5.1% to 27.5%"
+          ]
+        ],
+        [
+          [
+            "Asking Price",
+            "$9,000,000"
+          ],
+          [
+            "Price / SF",
+            "$150"
+          ],
+          [
+            "Discount to Replacement",
+            "-25.6%"
+          ],
+          [
+            "Entry Cap",
+            "7.343%"
+          ],
+          [
+            "Exit Cap (Base)",
+            "7.343% (floored at entry)"
+          ],
+          [
+            "Yr-1 Yield on Cost",
+            "7.6%"
+          ],
+          [
+            "Total Basis",
+            "$9,090,000"
+          ],
+          [
+            "Equity Required",
+            "$3,298,500"
+          ],
+          [
+            "Senior Debt",
+            "$5,850,000 (Max LTV)"
+          ]
+        ],
+        [
+          [
+            "Total Uses",
+            "$9,148,500",
+            ""
+          ],
+          [
+            "Senior Debt",
+            "$5,850,000",
+            "64%"
+          ],
+          [
+            "Total Equity",
+            "$3,298,500",
+            "36%"
+          ],
+          [
+            "of which GP co-invest",
+            "$329,850",
+            "10% of equity"
+          ],
+          [
+            "Asset-management fee (hold total)",
+            "$164,925",
+            "1.00%/yr"
+          ],
+          [
+            "GP promote (hold total)",
+            "$241,539",
+            ""
+          ]
+        ],
+        [
+          [
+            "Initiative",
+            "Impact / yr",
+            "Timeline"
+          ],
+          [
+            "Revenue Management / ECRI: Implement systematic existing-customer rate increases (ECRI) targeting 8-10% annual increa...",
+            "$31,860",
+            "Immediate"
+          ],
+          [
+            "Ancillary Revenue: Add/expand tenant insurance program, late fees, admin fees, and merchandise sales to target 5-8% o...",
+            "$32,940",
+            "3-6 months"
+          ],
+          [
+            "Reduce Repairs & Maintenance: Repairs & Maintenance at $0.40/SF is above benchmark range ($0.18-$0.36/SF). Target top...",
+            "$2,400",
+            "6-12 months"
+          ]
+        ],
+        [
+          [
+            "",
+            "Bear",
+            "Base",
+            "Bull"
+          ],
+          [
+            "Unlevered IRR",
+            "6.3%",
+            "9.8%",
+            "18.2%"
+          ],
+          [
+            "MOIC",
+            "1.31x",
+            "1.51x",
+            "2.13x"
+          ],
+          [
+            "Yr-1 Yield on Cost",
+            "7.3%",
+            "7.6%",
+            "8.0%"
+          ],
+          [
+            "Exit Cap",
+            "7.750%",
+            "7.343%",
+            "5.500%"
+          ]
+        ],
+        [
+          [
+            "Population (3-mile)",
+            "78,000"
+          ],
+          [
+            "Median HHI (3-mile)",
+            "$61,500"
+          ],
+          [
+            "Market",
+            "Abilene"
+          ],
+          [
+            "Supply (3-mile)",
+            "4.7 SF/capita"
+          ]
+        ]
+      ]
+    },
+    "memo": {
+      "paragraphs": [
+        "SELF-STORAGE INVESTMENT MEMO",
+        "Characterization Stabilized",
+        "1 Stabilized Way\nAbilene, TX",
+        "Prepared by CIM Analyst\nConfidential",
+        "1. Investment Summary",
+        "Occupancy check: economic occupancy of 90.0% vs physical of 93.0% (3-pt spread) \u2014 within normal operating range; upside must come from rate growth or expense control rather than collections recovery.",
+        "Model Checks",
+        "6 of 13 integrity checks flagged. Blocking findings were accepted by the analyst with the discrepancy recorded; advisory findings do not stop the model but change how its outputs should be read.",
+        "Screening Gates",
+        "Returns Snapshot (Unlevered)",
+        "Maximum Offer Price (for 10% Base Case IRR): $8,863,633",
+        "2. Market Overview",
+        "Demographics",
+        "Adequate density with 78,000 people within 3 miles \u2014 meets minimum threshold.",
+        "Middle-income trade area ($61,500 median HHI) \u2014 adequate purchasing power.",
+        "MSA Classification",
+        "Abilene \u2014 not identified as top-50 MSA. Verify market classification.",
+        "Supply Assessment",
+        "No explicit new supply mentions found in CIM \u2014 verify independently.",
+        "Demand Positives",
+        "Strong occupancy at 93.0% \u2014 demand exceeds supply.",
+        "Dense trade area (78,000 within 3 mi).",
+        "Overall Market Rating: Moderate",
+        "3. Property Description",
+        "Property: Characterization Stabilized",
+        "Address: 1 Stabilized Way",
+        "City/State: Abilene, TX",
+        "Year Built: 2015",
+        "Acreage: 4",
+        "NRSF: 60000",
+        "Total Units: 480",
+        "Climate-Controlled %: 45.0%",
+        "Physical Occupancy: 93.0%",
+        "Economic Occupancy: 90.0%",
+        "Built 2015 (11 years old) \u2014 mid-life asset, normal wear expected.",
+        "TBD \u2014 requires site visit for physical condition assessment.",
+        "Replacement Cost Estimate",
+        "Replacement Cost Assumptions",
+        "Soft costs assumed at 10% of hard + site costs. Developer profit assumed at 12% of total development cost. Hard cost rates represent midpoints of benchmark ranges based on 2025/2026 construction cost data for each facility type.",
+        "Asking price of $9,000,000 ($150/SF) represents a 25.6% premium over estimated replacement cost of $7,165,125 ($119/SF).",
+        "4. Financial Analysis",
+        "Income Summary",
+        "Gross Potential Rent: $1,180,000",
+        "Vacancy: $118,000",
+        "Effective Gross Revenue: $1,062,000",
+        "Other Income: $36,000",
+        "Total Revenue: $1,098,000",
+        "Expense Benchmarking",
+        "Adjusted TTM NOI",
+        "CIM TTM NOI of $670,000 adjusted down by $9,100 to $660,900 after expense benchmarking. The analyst-adjusted figure is used as the base for all return calculations.",
+        "5. Unit Mix & Rent Analysis",
+        "Property offers 4 unit types totaling 480 units. Weighted average rent of $1.07/SF/month. 2 unit type(s) are climate-controlled.",
+        "Rent Gap to Market",
+        "Subject average rent of $1.47/SF/mo is below the market average of $1.52/SF/mo by 3.3%.",
+        "6. Valuation & Returns",
+        "Bear Case",
+        "Entry Cap: 7.3%",
+        "Exit Cap: 7.750%",
+        "= 6.250% market cap (Self Storage, mid, table as of 2026-Q3) +100 bp scenario spread +50 bp obsolescence drift (10.0 bp/yr \u00d7 5 yrs)",
+        "Exit Value (gross): $8,689,255",
+        "Acquisition Closing Costs: $90,000",
+        "Disposition Costs: $130,339",
+        "Net Sale Proceeds: $8,558,916",
+        "5-Year IRR (net of costs): 6.3%",
+        "5-Year MOIC: 1.31x",
+        "Yield on Cost: 7.3%",
+        "Base Case",
+        "Entry Cap: 7.3%",
+        "Exit Cap: 7.343%",
+        "= 6.250% market cap (Self Storage, mid, table as of 2026-Q3) +0 bp scenario spread +37.5 bp obsolescence drift (7.5 bp/yr \u00d7 5 yrs) = 6.625%, then raised to the entry cap to hold exit \u2265 entry",
+        "Exit Value (gross): $10,295,433",
+        "Acquisition Closing Costs: $90,000",
+        "Disposition Costs: $154,431",
+        "Net Sale Proceeds: $10,141,002",
+        "5-Year IRR (net of costs): 9.8%",
+        "5-Year MOIC: 1.51x",
+        "Yield on Cost: 7.6%",
+        "Bull Case",
+        "Entry Cap: 7.3%",
+        "Exit Cap: 5.500%",
+        "= 6.250% market cap (Self Storage, mid, table as of 2026-Q3) -100 bp scenario spread +25 bp obsolescence drift (5.0 bp/yr \u00d7 5 yrs)",
+        "Exit Value (gross): $15,604,470",
+        "Acquisition Closing Costs: $90,000",
+        "Disposition Costs: $234,067",
+        "Net Sale Proceeds: $15,370,403",
+        "5-Year IRR (net of costs): 18.2%",
+        "5-Year MOIC: 2.13x",
+        "Yield on Cost: 8.0%",
+        "Sources & Uses",
+        "Total equity required: $3,298,500 (GP co-invest 10.0%: $329,850; LP $2,968,650).",
+        "Levered Returns (LP Net)",
+        "Senior loan $5,850,000 at 6.2%, 25-year amortization, 0 months IO, 10-year term. Sized off the base case at the lesser of LTV, DSCR and debt yield; bound by Max LTV at 65.0% LTV, 1.50x Year-1 DSCR and 11.9% debt yield. The SAME loan is carried through all three scenarios \u2014 sizing per scenario would hand the bear case a smaller loan and flatten the downside it exists to show.",
+        "Leverage is DILUTIVE in the Bear case(s): LP net IRR is below the unlevered IRR because the loan constant sits above the deal's yield on cost. This is an outcome, not an error.",
+        "Levered Assumptions",
+        "8.00% pref, annually compounded \u2014 Pref simple or compounded, and at what frequency",
+        "Contributed / unreturned capital \u2014 Accrual base: contributed/unreturned or committed",
+        "Return of capital first (presentation only: the pref compounds, so no dollar moves) \u2014 Return of capital before pref, or pref first",
+        "Above the waterfall (deal expense) \u2014 1.00% of invested equity, measured at the start of each period \u2014 AM fee above the waterfall or netted from LP",
+        "20% promote on the LP-attributable residual (90% of it) \u2014 Promote on 100% of residual or LP-attributable only",
+        "Maximum Offer Price",
+        "At a target 10% base case unlevered IRR, the maximum offer price is $8,863,633 (implied entry cap: 7.5%).",
+        "At a target 15% LP NET IRR \u2014 after debt service, the asset-management fee and the GP promote \u2014 the maximum offer price is $7,985,875 (implied entry cap: 8.3%). At that price the deal supports $5,190,819 of senior debt (63.9% LTV, bound by Max LTV) and requires $2,926,823 of equity.",
+        "This price is computed on the levered assumption set stated under Levered Returns above: 8.00% pref, annually compounded; Contributed / unreturned capital; Return of capital first (presentation only: the pref compounds, so no dollar moves); Above the waterfall (deal expense) \u2014 1.00% of invested equity, measured at the start of each period; 20% promote on the LP-attributable residual (90% of it).",
+        "7. Value-Add Opportunities",
+        "Identified 2 revenue enhancement opportunities. Identified 3 expense reduction opportunities. Estimated total annual NOI uplift: $173,800. 3 capital improvement item(s) identified for evaluation.",
+        "8. Risk Analysis",
+        "Why This Deal Could Fail",
+        "Failed Gate 3: Price \u2264 Replacement Cost: Actual: $9,000,000 vs threshold: \u2264 $7,165,125. Asking $150/SF vs replacement $119/SF",
+        "Failed Gate 4: 5-Yr Unlevered IRR \u2265 10%: Actual: 9.8% vs threshold: \u2265 10%. Below target IRR (static model)",
+        "Premium to replacement cost: Asking $150/SF vs replacement $119/SF (25.6% premium).",
+        "Risk Register",
+        "Overall Risk Rating: High",
+        "9. Due Diligence Items",
+        "Obtain and review actual T-12 P&L (not broker pro forma)",
+        "Verify 3-mile population and demographics via census data",
+        "Confirm new supply pipeline with local planning/permitting records",
+        "Conduct physical property inspection and condition assessment",
+        "Obtain rent roll with move-in dates and rate history",
+        "Reconcile economic vs physical occupancy from the rent roll (concessions, delinquency, below-street in-place rates)",
+        "Verify competitor street-rate trend over trailing 6-12 months \u2014 confirm the in-place-to-market gap is closing from below (market rising), not from above (street rates falling)",
+        "Verify property tax assessment and potential reassessment at sale price",
+        "Review competitor rent survey (independent of CIM data)",
+        "Confirm insurance quotes for the specific property",
+        "Review lease/rental agreement terms",
+        "Environmental Phase I assessment",
+        "Title and survey review",
+        "Verify zoning and entitlements",
+        "10. Recommendation",
+        "RECOMMENDATION: DECLINE",
+        "One or more screening gates have failed:",
+        "Gate 3 (Price \u2264 Replacement Cost): Asking $150/SF vs replacement $119/SF",
+        "Gate 4 (5-Yr Unlevered IRR \u2265 10%): Below target IRR (static model)",
+        "Gate 7 (Major City / Top-50 MSA): MSA not auto-matched to top-50 \u2014 set Market Verification in assumptions to resolve",
+        "Maximum Offer: $8,863,633 (1.5% discount to asking price of $9,000,000)",
+        "Note: This analysis is based on CIM-provided data supplemented by benchmark assumptions. All figures should be verified during due diligence."
+      ],
+      "tables": [
+        [
+          [
+            "Metric",
+            "Value"
+          ],
+          [
+            "Property",
+            "Characterization Stabilized"
+          ],
+          [
+            "Location",
+            "Abilene, TX"
+          ],
+          [
+            "Asking Price",
+            "$9,000,000"
+          ],
+          [
+            "NRSF",
+            "60,000 SF"
+          ],
+          [
+            "Total Units",
+            "480"
+          ],
+          [
+            "Physical Occupancy",
+            "93.0%"
+          ],
+          [
+            "Economic Occupancy",
+            "90.0%"
+          ],
+          [
+            "Price / SF",
+            "$150"
+          ],
+          [
+            "Year Built",
+            "2015"
+          ]
+        ],
+        [
+          [
+            "Check",
+            "Severity",
+            "Finding"
+          ],
+          [
+            "Unit mix SF vs NRSF",
+            "Advisory",
+            "Unit mix totals 48,000 SF but NRSF is stated as 60,000 \u2014 off by 12,000 SF (20.0%, tolerance 2%). Usually a partially extracted unit mix; confirm before trusting any per-SF figure."
+          ],
+          [
+            "Unit mix rents vs GPR",
+            "Advisory",
+            "Unit mix at asking rates annualizes to $614,880 but GPR is stated as $1,180,000 \u2014 off by $565,120 (47.9%, tolerance 3%). Both figures are gross potential, so vacancy and concessions do not explain the gap."
+          ],
+          [
+            "Expense line floors",
+            "Advisory",
+            "Expense lines that cannot be taken at face value \u2014 not stated in the CIM: Capital Reserve. Each is adjusted up to the benchmark floor before NOI, but a line this far off is usually an extraction or entry error worth fixing at the source."
+          ],
+          [
+            "Total OpEx $/NRSF band",
+            "Advisory",
+            "Total OpEx of $7.29/SF is above the $2.22/SF\u2013$4.57/SF benchmark band."
+          ],
+          [
+            "Exit cap \u2265 entry cap",
+            "Advisory",
+            "Exit cap was raised to the entry cap to satisfy the exit \u2265 entry rule \u2014 Base raised from 6.625% to 7.343%. The scenario's returns are computed on the raised cap, not on the one entered."
+          ],
+          [
+            "Price vs replacement cost",
+            "Advisory",
+            "Asking price exceeds estimated replacement cost \u2014 $150.00/SF asking vs $119.42/SF replacement, a 25.6% premium."
+          ]
+        ],
+        [
+          [
+            "Gate",
+            "Threshold",
+            "Actual",
+            "Result"
+          ],
+          [
+            "Population (3-mi \u2265 50K)",
+            "\u2265 50,000",
+            "78,000",
+            "PASS"
+          ],
+          [
+            "No Unproven Demand",
+            "Phys \u2265 75%; no post-2020 ramp",
+            "93.0% phys / 90.0% econ",
+            "PASS"
+          ],
+          [
+            "Price \u2264 Replacement Cost",
+            "\u2264 $7,165,125",
+            "$9,000,000",
+            "FAIL"
+          ],
+          [
+            "5-Yr Unlevered IRR \u2265 10%",
+            "\u2265 10%",
+            "9.8%",
+            "FAIL"
+          ],
+          [
+            "No Oversupply Flag",
+            "\u2264 10 SF/capita",
+            "4.7 SF/capita",
+            "PASS"
+          ],
+          [
+            "NOI Step-Up \u2264 15%",
+            "\u2264 15%",
+            "3.0%",
+            "PASS"
+          ],
+          [
+            "Major City / Top-50 MSA",
+            "Top-50 MSA or strong secondary",
+            "Abilene",
+            "TBD"
+          ]
+        ],
+        [
+          [
+            "Metric",
+            "Bear",
+            "Base",
+            "Bull"
+          ],
+          [
+            "Yr1 Yield on Cost",
+            "7.3%",
+            "7.6%",
+            "8.0%"
+          ],
+          [
+            "5-Yr IRR",
+            "6.3%",
+            "9.8%",
+            "18.2%"
+          ],
+          [
+            "5-Yr MOIC",
+            "1.31x",
+            "1.51x",
+            "2.13x"
+          ]
+        ],
+        [
+          [
+            "Component",
+            "Cost"
+          ],
+          [
+            "Self-Storage Drive-Up Hard Cost (33,000 SF)",
+            "$2,310,000"
+          ],
+          [
+            "Self-Storage Drive-Up Site Work",
+            "$280,500"
+          ],
+          [
+            "Self-Storage Enclosed Hard Cost (27,000 SF)",
+            "$2,970,000"
+          ],
+          [
+            "Self-Storage Enclosed Site Work",
+            "$229,500"
+          ],
+          [
+            "Soft Costs",
+            "$579,000"
+          ],
+          [
+            "Developer Profit",
+            "$796,125"
+          ],
+          [
+            "Total Replacement Cost",
+            "$7,165,125"
+          ]
+        ],
+        [
+          [
+            "Facility Type",
+            "Hard Cost $/SF",
+            "Site Work $/SF"
+          ],
+          [
+            "Self-Storage Drive-Up",
+            "$70",
+            "$8"
+          ],
+          [
+            "Self-Storage Enclosed",
+            "$110",
+            "$8"
+          ]
+        ],
+        [
+          [
+            "Category",
+            "CIM Value",
+            "$/NRSF",
+            "Benchmark",
+            "Flag"
+          ],
+          [
+            "Property Taxes",
+            "$170,000",
+            "$2.83",
+            "$2.56-$2.56",
+            "ABOVE FORMULA"
+          ],
+          [
+            "Insurance",
+            "$16,000",
+            "$0.27",
+            "$0.18-$0.38",
+            "IN RANGE"
+          ],
+          [
+            "Utilities",
+            "$9,000",
+            "$0.15",
+            "$0.10-$0.22",
+            "IN RANGE"
+          ],
+          [
+            "Repairs & Maintenance",
+            "$24,000",
+            "$0.40",
+            "$0.18-$0.36",
+            "ABOVE RANGE"
+          ],
+          [
+            "Advertising",
+            "$8,000",
+            "$0.13",
+            "$0.06-$0.17",
+            "IN RANGE"
+          ],
+          [
+            "Payroll",
+            "$126,000",
+            "$2.10",
+            "$0.26-$0.51",
+            "ABOVE RANGE"
+          ],
+          [
+            "General & Administrative",
+            "$22,000",
+            "$0.37",
+            "$0.09-$0.18",
+            "ABOVE RANGE"
+          ],
+          [
+            "Capital Reserve",
+            "N/A",
+            "N/A",
+            "$0.15-$0.25",
+            ""
+          ],
+          [
+            "Management Fee",
+            "$53,100",
+            "N/A",
+            "N/A",
+            "IN RANGE"
+          ]
+        ],
+        [
+          [
+            "Size",
+            "Count",
+            "SF",
+            "Rate/Mo",
+            "$/SF/Mo"
+          ],
+          [
+            "5x10",
+            "160",
+            "50",
+            "$62",
+            "$1.24"
+          ],
+          [
+            "10x10",
+            "200",
+            "100",
+            "$108",
+            "$1.08"
+          ],
+          [
+            "10x15",
+            "80",
+            "150",
+            "$152",
+            "$1.01"
+          ],
+          [
+            "10x20",
+            "40",
+            "200",
+            "$189",
+            "$0.94"
+          ]
+        ],
+        [
+          [
+            "Year",
+            "Yr 1",
+            "Yr 2",
+            "Yr 3",
+            "Yr 4",
+            "Yr 5"
+          ],
+          [
+            "NOI",
+            "$660,900",
+            "$664,257",
+            "$667,468",
+            "$670,524",
+            "$673,417"
+          ]
+        ],
+        [
+          [
+            "Year",
+            "Yr 1",
+            "Yr 2",
+            "Yr 3",
+            "Yr 4",
+            "Yr 5"
+          ],
+          [
+            "NOI",
+            "$693,945",
+            "$708,999",
+            "$724,360",
+            "$740,035",
+            "$756,028"
+          ]
+        ],
+        [
+          [
+            "Year",
+            "Yr 1",
+            "Yr 2",
+            "Yr 3",
+            "Yr 4",
+            "Yr 5"
+          ],
+          [
+            "NOI",
+            "$726,990",
+            "$760,878",
+            "$796,265",
+            "$826,685",
+            "$858,246"
+          ]
+        ],
+        [
+          [
+            "Uses",
+            "Amount",
+            "% of Total"
+          ],
+          [
+            "Purchase Price",
+            "$9,000,000",
+            "98.4%"
+          ],
+          [
+            "Acquisition Closing Costs",
+            "$90,000",
+            "1.0%"
+          ],
+          [
+            "Upfront CapEx",
+            "$0",
+            "0.0%"
+          ],
+          [
+            "Operating Reserve",
+            "$0",
+            "0.0%"
+          ],
+          [
+            "Financing Costs",
+            "$58,500",
+            "0.6%"
+          ],
+          [
+            "Total Uses",
+            "$9,148,500",
+            "100.0%"
+          ]
+        ],
+        [
+          [
+            "Sources",
+            "Amount",
+            "% of Total"
+          ],
+          [
+            "Senior Debt",
+            "$5,850,000",
+            "63.9%"
+          ],
+          [
+            "GP Co-Invest (10% of equity)",
+            "$329,850",
+            "3.6%"
+          ],
+          [
+            "LP Equity",
+            "$2,968,650",
+            "32.4%"
+          ],
+          [
+            "Total Sources",
+            "$9,148,500",
+            "100.0%"
+          ]
+        ],
+        [
+          [
+            "5-Year Levered",
+            "Bear",
+            "Base",
+            "Bull"
+          ],
+          [
+            "LP Net IRR",
+            "5.1%",
+            "12.9%",
+            "27.5%"
+          ],
+          [
+            "LP MOIC",
+            "1.25x",
+            "1.74x",
+            "3.09x"
+          ],
+          [
+            "GP Promote",
+            "$0",
+            "$241,539",
+            "$1,253,027"
+          ],
+          [
+            "AM Fee (total)",
+            "$164,925",
+            "$164,925",
+            "$164,925"
+          ],
+          [
+            "Equity Required",
+            "$3,298,500",
+            "$3,298,500",
+            "$3,298,500"
+          ]
+        ],
+        [
+          [
+            "Risk",
+            "Category",
+            "Severity",
+            "Mitigation"
+          ],
+          [
+            "Failed Gate 3: Price \u2264 Replacement Cost",
+            "Screening Gate",
+            "High",
+            "This gate failure requires specific justification to proceed."
+          ],
+          [
+            "Failed Gate 4: 5-Yr Unlevered IRR \u2265 10%",
+            "Screening Gate",
+            "High",
+            "This gate failure requires specific justification to proceed."
+          ],
+          [
+            "Premium to replacement cost",
+            "Valuation",
+            "High",
+            "Negotiate price below replacement cost or demonstrate irreplaceable location/market value."
+          ],
+          [
+            "Unverified Gate 7: Major City / Top-50 MSA",
+            "Data Gap",
+            "Medium",
+            "Manual verification required before final recommendation."
+          ]
+        ]
+      ]
+    }
+  },
+  "errors": [],
+  "expense_ratio": 0.398087,
+  "gate_summary": {
+    "failed": 2,
+    "passed": 4,
+    "recommendation": "DECLINE",
+    "tbd": 1,
+    "total": 7
+  },
+  "gates": [
+    {
+      "actual": "78,000",
+      "gate": 1,
+      "name": "Population (3-mi \u2265 50K)",
+      "result": "PASS",
+      "threshold": "\u2265 50,000"
+    },
+    {
+      "actual": "93.0% phys / 90.0% econ",
+      "gate": 2,
+      "name": "No Unproven Demand",
+      "result": "PASS",
+      "threshold": "Phys \u2265 75%; no post-2020 ramp"
+    },
+    {
+      "actual": "$9,000,000",
+      "gate": 3,
+      "name": "Price \u2264 Replacement Cost",
+      "result": "FAIL",
+      "threshold": "\u2264 $7,165,125"
+    },
+    {
+      "actual": "9.8%",
+      "gate": 4,
+      "name": "5-Yr Unlevered IRR \u2265 10%",
+      "result": "FAIL",
+      "threshold": "\u2265 10%"
+    },
+    {
+      "actual": "4.7 SF/capita",
+      "gate": 5,
+      "name": "No Oversupply Flag",
+      "result": "PASS",
+      "threshold": "\u2264 10 SF/capita"
+    },
+    {
+      "actual": "3.0%",
+      "gate": 6,
+      "name": "NOI Step-Up \u2264 15%",
+      "result": "PASS",
+      "threshold": "\u2264 15%"
+    },
+    {
+      "actual": "Abilene",
+      "gate": 7,
+      "name": "Major City / Top-50 MSA",
+      "result": "TBD",
+      "threshold": "Top-50 MSA or strong secondary"
+    }
+  ],
+  "levered": {
+    "base": {
+      "am_fee_total": 164925.0,
+      "gp_promote": 241538.579274,
+      "lp_moic": 1.738957,
+      "lp_net_irr": 0.128867
+    },
+    "bear": {
+      "am_fee_total": 164925.0,
+      "gp_promote": 0.0,
+      "lp_moic": 1.253733,
+      "lp_net_irr": 0.050765
+    },
+    "bull": {
+      "am_fee_total": 164925.0,
+      "gp_promote": 1253027.076545,
+      "lp_moic": 3.088425,
+      "lp_net_irr": 0.27539
+    }
+  },
+  "levered_max_offer": {
+    "achieved_irr": 0.149193,
+    "coerced_region": true,
+    "max_price": 7985875.0,
+    "monotonicity_warning": null,
+    "target_irr": 0.15
+  },
+  "max_offer": {
+    "achieved_irr": 0.099575,
+    "max_price": 8863632.8125,
+    "target_irr": 0.1,
+    "total_basis": 8952269.140625
+  },
+  "risks": [
+    [
+      "High",
+      "Failed Gate 3: Price \u2264 Replacement Cost"
+    ],
+    [
+      "High",
+      "Failed Gate 4: 5-Yr Unlevered IRR \u2265 10%"
+    ],
+    [
+      "High",
+      "Premium to replacement cost"
+    ],
+    [
+      "Medium",
+      "Unverified Gate 7: Major City / Top-50 MSA"
+    ]
+  ],
+  "scenarios": {
+    "base": {
+      "entry_cap": 0.073433,
+      "exit_cap": 0.073433,
+      "exit_cap_coerced": true,
+      "exit_value": 10295433.305148,
+      "expense_projection": [
+        458955.0,
+        472723.65,
+        486905.3595,
+        501512.520285,
+        516557.895894
+      ],
+      "hold_years": 5,
+      "irr": 0.098402,
+      "moic": 1.514232,
+      "noi_projection": [
+        693945.0,
+        708998.85,
+        724360.203,
+        740034.681277,
+        756027.985708
+      ],
+      "requested_exit_cap": 0.06625,
+      "revenue_projection": [
+        1152900.0,
+        1181722.5,
+        1211265.5625,
+        1241547.201562,
+        1272585.881602
+      ],
+      "total_basis": 9090000.0,
+      "yield_on_cost": 0.076342
+    },
+    "bear": {
+      "entry_cap": 0.073433,
+      "exit_cap": 0.0775,
+      "exit_cap_coerced": false,
+      "exit_value": 8689255.196584,
+      "expense_projection": [
+        437100.0,
+        450213.0,
+        463719.39,
+        477630.9717,
+        491959.900851
+      ],
+      "hold_years": 5,
+      "irr": 0.063069,
+      "moic": 1.308634,
+      "noi_projection": [
+        660900.0,
+        664257.0,
+        667467.66,
+        670523.88405,
+        673417.277735
+      ],
+      "requested_exit_cap": 0.0775,
+      "revenue_projection": [
+        1098000.0,
+        1114470.0,
+        1131187.05,
+        1148154.85575,
+        1165377.178586
+      ],
+      "total_basis": 9090000.0,
+      "yield_on_cost": 0.072706
+    },
+    "bull": {
+      "entry_cap": 0.073433,
+      "exit_cap": 0.055,
+      "exit_cap_coerced": false,
+      "exit_value": 15604469.62458,
+      "expense_projection": [
+        480810.0,
+        495234.3,
+        510091.329,
+        525394.06887,
+        541155.890936
+      ],
+      "hold_years": 5,
+      "irr": 0.182273,
+      "moic": 2.127554,
+      "noi_projection": [
+        726990.0,
+        760877.7,
+        796265.151,
+        826684.88793,
+        858245.829352
+      ],
+      "requested_exit_cap": 0.055,
+      "revenue_projection": [
+        1207800.0,
+        1256112.0,
+        1306356.48,
+        1352078.9568,
+        1399401.720288
+      ],
+      "total_basis": 9090000.0,
+      "yield_on_cost": 0.079977
+    }
+  },
+  "sensitivity": {
+    "base_exit_cap": 0.06625,
+    "base_price": 9000000,
+    "cap_labels": [
+      "5.62%",
+      "5.88%",
+      "6.13%",
+      "6.38%",
+      "6.62%",
+      "6.88%",
+      "7.13%",
+      "7.38%",
+      "7.62%"
+    ],
+    "cap_values": [
+      0.05625,
+      0.05875,
+      0.06125,
+      0.06375,
+      0.06625,
+      0.06875,
+      0.07125,
+      0.07375,
+      0.07625
+    ],
+    "irr_grid": [
+      [
+        0.175212,
+        0.166818,
+        0.158874,
+        0.151341,
+        0.144184,
+        0.137371,
+        0.130875,
+        0.124671,
+        0.118738
+      ],
+      [
+        0.16787,
+        0.159513,
+        0.151606,
+        0.144107,
+        0.136982,
+        0.130199,
+        0.123732,
+        0.117556,
+        0.111649
+      ],
+      [
+        0.160782,
+        0.152463,
+        0.144591,
+        0.137125,
+        0.130031,
+        0.123278,
+        0.116839,
+        0.110689,
+        0.104808
+      ],
+      [
+        0.153935,
+        0.145652,
+        0.137813,
+        0.13038,
+        0.123316,
+        0.116592,
+        0.11018,
+        0.104057,
+        0.0982
+      ],
+      [
+        0.147313,
+        0.139065,
+        0.13126,
+        0.123858,
+        0.116824,
+        0.110128,
+        0.103743,
+        0.097645,
+        0.091812
+      ],
+      [
+        0.140904,
+        0.13269,
+        0.124917,
+        0.117545,
+        0.11054,
+        0.103872,
+        0.097513,
+        0.091439,
+        0.08563
+      ],
+      [
+        0.134695,
+        0.126515,
+        0.118773,
+        0.111431,
+        0.104454,
+        0.097812,
+        0.091479,
+        0.085429,
+        0.079643
+      ],
+      [
+        0.128675,
+        0.120528,
+        0.112817,
+        0.105504,
+        0.098555,
+        0.091939,
+        0.085629,
+        0.079604,
+        0.07384
+      ],
+      [
+        0.122835,
+        0.114719,
+        0.107039,
+        0.099754,
+        0.092831,
+        0.086241,
+        0.079955,
+        0.073953,
+        0.068211
+      ]
+    ],
+    "price_labels": [
+      "-10.0%",
+      "-7.5%",
+      "-5.0%",
+      "-2.5%",
+      "+0.0%",
+      "+2.5%",
+      "+5.0%",
+      "+7.5%",
+      "+10.0%"
+    ],
+    "price_values": [
+      8100000.0,
+      8325000.0,
+      8550000.0,
+      8775000.0,
+      9000000.0,
+      9225000.0,
+      9450000.0,
+      9675000.0,
+      9900000.0
+    ]
+  },
+  "sources_uses": {
+    "balanced": true,
+    "gp_equity": 329850.0,
+    "lp_equity": 2968650.0,
+    "ltv": 0.639449,
+    "senior_debt": 5850000.0,
+    "total_equity": 3298500.0,
+    "total_sources": 9148500.0,
+    "total_uses": 9148500.0
+  },
+  "va_max_offer": {
+    "achieved_irr": null,
+    "max_price": null,
+    "target_irr": null
+  },
+  "va_results": {},
+  "value_add": {
+    "estimated_noi_uplift": 173800.0,
+    "expense_categories": [
+      "Reduce Repairs & Maintenance",
+      "Reduce Payroll",
+      "Reduce General & Administrative"
+    ],
+    "revenue_categories": [
+      "Revenue Management / ECRI",
+      "Ancillary Revenue"
+    ]
+  }
+}
