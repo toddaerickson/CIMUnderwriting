@@ -24,12 +24,26 @@ updating one means editing the JSON in the same commit as the code change,
 so the diff shows the reviewer exactly which numbers moved. That is the
 whole point — the artifact under review IS the behavioural delta.
 
+## The documents are pinned too, not just the result object
+
+`snapshot_of` reads the rendered `.docx` and `.xlsx` back off disk. Pinning
+only `AnalysisResult` would leave a hole exactly where item T Category 1
+works: the memo's "10% IRR" recommendation threshold, the sensitivity grid's
+0.12/0.10 fill colors and the max-offer captions are literals inside
+`output/`, and moving one wrongly changes the document a user opens while
+every field on the result object stays identical. The writers raise nothing
+in that case, so without the document text the suite would stay green
+through the drift it exists to catch.
+
 ## What is deliberately NOT pinned
 
 Anything that legitimately varies run to run: file paths, the analysis begin
 date the XLSM writer derives from `datetime.now()`, and the template-writer
 error on machines without the gitignored `template_uw.xlsm`. `_scrub`
 removes them. Pinning those would produce a test that fails on a Tuesday.
+The XLSM itself is therefore absent here on purpose — it is the one output
+that cannot be regenerated on a machine without the template, and item E3b
+already CI-gates its write paths with an AST walk.
 """
 
 import json
@@ -184,10 +198,92 @@ def _scrub(errors):
     The XLSM template is gitignored, so `generate_template` fails on any
     machine that does not happen to have it — including CI. Pinning that
     string would make the snapshot depend on a file the repo cannot carry.
+
+    Every surviving error is then truncated at its first colon, which is a
+    SECOND filter and applies to all of them, not just the template ones:
+    `engine` formats its errors as "<what failed>: <the exception>", and the
+    exception half carries tmpdir paths and library-version wording that
+    vary by machine. So this pins WHICH stage failed, not why. A stage that
+    starts failing still shows up — the list goes from empty to non-empty —
+    but two different causes within one stage snapshot identically, and
+    diagnosing that means reading the failure, not the snapshot.
     """
     return sorted(e.split(":")[0] for e in errors
                   if "Template not found" not in e
                   and "Template generation failed" not in e)
+
+
+def _cell(value):
+    """One workbook cell, rounded like every other float in the snapshot."""
+    return _round(value)
+
+
+def _docx_content(path: str) -> dict:
+    """The text of a generated .docx, as a reader sees it.
+
+    Paragraphs and tables are listed separately rather than interleaved in
+    document order: both orders are stable run to run, and the separate
+    lists keep the review diff readable when a table row moves.
+    """
+    from docx import Document
+
+    doc = Document(path)
+    return {
+        "paragraphs": [p.text.strip() for p in doc.paragraphs if p.text.strip()],
+        "tables": [[[c.text.strip() for c in row.cells] for row in t.rows]
+                   for t in doc.tables],
+    }
+
+
+def _xlsx_content(path: str) -> dict:
+    """Every populated cell of a generated .xlsx, per sheet.
+
+    Fill colors ride along because they are underwriting output here, not
+    decoration: the sensitivity grid colors each IRR against hard-coded
+    0.12 / 0.10 thresholds ([excel_writer.py](../output/excel_writer.py)),
+    and those are item T literals. A threshold that moves recolors the grid
+    without moving a single number in it.
+    """
+    from openpyxl import load_workbook
+
+    wb = load_workbook(path)
+    sheets = {}
+    for ws in wb.worksheets:
+        cells = {}
+        for row in ws.iter_rows():
+            for cell in row:
+                if cell.value is None:
+                    continue
+                entry = {"v": _cell(cell.value)}
+                fill = cell.fill
+                if fill is not None and fill.fill_type == "solid":
+                    color = fill.start_color
+                    rgb = getattr(color, "rgb", None)
+                    # Every solid fill records SOMETHING. A theme or indexed
+                    # color has no rgb string, and dropping the key there
+                    # would be a silent hole in the one place this snapshot
+                    # is watching a color: the sensitivity grid.
+                    entry["fill"] = rgb if isinstance(rgb, str) else (
+                        f"{getattr(color, 'type', '?')}:{getattr(color, 'value', None)}")
+                cells[cell.coordinate] = entry
+        sheets[ws.title] = cells
+    wb.close()
+    return sheets
+
+
+def _documents(result: AnalysisResult) -> dict:
+    """The three documents the run writes, read back off disk.
+
+    A path that is empty means the writer did not run — pinned as None so
+    an output silently disappearing is a snapshot diff rather than a
+    missing key nobody notices.
+    """
+    return {
+        "memo": _docx_content(result.memo_path) if result.memo_path else None,
+        "excel": _xlsx_content(result.excel_path) if result.excel_path else None,
+        "investor_summary": (_docx_content(result.investor_summary_path)
+                             if result.investor_summary_path else None),
+    }
 
 
 def _scenario(scen: dict) -> dict:
@@ -214,12 +310,28 @@ def snapshot_of(result: AnalysisResult) -> dict:
                          if k != "failed_gates" and k != "tbd_gates"},
         "scenarios": {name: _scenario(s)
                       for name, s in sorted(result.scenario_results.items())},
-        "sensitivity": _round(result.sensitivity.get("irr_grid")),
+        # The AXES, not just the grid. A step size or a base exit cap that
+        # moves does shift the IRRs with it, but the labels are what the
+        # workbook prints as its row and column headers, and item T moves
+        # both into `SENSITIVITY_GRID` in the same edit.
+        "sensitivity": {k: _round(result.sensitivity.get(k))
+                        for k in ("irr_grid", "price_labels", "price_values",
+                                  "cap_labels", "cap_values", "base_price",
+                                  "base_exit_cap")},
         "max_offer": {k: _round(result.max_offer.get(k))
                       for k in ("max_price", "target_irr", "achieved_irr",
                                 "total_basis")},
         "va_max_offer": {k: _round(result.va_max_offer.get(k))
                          for k in ("max_price", "target_irr", "achieved_irr")},
+        # Item E4's second max offer, solved to the fund's 15% LP NET bar.
+        # It is a separate answer to a separate question (CLAUDE.md design
+        # decision 8), printed on its own memo and workbook surfaces, and
+        # its bisection bracket in `model/solver.py` is a hand-copy of the
+        # unlevered one that item T is about to fold into `SOLVER_BOUNDS`.
+        "levered_max_offer": {k: _round(result.levered_max_offer.get(k))
+                              for k in ("max_price", "target_irr",
+                                        "achieved_irr", "monotonicity_warning",
+                                        "coerced_region")},
         "sources_uses": {k: _round(result.sources_uses.get(k))
                          for k in ("total_uses", "total_sources", "total_equity",
                                    "senior_debt", "gp_equity", "lp_equity",
@@ -258,6 +370,7 @@ def snapshot_of(result: AnalysisResult) -> dict:
         "risks": sorted([r.get("severity"), r.get("risk")]
                         for r in (result.risk_analysis or {}).get("risks", [])),
         "errors": _scrub(result.errors),
+        "documents": _documents(result),
     }
 
 
@@ -297,6 +410,51 @@ def run_deal(name: str, tmp_path) -> dict:
 
 # ── The gate ─────────────────────────────────────────────────────────
 
+# A failure prints differing LEAVES, not differing top-level keys. Once the
+# memo and workbook are in the snapshot, printing whole values would dump
+# the entire document twice to report one moved caption.
+_MAX_DIFF_LINES = 40
+
+
+def _diff_lines(expected, actual, path: str) -> list:
+    """Leaf-level differences between two snapshot fragments.
+
+    Recurses through dicts and equal-length lists so the message names the
+    exact path that moved (`documents.memo.paragraphs[57]`). Anything else —
+    a list that changed length, two scalars — is reported where it sits,
+    because "the list is a different length" IS the finding.
+    """
+    if expected == actual:
+        return []
+    if isinstance(expected, dict) and isinstance(actual, dict):
+        out = []
+        for key in sorted(set(expected) | set(actual)):
+            sub = f"{path}.{key}" if path else str(key)
+            if key not in expected:
+                out.append(f"  {sub}: ADDED -> {actual[key]!r}")
+            elif key not in actual:
+                out.append(f"  {sub}: REMOVED (was {expected[key]!r})")
+            else:
+                out.extend(_diff_lines(expected[key], actual[key], sub))
+        return out
+    if isinstance(expected, list) and isinstance(actual, list):
+        if len(expected) == len(actual):
+            out = []
+            for i, (e, a) in enumerate(zip(expected, actual)):
+                out.extend(_diff_lines(e, a, f"{path}[{i}]"))
+            return out
+        # A list that changed LENGTH reports the change and its first
+        # divergence, not both lists in full. Item T's own memo assumptions
+        # appendix ADDS paragraphs, so this is the expected shape of a
+        # deliberate delta, not an exotic one — dumping 130 paragraphs
+        # twice would bury it.
+        i = next((n for n, (e, a) in enumerate(zip(expected, actual)) if e != a),
+                 min(len(expected), len(actual)))
+        return [f"  {path or '<root>'}: length {len(expected)} -> {len(actual)},"
+                f" first difference at [{i}]:\n    was: {expected[i:i + 1]}\n"
+                f"    now: {actual[i:i + 1]}"]
+    return [f"  {path or '<root>'}:\n    was: {expected!r}\n    now: {actual!r}"]
+
 @pytest.mark.parametrize("name", sorted(DEALS))
 def test_pipeline_output_matches_its_snapshot(name, tmp_path):
     """Item T's safety net.
@@ -320,18 +478,25 @@ def test_pipeline_output_matches_its_snapshot(name, tmp_path):
     if actual == expected:
         return
 
-    diffs = []
-    for key in sorted(set(expected) | set(actual)):
-        if expected.get(key) != actual.get(key):
-            diffs.append(f"  {key}:\n    was: {expected.get(key)}\n"
-                         f"    now: {actual.get(key)}")
-    pytest.fail(f"{name} deal moved:\n" + "\n".join(diffs))
+    diffs = _diff_lines(expected, actual, "")
+    shown, extra = diffs[:_MAX_DIFF_LINES], len(diffs) - _MAX_DIFF_LINES
+    if extra > 0:
+        shown.append(f"  ... and {extra} more differing leaves")
+    pytest.fail(f"{name} deal moved:\n" + "\n".join(shown))
 
 
 def test_the_fixtures_exercise_the_paths_they_claim_to():
     """A characterization suite whose fixtures all take the same branch
-    pins one path three times. These assertions are what make the three
-    deals actually different."""
+    pins one path three times.
+
+    These are PRECONDITIONS on the fixtures, checked against the branch
+    thresholds the pipeline actually uses — not assertions about what the
+    engine did with them. They are true by construction today, which is the
+    point: they fail the day someone edits an occupancy or drops a field
+    and quietly collapses two deals onto one path. What proves the paths
+    really diverge is the snapshot itself — `va_results` is populated in
+    `value_add.json` and empty in the other two.
+    """
     stab, va, thin = stabilized_deal(), value_add_deal(), thin_deal()
 
     # The mismanagement spread is the value-add trigger; the stabilized
