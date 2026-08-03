@@ -959,6 +959,8 @@ def _analysis_worker(run_pk):
                 memo_filename=os.path.basename(result.memo_path or "")[:300],
                 excel_filename=os.path.basename(result.excel_path or "")[:300],
                 template_filename=os.path.basename(result.template_path or "")[:300],
+                investor_summary_filename=os.path.basename(
+                    result.investor_summary_path or "")[:300],
             )
 
             deal_updates = {

@@ -474,6 +474,12 @@ DOWNLOAD_KINDS = {
               ".spreadsheetml.sheet"),
     "template": ("template_filename",
                  "application/vnd.ms-excel.sheet.macroEnabled.12"),
+    # Item G. Only ever served from a RUN, never from the Deal: `Deal`
+    # has no such field, and `getattr(deal, field, "")` below would
+    # silently return "" rather than 404 if that ever changed.
+    "investor_summary": ("investor_summary_filename",
+                         "application/vnd.openxmlformats-officedocument"
+                         ".wordprocessingml.document"),
 }
 
 

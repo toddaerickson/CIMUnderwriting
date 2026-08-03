@@ -7,6 +7,10 @@ Follows the exact section structure of the SS Investment Memo Template.
 import os
 
 import config as cfg
+from output import safe_filename
+from output.page_budget import (PageBudget, MARGIN_X_IN, MARGIN_Y_IN,
+                                PAGE_HEIGHT_IN, PAGE_MIN_PT, PAGE_WIDTH_IN,
+                                paragraph_pt, table_pt)
 from docx import Document
 from docx.shared import Inches, Pt, RGBColor
 from docx.enum.text import WD_ALIGN_PARAGRAPH
@@ -36,7 +40,7 @@ def generate_memo(property_name: str, cim_data, gate_results: list,
     font.name = "Calibri"
     font.size = Pt(11)
 
-    safe_name = _safe_filename(property_name or "Unknown_Property")
+    safe_name = safe_filename(property_name or "Unknown_Property")
     filename = f"SS_Investment_Memo_{safe_name}.docx"
     filepath = os.path.join(output_dir, filename)
 
@@ -959,6 +963,693 @@ def _add_section_10(doc, gate_results, scenario_results, max_offer, risk_analysi
     ).italic = True
 
 
+# ── LP-Facing Investor Summary (item G) ─────────────────────────────
+#
+# A two-page document for a sophisticated family office. The operator's
+# framing sets the structure: a clear target return, a description of the
+# PLAN to achieve it, and risks acknowledged WITH mitigants.
+#
+# It is a SECOND RENDERING, never a second computation. Every figure is
+# read off the same result dicts `generate_memo` receives. The only
+# arithmetic permitted here is differences and ratios between figures
+# that are already published elsewhere — the leverage delta, the
+# yield-on-cost spread. Never a re-derivation of a modelled quantity;
+# that is the second-source-of-truth defect the rule exists to prevent.
+#
+# **The two-page mechanism CONSTRAINS Word rather than predicting it.**
+# Geometry is pinned, styles use EXACTLY line spacing, and every block is
+# a table row with an EXACTLY height, so Word cannot reflow. What remains
+# is a content budget, enforced by `output.page_budget`, which raises
+# `InvestorSummaryOverflow` rather than silently shrinking anything. Read
+# that module's docstring for the conditions under which the guarantee is
+# wrong — it is a content budget, not a page count.
+#
+# **Write and measure are one call, never two.** `_is_para` and
+# `_is_table` render the text AND charge the budget for that same
+# string. An earlier draft measured in one place and rendered in
+# another, which is a divergence waiting to happen: the budget would
+# pass on text the document did not contain.
+#
+# **Distribution is gated, the build is not.** A document aimed at
+# prospective investors edges toward securities marketing, which sits
+# behind the operator's General Counsel gate. `_SUMMARY_LEGEND` states
+# that on the page itself; do not remove it, and route wording past GC
+# before this leaves the firm.
+
+_IS_BODY_PT = 9
+_IS_HEAD_PT = 12
+_IS_MICRO_PT = 7.5
+
+_IS_MAX_THESIS = 3
+_IS_MAX_RISKS = 3
+_IS_MAX_PLAN_ROWS = 3
+
+# Field caps, each asserted directly by the tests.
+_IS_MAX_NAME_CHARS = 60
+_IS_MAX_MITIGANT_CHARS = 180
+_IS_MAX_THESIS_CHARS = 180
+_IS_MAX_PLAN_CHARS = 120
+
+# Risk severities, most severe first. `identify_risks` emits title case
+# and pre-sorts; this orders the same vocabulary rather than inventing a
+# second one.
+_IS_SEVERITY_ORDER = {"High": 0, "Medium": 1, "Low": 2}
+
+# Typographic punctuation this document and broker PDFs actually use,
+# folded to ASCII so `page_budget` can measure it. Accented Latin is
+# handled by NFKD below. Anything still non-ASCII after both — CJK,
+# emoji — deliberately reaches `text_width_pt` and RAISES: the width
+# table has no entry for it, and measuring it at Latin width is how a
+# two-page guarantee silently becomes three pages.
+_IS_PUNCT = {"’": "'", "‘": "'", "“": '"', "”": '"',
+             "—": "-", "–": "-", "…": "...", "·": "-",
+             "→": "->", "×": "x", " ": " ", "•": "*"}
+
+_SUMMARY_LEGEND = (
+    "Prepared by CIM Analyst from the seller's Confidential Information "
+    "Memorandum supplemented by benchmark assumptions. Figures are "
+    "underwriting estimates, not results, and are subject to due "
+    "diligence. Past or projected performance is not a guarantee of "
+    "future results. This document is for internal and prospect "
+    "discussion only. It is not an offer to sell or a solicitation of an "
+    "offer to buy any security, and it is not investment advice."
+)
+
+
+def generate_investor_summary(property_name: str, cim_data,
+                              market_analysis: dict, physical_analysis: dict,
+                              scenario_results: dict, risk_analysis: dict,
+                              rent_analysis: dict = None,
+                              value_add: dict = None,
+                              va_results: dict = None,
+                              gate_results: list = None,
+                              gate_summary: dict = None,
+                              check_summary: dict = None,
+                              sources_uses: dict = None,
+                              levered: dict = None, debt: dict = None,
+                              thesis: list = None,
+                              output_dir: str = ".") -> str:
+    """Generate the 2-page LP-facing investor summary .docx.
+
+    Args:
+        thesis: operator override for the three thesis bullets. None
+            derives them from the priority ladder in `_derive_thesis`,
+            which is the normal path — there is no thesis field on any
+            result object, and adding a DB column for prose the model can
+            already justify would be a second source of truth.
+
+    Raises:
+        InvestorSummaryOverflow: content exceeds a page's budget. Loud on
+            purpose — a silently shrunk document is one nobody notices is
+            wrong, and this one goes to investors.
+
+    Returns: path to the generated file.
+    """
+    doc, page1, page2 = _is_build(
+        property_name, cim_data, market_analysis, physical_analysis,
+        scenario_results, risk_analysis, rent_analysis, value_add,
+        va_results, gate_results, gate_summary, check_summary,
+        sources_uses, levered, debt, thesis)
+
+    page1.check()
+    # The floor guards the opposite defect: a page 2 the truncation
+    # ladder emptied out is as wrong as one that overflows, and a
+    # one-sided assert never catches it. It applies ONLY to a deal that
+    # had that content in the first place — a thin early-look CIM with
+    # no scenarios and no risks is legitimately short, and failing it
+    # would make the degraded path impossible rather than safe.
+    complete = bool(scenario_results and (risk_analysis or {}).get("risks"))
+    page2.check(floor_pt=PAGE_MIN_PT if complete else None)
+
+    safe_name = safe_filename(property_name or "Unknown_Property")
+    filepath = os.path.join(output_dir, f"Investor_Summary_{safe_name}.docx")
+    doc.save(filepath)
+    return filepath
+
+
+def _is_build(property_name, cim_data, market_analysis, physical_analysis,
+              scenario_results, risk_analysis, rent_analysis, value_add,
+              va_results, gate_results, gate_summary, check_summary,
+              sources_uses, levered, debt, thesis):
+    """Compose the document and return it with both page budgets.
+
+    Split out so the tests can assert the budget NUMBERS rather than only
+    that composing did not raise. A test that just checks "no exception"
+    cannot tell a page that fits comfortably from one a byte away from
+    overflowing.
+    """
+    doc = Document()
+    _is_pin_geometry(doc)
+
+    profile = (physical_analysis or {}).get("property_profile") or {}
+    base = (scenario_results or {}).get("base") or {}
+    lev_base = (levered or {}).get("base") or {}
+    # CLAUDE.md decision 7: no LP net figure without its assumption stamp.
+    # The figures and the stamp were gated independently, so a payload with
+    # a levered scenario but no stamp printed an LP net IRR bare. Coupling
+    # them in ONE predicate is how memo section 6 does it (`if not base:
+    # return`), and it makes the invariant structural rather than a
+    # property of whatever the caller happened to pass.
+    levered = levered if (lev_base.get("assumption_stamp")) else None
+    lev_base = lev_base if levered else {}
+
+    page1 = PageBudget("Page 1")
+    page2 = PageBudget("Page 2")
+
+    _is_header(doc, page1, cim_data, profile, property_name)
+    _is_target_return(doc, page1, scenario_results, levered)
+    _is_assumption_stamp(doc, page1, lev_base)
+    _is_thesis(doc, page1, thesis, cim_data, physical_analysis,
+               rent_analysis, value_add, market_analysis)
+    _is_key_metrics(doc, page1, cim_data, base, physical_analysis,
+                    sources_uses, debt)
+    _is_sources_uses(doc, page1, sources_uses, lev_base)
+
+    _is_plan_to_achieve(doc, page2, value_add, va_results, base)
+    _is_scenarios(doc, page2, scenario_results)
+    _is_risks(doc, page2, risk_analysis)
+    _is_market(doc, page2, market_analysis, gate_results)
+    _is_footer(doc, page2, gate_summary, check_summary)
+
+    return doc, page1, page2
+
+
+# ── Geometry, styles, and the write-and-measure helpers ──────────────
+
+def _is_pin_geometry(doc):
+    """Pin the page and define the three styles the budget assumes.
+
+    EXACTLY line spacing and `widow_control = False` are not cosmetic:
+    Word's widow/orphan control is the classic invisible line-pusher,
+    and "at least" spacing lets one tall glyph grow a row. Either would
+    break a budget computed from nominal metrics.
+    """
+    from docx.enum.text import WD_LINE_SPACING
+    from docx.enum.style import WD_STYLE_TYPE
+
+    section = doc.sections[0]
+    section.page_width = Inches(PAGE_WIDTH_IN)
+    section.page_height = Inches(PAGE_HEIGHT_IN)
+    section.left_margin = section.right_margin = Inches(MARGIN_X_IN)
+    section.top_margin = section.bottom_margin = Inches(MARGIN_Y_IN)
+
+    for name, size in (("LPBody", _IS_BODY_PT), ("LPHead", _IS_HEAD_PT),
+                       ("LPMicro", _IS_MICRO_PT)):
+        try:
+            style = doc.styles.add_style(name, WD_STYLE_TYPE.PARAGRAPH)
+        except ValueError:
+            style = doc.styles[name]
+        style.font.name = "Calibri"
+        style.font.size = Pt(size)
+        fmt = style.paragraph_format
+        fmt.line_spacing_rule = WD_LINE_SPACING.EXACTLY
+        fmt.line_spacing = Pt(size * 1.15)
+        fmt.space_before = Pt(0)
+        fmt.space_after = Pt(2)
+        fmt.widow_control = False
+
+
+def _ascii(text) -> str:
+    """Fold typographic punctuation and accents to ASCII.
+
+    Deliberately does NOT strip what it cannot fold. Dropping a CJK
+    glyph here would let an unmeasurable string through silently; leaving
+    it makes `page_budget.text_width_pt` raise, which is the contract.
+    """
+    import unicodedata
+
+    s = str(text if text is not None else "")
+    for bad, good in _IS_PUNCT.items():
+        s = s.replace(bad, good)
+    s = unicodedata.normalize("NFKD", s)
+    return "".join(c for c in s if not unicodedata.combining(c))
+
+
+_IS_STYLE_PT = {"LPBody": _IS_BODY_PT, "LPHead": _IS_HEAD_PT,
+                "LPMicro": _IS_MICRO_PT}
+
+
+def _is_para(doc, budget, label, text, style="LPBody", bold=False,
+             italic=False, color=None):
+    """Render a paragraph AND charge the budget for the same string."""
+    text = _ascii(text)
+    para = doc.add_paragraph(style=style)
+    run = para.add_run(text)
+    run.bold = bold
+    run.italic = italic
+    if color is not None:
+        run.font.color.rgb = color
+    if budget is not None:
+        budget.add(label, paragraph_pt(text, _IS_STYLE_PT[style], bold=bold))
+    return para
+
+
+def _is_table(doc, budget, label, rows, widths_in, header=False):
+    """Render a fixed-layout table AND charge the budget for it.
+
+    `autofit=False` plus explicit cell widths is what stops Word
+    re-deciding column widths, which would invalidate every wrap the
+    budget computed. Row heights are EXACTLY for the same reason.
+    """
+    from docx.enum.table import WD_ROW_HEIGHT_RULE
+
+    rows = [[_ascii(c) for c in row] for row in rows]
+    table = doc.add_table(rows=0, cols=len(widths_in))
+    table.autofit = False
+    if header:
+        table.style = "Table Grid"
+    for cells in rows:
+        row = table.add_row()
+        row.height_rule = WD_ROW_HEIGHT_RULE.EXACTLY
+        row.height = Pt(_IS_BODY_PT * 1.15)
+        for i, value in enumerate(cells):
+            cell = row.cells[i]
+            cell.width = Inches(widths_in[i])
+            para = cell.paragraphs[0]
+            para.style = doc.styles["LPBody"]
+            para.add_run(value)
+    if budget is not None:
+        budget.add(label, table_pt(rows, _IS_BODY_PT,
+                                   [w * 72 for w in widths_in]))
+    return table
+
+
+def _truncate(text, limit: int) -> str:
+    text = str(text if text is not None else "")
+    return text if len(text) <= limit else text[:limit - 3].rstrip() + "..."
+
+
+# ── Page 1 — "What you make" ─────────────────────────────────────────
+
+def _is_header(doc, budget, cim_data, profile, property_name):
+    name = _truncate(property_name or profile.get("property_name")
+                     or "Property", _IS_MAX_NAME_CHARS)
+    _is_para(doc, budget, "header/name", name, style="LPHead", bold=True)
+
+    bits = [profile.get("city_state"),
+            f"Built {profile.get('year_built')}" if profile.get("year_built") else None,
+            _fmt_number(profile.get("nrsf"), suffix=" NRSF") if profile.get("nrsf") else None,
+            f"{profile.get('total_units')} units" if profile.get("total_units") else None,
+            f"{profile.get('cc_pct'):.0%} climate-controlled" if profile.get("cc_pct") else None]
+    line = " - ".join(b for b in bits if b)
+    if line:
+        _is_para(doc, budget, "header/profile", line)
+
+    # Physical and economic occupancy as a PAIR, always. A broker quoting
+    # one occupancy number is almost always quoting physical, and the
+    # spread between the two is this fund's entire value-add thesis.
+    phys, econ = profile.get("physical_occupancy"), profile.get("economic_occupancy")
+    if phys is not None or econ is not None:
+        occ = f"Occupancy: {_fmt_pct(phys)} physical / {_fmt_pct(econ)} economic"
+        if phys is not None and econ is not None:
+            occ += f"  ({(phys - econ) * 100:.0f}-point spread)"
+        _is_para(doc, budget, "header/occupancy", occ)
+
+
+def _is_target_return(doc, budget, scenario_results, levered):
+    """Unlevered and LP net, side by side at equal weight, with the
+    leverage effect between them.
+
+    Equal weight is the operator's call and it is the honest
+    presentation: on config defaults the loan constant frequently sits
+    above yield on cost, so LP net can land BELOW unlevered. Leading
+    with the levered number alone would bury that, and a sophisticated
+    allocator who spots it stops trusting the whole document.
+    """
+    if not scenario_results:
+        return
+    _is_para(doc, budget, "target/head", "TARGET RETURN", style="LPHead",
+             bold=True)
+
+    base = scenario_results.get("base") or {}
+    bear = scenario_results.get("bear") or {}
+    bull = scenario_results.get("bull") or {}
+    lev = levered or {}
+
+    def band(lo, hi, fmt):
+        return "-" if lo is None or hi is None else f"{fmt(lo)} to {fmt(hi)}"
+
+    rows = [["", "Unlevered (property)", "LP Net (after fees & promote)"],
+            ["IRR", _fmt_pct(base.get("irr")),
+             _fmt_pct((lev.get("base") or {}).get("lp_net_irr"))],
+            ["MOIC", _fmt_x(base.get("moic")),
+             _fmt_x((lev.get("base") or {}).get("lp_moic"))],
+            ["Bear to Bull", band(bear.get("irr"), bull.get("irr"), _fmt_pct),
+             band((lev.get("bear") or {}).get("lp_net_irr"),
+                  (lev.get("bull") or {}).get("lp_net_irr"), _fmt_pct)]]
+    _is_table(doc, budget, "target/table", rows, [1.3, 3.0, 3.0], header=True)
+
+    # Leverage effect — a DIFFERENCE between two published figures, which
+    # is the only arithmetic this document is allowed to do.
+    unlev, lp = base.get("irr"), (lev.get("base") or {}).get("lp_net_irr")
+    if unlev is not None and lp is not None:
+        bps = (lp - unlev) * 10_000
+        verdict = "accretive" if bps >= 0 else "DILUTIVE"
+        _is_para(doc, budget, "target/leverage",
+                 f"Leverage effect: {bps:+,.0f} bps ({verdict}). Debt is "
+                 f"{verdict} to the LP at the modelled terms.",
+                 bold=bps < 0)
+
+
+def _is_assumption_stamp(doc, budget, lev_base):
+    """CLAUDE.md key design decision 7 — no LP net IRR without its stamp.
+
+    This is the only surface that leaves the firm, so the rule binds
+    hardest here: the reader has no memo section 6 and no Returns tab to
+    cross-check which conventions produced the number.
+    """
+    stamp = (lev_base or {}).get("assumption_stamp") or []
+    labels = " - ".join(r.get("label", "") for r in stamp if r.get("label"))
+    if not labels:
+        # Unreachable from `_is_build`, which nulls `levered` outright when
+        # the stamp is missing so no levered FIGURE prints either. Kept as
+        # a guard for direct callers.
+        return
+    _is_para(doc, budget, "stamp",
+             f"LP net returns are computed under: {labels}. These are "
+             f"proposed terms, subject to the final partnership agreement.",
+             style="LPMicro", italic=True, color=RGBColor(0x55, 0x55, 0x55))
+
+
+def _derive_thesis(cim_data, physical_analysis, rent_analysis, value_add,
+                   market_analysis) -> list:
+    """Top three, in fixed priority order.
+
+    Each candidate is GATED on a value the pipeline already produced and
+    restates that value, so the thesis cannot claim something the model
+    did not find. Priority is fixed rather than scored: a ranking
+    function would be a judgment this document is not allowed to make.
+    """
+    out = []
+
+    pvr = (physical_analysis or {}).get("price_vs_replacement") or {}
+    discount = pvr.get("discount_to_replacement")
+    if discount is not None and discount > 0:
+        out.append(f"Basis {discount:.0%} below replacement cost "
+                   f"({_fmt_currency(pvr.get('asking_price'))} against "
+                   f"{_fmt_currency(pvr.get('replacement_cost'))} to build) - "
+                   f"a structural entry advantage a competing buyer cannot "
+                   f"underwrite away.")
+
+    # `is not None`, not truthiness: a 0% economic occupancy is a
+    # property collecting nothing, which is the LOUDEST version of the
+    # profile this bullet exists to surface.
+    phys = getattr(cim_data, "physical_occupancy", None)
+    econ = getattr(cim_data, "economic_occupancy", None)
+    flag = cfg.GATES.get("econ_phys_spread_flag")
+    if (phys is not None and econ is not None and flag
+            and (phys - econ) >= flag):
+        out.append(f"Economic occupancy trails physical by "
+                   f"{(phys - econ) * 100:.0f} points ({_fmt_pct(econ)} "
+                   f"against {_fmt_pct(phys)}) - the asset is full and "
+                   f"under-collecting, a management problem rather than a "
+                   f"demand problem.")
+
+    gap = (rent_analysis or {}).get("rent_gap_pct")
+    if gap is not None and gap > 0:
+        out.append(f"In-place rents sit {gap:.0%} below market, closable "
+                   f"through the existing tenant base rather than new "
+                   f"lease-up.")
+
+    revenue_ops = (value_add or {}).get("revenue_opportunities") or []
+    if revenue_ops:
+        top = revenue_ops[0]
+        out.append(f"{top.get('category')}: {top.get('description')}")
+
+    demos = (market_analysis or {}).get("demographics") or {}
+    msa = (market_analysis or {}).get("msa_info") or {}
+    pop = demos.get("population_3mi")
+    if pop:
+        line = f"{pop:,.0f} people within three miles"
+        if msa.get("is_top_50"):
+            line += f"; {msa.get('msa_name')} is a top-50 MSA"
+        out.append(line + ".")
+
+    return out[:_IS_MAX_THESIS]
+
+
+def _is_thesis(doc, budget, thesis, cim_data, physical_analysis,
+               rent_analysis, value_add, market_analysis):
+    bullets = thesis if thesis is not None else _derive_thesis(
+        cim_data, physical_analysis, rent_analysis, value_add, market_analysis)
+    bullets = [_truncate(b, _IS_MAX_THESIS_CHARS)
+               for b in (bullets or [])][:_IS_MAX_THESIS]
+    if not bullets:
+        return
+    _is_para(doc, budget, "thesis/head", "Investment Thesis", style="LPHead",
+             bold=True)
+    for b in bullets:
+        _is_para(doc, budget, "thesis/bullet", f"* {b}")
+
+
+def _is_key_metrics(doc, budget, cim_data, base, physical_analysis,
+                    sources_uses, debt):
+    pvr = (physical_analysis or {}).get("price_vs_replacement") or {}
+    rows = [["Asking Price", _fmt_currency(getattr(cim_data, "asking_price", None))],
+            ["Price / SF", _fmt_currency(getattr(cim_data, "price_per_sf", None))]]
+
+    discount = pvr.get("discount_to_replacement")
+    if discount is not None:
+        rows.append(["Discount to Replacement", f"{discount:.1%}"])
+
+    rows.append(["Entry Cap", _fmt_cap(base.get("entry_cap"))])
+    exit_label = _fmt_cap(base.get("exit_cap"))
+    if base.get("exit_cap_coerced"):
+        exit_label += " (floored at entry)"
+    rows.append(["Exit Cap (Base)", exit_label])
+    rows.append(["Yr-1 Yield on Cost", _fmt_pct(base.get("yield_on_cost"))])
+
+    # Total basis is the UNLEVERED definition and excludes financing costs
+    # (CLAUDE.md decision 3). `sources_uses["total_uses"]` is documented as
+    # `total_basis + financing_costs`, so printing it under this label put a
+    # financing-inflated number on the one document built to keep the
+    # unlevered lens financing-free. `output/excel_writer.py` labels the
+    # same row off `scen["total_basis"]`; this reads the same field.
+    if base.get("total_basis") is not None:
+        rows.append(["Total Basis", _fmt_currency(base.get("total_basis"))])
+    if sources_uses:
+        rows.append(["Equity Required",
+                     _fmt_currency(sources_uses.get("total_equity"))])
+    if debt and debt.get("loan"):
+        from model.debt import binding_constraint_label
+        rows.append(["Senior Debt", f"{_fmt_currency(debt.get('loan'))} "
+                                    f"({binding_constraint_label(debt)})"])
+
+    # Gaps are SHOWN, not dropped (operator's call): an LP cannot tell a
+    # metric that is missing from one that was never part of the analysis
+    # if the row simply vanishes.
+    _is_para(doc, budget, "metrics/head", "Key Metrics", style="LPHead",
+             bold=True)
+    _is_table(doc, budget, "metrics/table", rows, [2.6, 4.7])
+
+
+def _is_sources_uses(doc, budget, sources_uses, lev_base):
+    """Sources & Uses, plus the fee and promote load.
+
+    Fee transparency is volunteered rather than waited for. This audience
+    asks what was deducted to reach an LP net number within ten minutes;
+    printing it converts an interrogation into a checked box.
+    """
+    if not sources_uses:
+        return
+    _is_para(doc, budget, "su/head", "Capital Stack", style="LPHead", bold=True)
+
+    total = sources_uses.get("total_uses") or 0
+
+    def share(amount):
+        return f"{amount / total:.0%}" if total and amount is not None else "-"
+
+    rows = [["Total Uses", _fmt_currency(total), ""],
+            ["Senior Debt", _fmt_currency(sources_uses.get("senior_debt")),
+             share(sources_uses.get("senior_debt"))],
+            ["Total Equity", _fmt_currency(sources_uses.get("total_equity")),
+             share(sources_uses.get("total_equity"))]]
+    coinvest = sources_uses.get("gp_coinvest_pct")
+    if coinvest is not None:
+        rows.append(["  of which GP co-invest",
+                     _fmt_currency(sources_uses.get("gp_equity")),
+                     f"{coinvest:.0%} of equity"])
+    if lev_base:
+        fee_pct = lev_base.get("am_fee_pct")
+        rows.append(["Asset-management fee (hold total)",
+                     _fmt_currency(lev_base.get("am_fee_total")),
+                     f"{fee_pct:.2%}/yr" if fee_pct is not None else ""])
+        rows.append(["GP promote (hold total)",
+                     _fmt_currency(lev_base.get("gp_promote")), ""])
+
+    _is_table(doc, budget, "su/table", rows, [3.3, 2.2, 1.8])
+
+
+# ── Page 2 — "How we get there, and what breaks it" ──────────────────
+
+def _is_plan_to_achieve(doc, budget, value_add, va_results, base):
+    """The centre of the operator's framing: how the return is produced.
+
+    Three sources, in order of how concrete they are. A value-add deal
+    gets its named opportunities and, when the monthly engine ran, the
+    quantified bridge. A stabilized deal has neither, so it falls back to
+    where the return comes from arithmetically — spreads between figures
+    already published on page 1.
+    """
+    head = _is_para(doc, budget, "plan/head", "Plan to Achieve the Return",
+                    style="LPHead", bold=True)
+    # `page_break_before` rather than `add_page_break()`, which injects a
+    # stray empty paragraph — a line of height the budget never charged.
+    head.paragraph_format.page_break_before = True
+
+    ops = list((value_add or {}).get("revenue_opportunities") or [])
+    ops += list((value_add or {}).get("expense_opportunities") or [])
+    uplift = (value_add or {}).get("estimated_noi_uplift")
+
+    if ops:
+        if uplift:
+            _is_para(doc, budget, "plan/uplift",
+                     f"Identified NOI uplift: {_fmt_currency(uplift)} per "
+                     f"year at stabilization.", bold=True)
+        rows = [["Initiative", "Impact / yr", "Timeline"]]
+        for op in ops[:_IS_MAX_PLAN_ROWS]:
+            rows.append([
+                _truncate(f"{op.get('category')}: {op.get('description')}",
+                          _IS_MAX_PLAN_CHARS),
+                _fmt_currency(op.get("est_annual_impact")),
+                op.get("timeline") or "-"])
+        _is_table(doc, budget, "plan/table", rows, [4.3, 1.5, 1.5], header=True)
+
+    va = (va_results or {}).get("base") or {}
+    if va:
+        bridge = []
+        cur, tgt = va.get("current_occupancy"), va.get("target_occupancy")
+        months = va.get("months_to_stabilize")
+        if cur is not None and tgt is not None:
+            bridge.append(f"occupancy {cur:.0%} -> {tgt:.0%}"
+                          + (f" over {months} months" if months else ""))
+        ip, tp = va.get("in_place_rent_psf"), va.get("target_rent_psf")
+        mp = va.get("market_rent_psf")
+        if ip and tp:
+            leg = f"rent ${ip:.2f} -> ${tp:.2f}/SF"
+            if mp:
+                leg += f" against a ${mp:.2f} market"
+            bridge.append(leg)
+        if bridge:
+            _is_para(doc, budget, "plan/bridge",
+                     "Underwritten bridge: " + "; ".join(bridge) + ".")
+    elif not ops:
+        # Stabilized deal: no value-add narrative exists, so say where the
+        # return actually comes from. All three are differences between
+        # figures printed on page 1.
+        parts = []
+        yoc, entry = base.get("yield_on_cost"), base.get("entry_cap")
+        if yoc is not None and entry is not None:
+            parts.append(f"a {(yoc - entry) * 10_000:+,.0f} bp spread of "
+                         f"Year-1 yield on cost over the entry cap")
+        noi = base.get("noi_projection") or []
+        if len(noi) >= 2 and noi[0]:
+            parts.append(f"NOI growth of {(noi[-1] / noi[0] - 1):.0%} across "
+                         f"the hold")
+        exit_cap = base.get("exit_cap")
+        if exit_cap is not None and entry is not None:
+            parts.append(f"an exit underwritten "
+                         f"{(exit_cap - entry) * 10_000:+,.0f} bp "
+                         f"{'wider' if exit_cap >= entry else 'tighter'} "
+                         f"than entry")
+        if parts:
+            _is_para(doc, budget, "plan/sources",
+                     "This is a stabilized asset; the return comes from "
+                     + ", ".join(parts) + ".")
+
+
+def _is_scenarios(doc, budget, scenario_results):
+    if not scenario_results:
+        return
+    hold = _hold_years(scenario_results)
+    _is_para(doc, budget, "scen/head", f"Scenario Returns ({hold}-Year Hold)",
+             style="LPHead", bold=True)
+    rows = [["", "Bear", "Base", "Bull"]]
+    for label, key, fmt in (("Unlevered IRR", "irr", _fmt_pct),
+                            ("MOIC", "moic", _fmt_x),
+                            ("Yr-1 Yield on Cost", "yield_on_cost", _fmt_pct),
+                            ("Exit Cap", "exit_cap", _fmt_cap)):
+        rows.append([label] + [fmt((scenario_results.get(s) or {}).get(key))
+                               for s in ("bear", "base", "bull")])
+    _is_table(doc, budget, "scen/table", rows, [2.5, 1.6, 1.6, 1.6],
+              header=True)
+
+
+def _is_risks(doc, budget, risk_analysis):
+    """Top three by severity, each WITH its mitigant.
+
+    Mitigants are never dropped by the truncation ladder. A risk printed
+    without one reads as an unanswered objection, which is worse for this
+    audience than not raising the risk at all.
+    """
+    risks = list((risk_analysis or {}).get("risks") or [])
+    if not risks:
+        return
+    risks.sort(key=lambda r: _IS_SEVERITY_ORDER.get(r.get("severity"), 99))
+
+    _is_para(doc, budget, "risk/head", "Principal Risks & Mitigants",
+             style="LPHead", bold=True)
+    for r in risks[:_IS_MAX_RISKS]:
+        _is_para(doc, budget, "risk/item",
+                 f"{r.get('severity', '')} - {r.get('risk', '')}", bold=True)
+        mitigant = _truncate(r.get("mitigation") or "Under diligence.",
+                             _IS_MAX_MITIGANT_CHARS)
+        _is_para(doc, budget, "risk/mitigant", f"Mitigant: {mitigant}",
+                 italic=True)
+
+    failure = ((risk_analysis or {}).get("why_deal_could_fail") or [None])[0]
+    if failure:
+        _is_para(doc, budget, "risk/failure",
+                 f"Primary failure mode: {failure}")
+
+
+def _is_market(doc, budget, market_analysis, gate_results):
+    demos = (market_analysis or {}).get("demographics") or {}
+    msa = (market_analysis or {}).get("msa_info") or {}
+    by_gate = {g.get("gate"): g for g in (gate_results or [])}
+
+    rows = []
+    if demos.get("population_3mi"):
+        rows.append(["Population (3-mile)", f"{demos['population_3mi']:,.0f}"])
+    if demos.get("median_hhi_3mi"):
+        rows.append(["Median HHI (3-mile)",
+                     _fmt_currency(demos["median_hhi_3mi"])])
+    if msa.get("msa_name"):
+        # `is_top_50` is a bool and there is no MSA rank number anywhere
+        # in this codebase. Never print one.
+        rows.append(["Market", msa["msa_name"]
+                     + (" - top-50 MSA" if msa.get("is_top_50") else "")])
+    # SF/capita is TBD whenever competitive supply is unentered, which is
+    # the common case. Conditional, not required.
+    sf_gate = by_gate.get(5)
+    if sf_gate and "TBD" not in str(sf_gate.get("actual", "")):
+        rows.append(["Supply (3-mile)", str(sf_gate.get("actual"))])
+
+    # Unlike Key Metrics, a market section with NO rows is omitted
+    # entirely: a heading over three blank rows conveys nothing, where a
+    # named metric reading N/A is itself information.
+    if not rows:
+        return
+    _is_para(doc, budget, "mkt/head", "Market Snapshot", style="LPHead",
+             bold=True)
+    _is_table(doc, budget, "mkt/table", rows, [2.6, 4.7])
+
+
+def _is_footer(doc, budget, gate_summary, check_summary):
+    bits = []
+    rec = (gate_summary or {}).get("recommendation")
+    if rec:
+        bits.append(f"Screening result: {rec}")
+    blocking = (check_summary or {}).get("blocking_failed")
+    if blocking:
+        bits.append(f"{blocking} blocking model check(s) unresolved")
+    if bits:
+        _is_para(doc, budget, "footer/status", " - ".join(bits), bold=True)
+
+    _is_para(doc, budget, "footer/legend", _SUMMARY_LEGEND, style="LPMicro",
+             italic=True, color=RGBColor(0x55, 0x55, 0x55))
+
+
 # ── Formatting Helpers ──────────────────────────────────────────────
 
 def _fmt_currency(val) -> str:
@@ -1024,5 +1715,4 @@ def _fmt_x(val) -> str:
     return f"{val:.2f}x"
 
 
-def _safe_filename(name: str) -> str:
-    return "".join(c if c.isalnum() or c in (" ", "-", "_") else "_" for c in name).strip().replace(" ", "_")
+

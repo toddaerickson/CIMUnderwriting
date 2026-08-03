@@ -62,6 +62,7 @@ class AnalysisContext:
     memo_path: str = ""
     excel_path: str = ""
     template_path: str = ""
+    investor_summary_path: str = ""
 
     # ── Derived helpers (read-only convenience) ───────────────────
 

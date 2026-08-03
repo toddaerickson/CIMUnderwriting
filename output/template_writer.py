@@ -60,6 +60,7 @@ from datetime import datetime
 import openpyxl
 
 import config as cfg
+from output import safe_filename
 from model.debt import MONTHS_PER_YEAR
 from registry import ScenarioType
 
@@ -269,7 +270,7 @@ def generate_template(
         raise FileNotFoundError(f"Template not found: {TEMPLATE_PATH}")
 
     # Build output filename
-    safe_name = _safe_filename(property_name or cim_data.property_name or "Deal")
+    safe_name = safe_filename(property_name or cim_data.property_name or "Deal")
     out_path = os.path.join(output_dir, f"UW_{safe_name}.xlsm")
 
     # Copy template
@@ -807,9 +808,3 @@ def _write_summary_notes(ws, cim_data):
 
 
 # ── Helpers ──────────────────────────────────────────────────────────
-
-def _safe_filename(name: str) -> str:
-    """Convert property name to safe filename."""
-    # Remove characters that aren't safe for filenames
-    safe = "".join(c for c in name if c.isalnum() or c in (" ", "-", "_"))
-    return safe.strip().replace(" ", "_")[:60]

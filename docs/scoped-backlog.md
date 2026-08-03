@@ -391,14 +391,59 @@ regression-tested, since the unlevered screen remains the primary gate.
 
 ## G. LP-facing 2-page investor summary
 
-**Why.** [output/memo_writer.py](../output/memo_writer.py) produces a 9-section
-internal IC memo. There is no condensation for anyone outside the firm, and TSM
-sells its 2-page Investor Summary as a headline feature. Near-zero incremental
-logic — it is a second rendering of numbers we already compute.
+**Status 2026-08-02: SHIPPED, built to the operator's spec review rather
+than to the scope below.** The audience was specified after this section was
+written — a highly sophisticated family office — and the framing that came
+with it (clear target return, the PLAN to achieve it, risks WITH mitigants)
+restructured the document. The scope below is kept for the record; where the
+two disagree, the built document wins. What changed:
 
-**Scope.** `generate_investor_summary(...)` alongside `generate_memo` in the
-same module — no new file. Two pages, hard limit, which means a fixed section
-list and explicit truncation rules rather than a shrunken IC memo:
+- **Added: a "Plan to Achieve the Return" section.** The scope had no such
+  block — page 2 went straight from scenarios to risks — so nothing stated
+  HOW the return is produced, which is the centre of the framing.
+- **Added: fee and promote transparency, and the leverage effect.** An LP net
+  IRR printed without the AM fee, promote and co-invest that produced it
+  invites the first question this audience asks. The unlevered and LP net
+  columns carry equal weight because leverage is frequently DILUTIVE at
+  config defaults, and burying that costs the document its credibility.
+- **Added: mitigants.** The scope said "top 3 risks only, by severity" and
+  never asked for mitigation, though all 18 risk sites in `analysis/risks.py`
+  already emit one. Mitigants truncate but never drop.
+- **Cut: the photo slot.** No image pipeline exists anywhere in the repo, and
+  an empty rectangle reads as an unfinished template.
+- **Resolved: the three-bullet thesis** now derives from a fixed priority
+  ladder, each bullet gated on a value the pipeline produced, with a
+  `thesis=` operator override. No new DB field.
+- **Corrected: "MSA classification"** — `msa_info` carries a name and a bool.
+  There is no MSA rank number in this codebase and none is ever printed.
+- **Corrected: "SF per capita"** is conditional, not required; it is `TBD`
+  whenever competitive supply is unentered, which is the common case.
+- **Replaced: "assert the page count, do not eyeball it."** python-docx does
+  not paginate, and `soffice` is not a dependency this repo carries. The
+  guarantee is now a CONTENT BUDGET (`output/page_budget.py`): pinned
+  geometry, EXACTLY line spacing and row heights so Word cannot reflow, and
+  a Calibri width model that raises `InvestorSummaryOverflow` rather than
+  shrinking anything. An opt-in `soffice` test re-validates the calibration.
+  Read that module's docstring for the conditions under which it is wrong.
+
+The download button IS wired (migration `0006`, `DOWNLOAD_KINDS` entry,
+conditional button), so the deferral recorded here on 2026-08-02 is closed.
+
+Still open: the CLI's copy carries no LP net IRR — `AnalysisContext` has
+never held a `levered`/`debt` payload and `run.py` never computes one. That
+is a pre-existing CLI gap the IC memo shares, not something this item
+introduced.
+
+**Why.** [output/memo_writer.py](../output/memo_writer.py) produces a
+10-section internal IC memo. There is no condensation for anyone outside the
+firm, and TSM sells its 2-page Investor Summary as a headline feature.
+Near-zero incremental logic — it is a second rendering of numbers we already
+compute.
+
+**Original scope, superseded above.** `generate_investor_summary(...)`
+alongside `generate_memo` in the same module — no new file. Two pages, hard
+limit, which means a fixed section list and explicit truncation rules rather
+than a shrunken IC memo:
 
 Page 1 — property header and photo slot · three-bullet thesis · key metrics
 table (price, $/SF, entry cap, exit cap, Year-1 yield on cost, unlevered

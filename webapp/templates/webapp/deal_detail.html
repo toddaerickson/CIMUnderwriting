@@ -71,6 +71,9 @@
     {% if done_run.template_filename %}
     <a href="{% url 'deal-download' deal.pk 'template' %}" class="text-sm px-3 py-1.5 rounded border border-slate-300 text-slate-700 hover:bg-slate-50">UW Template (.xlsm)</a>
     {% endif %}
+    {% if done_run.investor_summary_filename %}
+    <a href="{% url 'deal-download' deal.pk 'investor_summary' %}" class="text-sm px-3 py-1.5 rounded border border-slate-300 text-slate-700 hover:bg-slate-50">Investor Summary (.docx)</a>
+    {% endif %}
   </div>
   {% endif %}
 
