@@ -1,0 +1,419 @@
+{
+  "adjusted_noi": 660900.0,
+  "check_summary": {
+    "advisory_failed": 6,
+    "blocking_failed": 0,
+    "failed": 6,
+    "passed": 7,
+    "skipped": 0,
+    "total": 13
+  },
+  "checks": [
+    [
+      "egr_le_gpr",
+      "blocking",
+      "pass"
+    ],
+    [
+      "exit_cap_coercion",
+      "advisory",
+      "fail"
+    ],
+    [
+      "expense_line_floor",
+      "advisory",
+      "fail"
+    ],
+    [
+      "income_identity",
+      "blocking",
+      "pass"
+    ],
+    [
+      "loan_matures_before_exit",
+      "advisory",
+      "pass"
+    ],
+    [
+      "market_exit_cap",
+      "advisory",
+      "pass"
+    ],
+    [
+      "occupancy_sanity",
+      "blocking",
+      "pass"
+    ],
+    [
+      "opex_per_nrsf_band",
+      "advisory",
+      "fail"
+    ],
+    [
+      "opex_ratio_band",
+      "advisory",
+      "pass"
+    ],
+    [
+      "price_vs_replacement",
+      "advisory",
+      "fail"
+    ],
+    [
+      "sources_uses_ties",
+      "blocking",
+      "pass"
+    ],
+    [
+      "unit_mix_gpr",
+      "advisory",
+      "fail"
+    ],
+    [
+      "unit_mix_sf",
+      "advisory",
+      "fail"
+    ]
+  ],
+  "debt": {
+    "binding_constraint": "ltv",
+    "dscr_year_1": 1.498517,
+    "financing_costs": 58500.0,
+    "loan": 5850000.0,
+    "origination_fee": 58500.0
+  },
+  "errors": [],
+  "expense_ratio": 0.398087,
+  "gate_summary": {
+    "failed": 2,
+    "passed": 4,
+    "recommendation": "DECLINE",
+    "tbd": 1,
+    "total": 7
+  },
+  "gates": [
+    {
+      "actual": "78,000",
+      "gate": 1,
+      "name": "Population (3-mi \u2265 50K)",
+      "result": "PASS",
+      "threshold": "\u2265 50,000"
+    },
+    {
+      "actual": "93.0% phys / 90.0% econ",
+      "gate": 2,
+      "name": "No Unproven Demand",
+      "result": "PASS",
+      "threshold": "Phys \u2265 75%; no post-2020 ramp"
+    },
+    {
+      "actual": "$9,000,000",
+      "gate": 3,
+      "name": "Price \u2264 Replacement Cost",
+      "result": "FAIL",
+      "threshold": "\u2264 $7,165,125"
+    },
+    {
+      "actual": "9.8%",
+      "gate": 4,
+      "name": "5-Yr Unlevered IRR \u2265 10%",
+      "result": "FAIL",
+      "threshold": "\u2265 10%"
+    },
+    {
+      "actual": "4.7 SF/capita",
+      "gate": 5,
+      "name": "No Oversupply Flag",
+      "result": "PASS",
+      "threshold": "\u2264 10 SF/capita"
+    },
+    {
+      "actual": "3.0%",
+      "gate": 6,
+      "name": "NOI Step-Up \u2264 15%",
+      "result": "PASS",
+      "threshold": "\u2264 15%"
+    },
+    {
+      "actual": "Abilene",
+      "gate": 7,
+      "name": "Major City / Top-50 MSA",
+      "result": "TBD",
+      "threshold": "Top-50 MSA or strong secondary"
+    }
+  ],
+  "levered": {
+    "base": {
+      "am_fee_total": 164925.0,
+      "gp_promote": 241538.579274,
+      "lp_moic": 1.738957,
+      "lp_net_irr": 0.128867
+    },
+    "bear": {
+      "am_fee_total": 164925.0,
+      "gp_promote": 0.0,
+      "lp_moic": 1.253733,
+      "lp_net_irr": 0.050765
+    },
+    "bull": {
+      "am_fee_total": 164925.0,
+      "gp_promote": 1253027.076545,
+      "lp_moic": 3.088425,
+      "lp_net_irr": 0.27539
+    }
+  },
+  "max_offer": {
+    "achieved_irr": 0.099575,
+    "max_price": 8863632.8125,
+    "target_irr": 0.1,
+    "total_basis": 8952269.140625
+  },
+  "risks": [
+    [
+      "High",
+      "Failed Gate 3: Price \u2264 Replacement Cost"
+    ],
+    [
+      "High",
+      "Failed Gate 4: 5-Yr Unlevered IRR \u2265 10%"
+    ],
+    [
+      "High",
+      "Premium to replacement cost"
+    ],
+    [
+      "Medium",
+      "Unverified Gate 7: Major City / Top-50 MSA"
+    ]
+  ],
+  "scenarios": {
+    "base": {
+      "entry_cap": 0.073433,
+      "exit_cap": 0.073433,
+      "exit_cap_coerced": true,
+      "exit_value": 10295433.305148,
+      "expense_projection": [
+        458955.0,
+        472723.65,
+        486905.3595,
+        501512.520285,
+        516557.895894
+      ],
+      "hold_years": 5,
+      "irr": 0.098402,
+      "moic": 1.514232,
+      "noi_projection": [
+        693945.0,
+        708998.85,
+        724360.203,
+        740034.681277,
+        756027.985708
+      ],
+      "requested_exit_cap": 0.06625,
+      "revenue_projection": [
+        1152900.0,
+        1181722.5,
+        1211265.5625,
+        1241547.201562,
+        1272585.881602
+      ],
+      "total_basis": 9090000.0,
+      "yield_on_cost": 0.076342
+    },
+    "bear": {
+      "entry_cap": 0.073433,
+      "exit_cap": 0.0775,
+      "exit_cap_coerced": false,
+      "exit_value": 8689255.196584,
+      "expense_projection": [
+        437100.0,
+        450213.0,
+        463719.39,
+        477630.9717,
+        491959.900851
+      ],
+      "hold_years": 5,
+      "irr": 0.063069,
+      "moic": 1.308634,
+      "noi_projection": [
+        660900.0,
+        664257.0,
+        667467.66,
+        670523.88405,
+        673417.277735
+      ],
+      "requested_exit_cap": 0.0775,
+      "revenue_projection": [
+        1098000.0,
+        1114470.0,
+        1131187.05,
+        1148154.85575,
+        1165377.178586
+      ],
+      "total_basis": 9090000.0,
+      "yield_on_cost": 0.072706
+    },
+    "bull": {
+      "entry_cap": 0.073433,
+      "exit_cap": 0.055,
+      "exit_cap_coerced": false,
+      "exit_value": 15604469.62458,
+      "expense_projection": [
+        480810.0,
+        495234.3,
+        510091.329,
+        525394.06887,
+        541155.890936
+      ],
+      "hold_years": 5,
+      "irr": 0.182273,
+      "moic": 2.127554,
+      "noi_projection": [
+        726990.0,
+        760877.7,
+        796265.151,
+        826684.88793,
+        858245.829352
+      ],
+      "requested_exit_cap": 0.055,
+      "revenue_projection": [
+        1207800.0,
+        1256112.0,
+        1306356.48,
+        1352078.9568,
+        1399401.720288
+      ],
+      "total_basis": 9090000.0,
+      "yield_on_cost": 0.079977
+    }
+  },
+  "sensitivity": [
+    [
+      0.175212,
+      0.166818,
+      0.158874,
+      0.151341,
+      0.144184,
+      0.137371,
+      0.130875,
+      0.124671,
+      0.118738
+    ],
+    [
+      0.16787,
+      0.159513,
+      0.151606,
+      0.144107,
+      0.136982,
+      0.130199,
+      0.123732,
+      0.117556,
+      0.111649
+    ],
+    [
+      0.160782,
+      0.152463,
+      0.144591,
+      0.137125,
+      0.130031,
+      0.123278,
+      0.116839,
+      0.110689,
+      0.104808
+    ],
+    [
+      0.153935,
+      0.145652,
+      0.137813,
+      0.13038,
+      0.123316,
+      0.116592,
+      0.11018,
+      0.104057,
+      0.0982
+    ],
+    [
+      0.147313,
+      0.139065,
+      0.13126,
+      0.123858,
+      0.116824,
+      0.110128,
+      0.103743,
+      0.097645,
+      0.091812
+    ],
+    [
+      0.140904,
+      0.13269,
+      0.124917,
+      0.117545,
+      0.11054,
+      0.103872,
+      0.097513,
+      0.091439,
+      0.08563
+    ],
+    [
+      0.134695,
+      0.126515,
+      0.118773,
+      0.111431,
+      0.104454,
+      0.097812,
+      0.091479,
+      0.085429,
+      0.079643
+    ],
+    [
+      0.128675,
+      0.120528,
+      0.112817,
+      0.105504,
+      0.098555,
+      0.091939,
+      0.085629,
+      0.079604,
+      0.07384
+    ],
+    [
+      0.122835,
+      0.114719,
+      0.107039,
+      0.099754,
+      0.092831,
+      0.086241,
+      0.079955,
+      0.073953,
+      0.068211
+    ]
+  ],
+  "sources_uses": {
+    "balanced": true,
+    "gp_equity": 329850.0,
+    "lp_equity": 2968650.0,
+    "ltv": 0.639449,
+    "senior_debt": 5850000.0,
+    "total_equity": 3298500.0,
+    "total_sources": 9148500.0,
+    "total_uses": 9148500.0
+  },
+  "va_max_offer": {
+    "achieved_irr": null,
+    "max_price": null,
+    "target_irr": null
+  },
+  "va_results": {},
+  "value_add": {
+    "estimated_noi_uplift": 173800.0,
+    "expense_categories": [
+      "Reduce Repairs & Maintenance",
+      "Reduce Payroll",
+      "Reduce General & Administrative"
+    ],
+    "revenue_categories": [
+      "Revenue Management / ECRI",
+      "Ancillary Revenue"
+    ]
+  }
+}
