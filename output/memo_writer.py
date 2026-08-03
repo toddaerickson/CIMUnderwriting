@@ -1104,6 +1104,14 @@ def _is_build(property_name, cim_data, market_analysis, physical_analysis,
     profile = (physical_analysis or {}).get("property_profile") or {}
     base = (scenario_results or {}).get("base") or {}
     lev_base = (levered or {}).get("base") or {}
+    # CLAUDE.md decision 7: no LP net figure without its assumption stamp.
+    # The figures and the stamp were gated independently, so a payload with
+    # a levered scenario but no stamp printed an LP net IRR bare. Coupling
+    # them in ONE predicate is how memo section 6 does it (`if not base:
+    # return`), and it makes the invariant structural rather than a
+    # property of whatever the caller happened to pass.
+    levered = levered if (lev_base.get("assumption_stamp")) else None
+    lev_base = lev_base if levered else {}
 
     page1 = PageBudget("Page 1")
     page2 = PageBudget("Page 2")
@@ -1313,6 +1321,9 @@ def _is_assumption_stamp(doc, budget, lev_base):
     stamp = (lev_base or {}).get("assumption_stamp") or []
     labels = " - ".join(r.get("label", "") for r in stamp if r.get("label"))
     if not labels:
+        # Unreachable from `_is_build`, which nulls `levered` outright when
+        # the stamp is missing so no levered FIGURE prints either. Kept as
+        # a guard for direct callers.
         return
     _is_para(doc, budget, "stamp",
              f"LP net returns are computed under: {labels}. These are "
@@ -1408,8 +1419,15 @@ def _is_key_metrics(doc, budget, cim_data, base, physical_analysis,
     rows.append(["Exit Cap (Base)", exit_label])
     rows.append(["Yr-1 Yield on Cost", _fmt_pct(base.get("yield_on_cost"))])
 
+    # Total basis is the UNLEVERED definition and excludes financing costs
+    # (CLAUDE.md decision 3). `sources_uses["total_uses"]` is documented as
+    # `total_basis + financing_costs`, so printing it under this label put a
+    # financing-inflated number on the one document built to keep the
+    # unlevered lens financing-free. `output/excel_writer.py` labels the
+    # same row off `scen["total_basis"]`; this reads the same field.
+    if base.get("total_basis") is not None:
+        rows.append(["Total Basis", _fmt_currency(base.get("total_basis"))])
     if sources_uses:
-        rows.append(["Total Basis", _fmt_currency(sources_uses.get("total_uses"))])
         rows.append(["Equity Required",
                      _fmt_currency(sources_uses.get("total_equity"))])
     if debt and debt.get("loan"):

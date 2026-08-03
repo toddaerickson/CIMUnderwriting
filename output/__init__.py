@@ -30,8 +30,17 @@ _DISAMBIGUATOR_LEN = 6
 def safe_filename(name: str) -> str:
     """Sanitize a property name into a filename stem.
 
-    Names that already fit come back unchanged, so nothing that works
-    today gets a new filename. Only over-long names gain the digest.
+    Length behaviour is additive: names already inside the cap keep their
+    stem, and only over-long ones gain the digest.
+
+    Sanitization is NOT identical to all three predecessors. `memo_writer`
+    and `excel_writer` replaced unsafe characters with "_"; `template_writer`
+    DROPPED them, so "O'Brien's Storage" was `OBriens_Storage` there and is
+    `O_Brien_s_Storage` here. Replacing won — dropping silently welds words
+    together — and nothing breaks, because every filename is stored at
+    generation time (`webapp.services`) and served from that stored value
+    (`webapp.views.deal_download`), never recomputed at lookup. Existing
+    rows keep pointing at the files they were written with.
     """
     safe = "".join(c if c.isalnum() or c in (" ", "-", "_") else "_"
                    for c in (name or "")).strip().replace(" ", "_")

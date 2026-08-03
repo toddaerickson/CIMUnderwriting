@@ -69,6 +69,11 @@ def _scenarios(**over):
         d = {"irr": irr, "moic": moic, "exit_cap": exit_cap,
              "entry_cap": 0.065, "yield_on_cost": 0.0712,
              "noi_projection": [650_000, 690_000, 720_000, 750_000, 780_000],
+             # Deliberately DIFFERENT from sources_uses["total_uses"]
+             # (10,350,000): total_uses carries financing costs and
+             # total_basis does not, so a test that used one number for
+             # both could not tell them apart.
+             "total_basis": 10_250_000,
              "hold_years": 5}
         d.update(over)
         return d
@@ -338,7 +343,7 @@ def test_figures_trace_to_the_result_dicts(tmp_path):
     assert "6.500%" in body                 # entry cap (3dp, as _fmt_cap)
     assert "6.850%" in body                 # base exit cap
     assert "$6,400,000" in body             # senior debt
-    assert "$10,350,000" in body            # total uses
+    assert "$10,350,000" in body            # total uses (capital stack)
 
 
 def test_fee_and_promote_load_is_volunteered(tmp_path):
@@ -533,3 +538,41 @@ def test_real_render_is_two_pages(tmp_path):
     raw = pdf.read_bytes()
     pages = raw.count(b"/Type /Page") or raw.count(b"/Type/Page")
     assert pages == 2, f"rendered {pages} pages"
+
+
+# ── Review findings ──────────────────────────────────────────────────
+
+def test_total_basis_is_the_unlevered_figure_not_total_uses(tmp_path):
+    """CLAUDE.md decision 3: total basis EXCLUDES financing costs, and
+    `total_uses == total_basis + financing_costs`. Printing total_uses
+    under a "Total Basis" label put a financing-inflated number on the
+    one document built to keep the unlevered lens financing-free."""
+    body = _text(_generate(tmp_path))
+    rows = [ln.strip() for ln in body.splitlines()]
+    basis_idx = rows.index("Total Basis")
+    assert rows[basis_idx + 1] == "$10,250,000"      # scenario total_basis
+    assert rows[basis_idx + 1] != "$10,350,000"      # NOT total_uses
+
+
+def test_no_levered_figure_survives_a_missing_assumption_stamp(tmp_path):
+    """CLAUDE.md decision 7, made structural. The figures and the stamp
+    used to be gated independently, so a payload carrying a levered
+    scenario but no stamp printed a bare LP net IRR — on the only
+    document that leaves the firm."""
+    stampless = {"base": {"lp_net_irr": 0.1567, "lp_moic": 2.03,
+                          "am_fee_total": 208_000, "gp_promote": 415_000},
+                 "bear": {"lp_net_irr": 0.012},
+                 "bull": {"lp_net_irr": 0.2891}}
+    body = _text(_generate(tmp_path, levered=stampless))
+    for leaked in ("15.7%", "2.03x", "$208,000", "$415,000", "28.9%"):
+        assert leaked not in body
+    assert "LP net returns are computed under" not in body
+    # The unlevered lens is untouched — it never depended on the stamp.
+    assert "12.3%" in body
+
+
+def test_bear_bull_band_alone_cannot_print_without_a_stamp(tmp_path):
+    """The band reads bear/bull directly, so it needed the same gate."""
+    body = _text(_generate(tmp_path, levered={"bear": {"lp_net_irr": 0.012},
+                                              "bull": {"lp_net_irr": 0.2891}}))
+    assert "1.2%" not in body and "28.9%" not in body

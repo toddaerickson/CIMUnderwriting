@@ -210,8 +210,14 @@ output/
    capital block is not (item E3b).
 7. **No LP net IRR without its assumption stamp**: five LPA questions are
    still open and each changes the number, so `model.levered` builds the
-   resolved set and all three surfaces render it beside every levered
-   figure — including the AM fee's rate and base, which is what makes
+   resolved set and EVERY surface that prints a levered figure renders it
+   beside that figure — the Returns tab, memo section 6, the workbook
+   sheet, and the LP-facing investor summary (item G), which is the only
+   one that leaves the firm and so the one where the rule binds hardest.
+   `memo_writer._is_build` makes that structural rather than incidental:
+   it nulls the whole levered payload when the stamp is absent, so no
+   block can print a figure the stamp does not cover
+   — including the AM fee's rate and base, which is what makes
    "net" mean anything. Three of those five conventions have exactly one
    implemented value (`accrual_base`, `am_fee_treatment`, `catch_up`) and
    the other value RAISES, so they deliberately get no form field: a

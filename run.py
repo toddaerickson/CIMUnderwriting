@@ -558,7 +558,7 @@ def _print_summary(ctx: AnalysisContext):
     print(f"  → {ctx.excel_path}")
     if ctx.template_path:
         print(f"  → {ctx.template_path}")
-    if getattr(ctx, "summary_path", ""):
+    if getattr(ctx, "investor_summary_path", ""):
         print(f"  → {ctx.investor_summary_path}")
     print("=" * 57)
     print()

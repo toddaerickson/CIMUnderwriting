@@ -52,13 +52,18 @@ PAGE_BUDGET_PT = USABLE_HEIGHT_PT * 0.90                   # 648pt
 # truncation ladder ate content that should have been there. A one-sided
 # assert never catches that, so the floor is part of the contract.
 #
-# Calibrated against what page 2 actually weighs: a complete deal runs
-# ~330-350pt at 9pt body, and a page that lost its plan table AND its
-# risks falls to ~150pt. 240pt sits between those. It is deliberately
-# NOT half the page — this document is dense and short by design, and a
-# floor the real content cannot clear is a test that only ever fails.
+# Calibrated by MEASURING page 2, not by estimating it: a complete deal
+# runs 387pt at 9pt body, and the same deal stripped of its plan table
+# and risks falls to 229pt. 240pt sits just above that floor and well
+# under the real figure. It is deliberately NOT half the page — this
+# document is dense and short by design, and a floor the real content
+# cannot clear is a test that only ever fails.
 #
-# The caller applies it only when the deal HAS that content; a thin
+# **What this does and does not catch.** The caller applies it only when
+# the deal HAS scenarios and risks, so it catches a block that vanished
+# from a deal that should have had it — a broken section guard, a
+# truncation ladder that took too much. It does NOT catch "the deal had
+# no risks", because that path is exempt by construction: a thin
 # early-look CIM is legitimately short and must still render.
 PAGE_MIN_PT = 240.0
 
