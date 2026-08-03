@@ -18,7 +18,7 @@ Mutations inside a linked worktree of this clone are ALLOWED. Mutations to OTHER
 reads, non-git Bash, read-only git, and edits outside any repo are ALLOWED — the guard
 only protects this clone's primary tree.
 
-Design (v4 — hardened over five adversarial-review rounds of the naive substring/cwd
+Design (v6 — hardened over seven adversarial-review rounds of the naive substring/cwd
 version; rounds 2-5 each found real holes in what the previous round called done):
   * Heredoc bodies (`… <<EOF … EOF`) are stripped BEFORE parsing, so command examples
     inside a script/PR body written via `cat <<EOF` aren't misread as real commands.
@@ -62,20 +62,28 @@ version; rounds 2-5 each found real holes in what the previous round called done
   * `--help` exempts only as the LEADING argument. `git commit -m --help`
     COMMITS, with "--help" as the message — verified against real git — so
     scanning the whole arg list for it exempts a real mutation.
-  * v5 NARROWED two rules that were denying safe work and offering advice that
-    did not help. `worktree remove`/`prune` and `branch -d`/`-D` cannot reach
-    the primary WORKING TREE at all — they drop a worktree dir or a ref, and
-    git itself refuses each of them on the shapes that would hurt: the main
-    tree is not removable, a dirty worktree needs `--force`, and a branch
-    checked out in ANY worktree cannot be deleted or force-moved (all four
-    verified against real git, not inferred). They are also the documented
-    post-merge cleanup in CLAUDE.md rule 3. Crucially, the remedy the deny
-    message offered — isolate into a worktree — makes neither command safer,
-    because it is the identical ref/dir deletion from a different cwd. A
-    check whose fix does not reduce the risk it names is friction, not
-    defence. `worktree remove --force`, `worktree move`/`repair` and
-    `branch -m`/`-f`/`--set-upstream-to` stay denied: each defeats one of
-    git's own protections or persists in the shared .git.
+  * v5 tried to narrow `worktree remove`/`prune` and `branch -d`/`-D`, on the
+    argument that git refuses each on the shapes that hurt. v6 keeps HALF of
+    that and reverts the rest, because an adversarial pass reproduced two
+    losses in what v5 had just allowed:
+      - `branch -D` bypasses the MERGE check, not merely the checked-out
+        check v5 leaned on. `worktree remove` a clean tree, then `branch -D`
+        its branch, and committed unpushed work is unreachable — the exact
+        durability CLAUDE.md rule 1 promises. `-D` is the branch equivalent
+        of `worktree remove --force`; both stay denied. `-d` is allowed, as
+        git refuses it on an unmerged branch.
+      - `worktree prune` treats "directory not reachable right now" as
+        "already gone", and permanently broke a live worktree whose path was
+        temporarily moved. Denied again.
+    `worktree remove` (unforced) stays ALLOWED — git will not run it on the
+    main tree at all — but the comment no longer claims uncommitted work is
+    safe, because git's dirty check does not see GITIGNORED files and the
+    plain form deletes them.
+  * Exact-token flag matching missed BUNDLED short options for seven rounds:
+    `git branch -fm src dst` force-renames, and `a in ("-m", "-f", …)` never
+    matched it, while the unbundled spelling denied correctly. `_short_flags`
+    now decomposes bundles. The lesson generalises past this one function —
+    `_dry_run` had always done it right, and nobody carried it across.
   * Scoped to THIS clone via $CLAUDE_PROJECT_DIR — other repos are never guarded.
   * A git mutation whose target can't be resolved (unexpanded $VAR / missing dir)
     FAILS CLOSED (deny).
@@ -244,69 +252,103 @@ def _restore_mut(args):
     return worktree or not staged                      # --staged-only = index unstage (safe)
 
 
+def _short_flags(args):
+    """Every letter across short-option bundles, plus the long flags seen.
+
+    Git accepts bundled single-letter options: `-fm` IS `-f -m`. Exact-token
+    membership (`a in ("-m", "-f", …)`) never sees that, which let
+    `git branch -fm src dst` — a FORCE RENAME — through this classifier while
+    the unbundled spelling was correctly denied. Found by adversarial review
+    of v5; the same bug was present in v4 and every round before it, and the
+    file already avoided it in `_dry_run` without the lesson being carried
+    across.
+    """
+    short, longs = set(), set()
+    for a in args:
+        if a.startswith("--"):
+            longs.add(a.split("=", 1)[0])
+        elif a.startswith("-") and len(a) > 1:
+            short.update(a[1:])
+    return short, longs
+
+
 def _branch_mut(args):
-    # rename/force/upstream rewrites — those touch no file but persist in
-    # .git/config, or repoint a ref, for every later session.
-    #
-    # DELETING a branch is ALLOWED, and that is a deliberate narrowing (see
-    # `_worktree_mut` for the same argument at more length). Two reasons:
-    #
-    #   1. It cannot reach the primary WORKING TREE, which is the only thing
-    #      this guard exists to protect. It removes a ref; it writes no
-    #      tracked file and moves no HEAD.
-    #   2. Git itself refuses to delete a branch checked out in ANY worktree
-    #      — verified: `error: cannot delete branch 'feat' used by worktree
-    #      at '/tmp/gx/wt'`. So it can only drop a ref that no live session
-    #      is sitting on.
-    #
-    # It was also blocking the post-merge cleanup CLAUDE.md rule 3 names as a
-    # ship step ("local ref delete via `git branch -D`"), and the remedy the
-    # deny message offered — isolate into a worktree — does not make the
-    # command any safer, because it is the same ref deletion from a different
-    # cwd. A check whose fix does not reduce the risk it names is friction,
-    # not defence.
-    #
-    # `--delete --force` is the long spelling of `-D`, so it lands here too
-    # rather than tripping the `--force` arm below.
+    """Ref admin, judged by whether it can DESTROY something durable.
+
+    `-d` is ALLOWED: git refuses it on a branch that is not fully merged
+    (`error: the branch 'x' is not fully merged`) and on one checked out in
+    any worktree, so it can only drop a ref whose commits already live
+    somewhere else. It writes no tracked file and moves no HEAD.
+
+    `-D` STAYS DENIED, reversing this item's first draft. The draft argued
+    that git refuses to delete a checked-out branch, which is true and is
+    the wrong protection to lean on: `-D` exists to bypass the MERGE check.
+    Adversarial review reproduced the loss in two commands this same change
+    had newly allowed — `worktree remove` a clean worktree, then `branch -D`
+    its branch — and the committed, unpushed work became unreachable. That
+    is precisely the guarantee CLAUDE.md rule 1 makes ("branch refs are
+    durable even if the worktree dir is lost"), so `-D` is the branch
+    equivalent of `worktree remove --force` and is denied for the same
+    reason. A stale local ref costs nothing; deliberate pruning is what
+    CIM_SOLO=1 is for.
+
+    Renames, force-updates, force-copies and the upstream/description forms
+    stay denied: each repoints a ref or persists in .git/config for every
+    later session.
+    """
     if _helpish(args):
         return False
-    if any(a in ("-d", "-D", "--delete") for a in args):
-        return False
-    return any(a in ("-m", "-M", "--move", "-f", "--force",
-                     "-u", "--unset-upstream", "--edit-description")
-               or a.startswith("--set-upstream-to")
-               for a in args)
+    short, longs = _short_flags(args)
+
+    # Rename, or force-copy over an existing ref.
+    if short & set("mMC") or longs & {"--move", "--unset-upstream",
+                                      "--edit-description", "--set-upstream-to"}:
+        return True
+    forced = bool(short & set("fD")) or "--force" in longs
+    deleting = bool(short & set("dD")) or "--delete" in longs
+    if deleting:
+        return forced          # -d allowed; -D / --delete --force denied
+    return forced              # bare -f force-updates a ref; listing/creating is fine
 
 
 def _worktree_mut(args):
     """Worktree admin, judged by whether it can reach the primary tree.
 
-    `remove` and `prune` are ALLOWED because git makes them unable to do the
-    damage this guard is for — verified, not assumed:
+    `remove` (unforced) is ALLOWED. Git refuses it on the main worktree
+    outright (`fatal: '<path>' is a main working tree`), so it cannot touch
+    the tree this hook protects, and it refuses a worktree with modified or
+    untracked files, so a concurrent session's VISIBLE work-in-progress is
+    safe from the plain form. This is the post-merge cleanup CLAUDE.md rule
+    3 names, and denying it bought nothing — "isolate into a worktree" is
+    not advice you can follow when the command removes one.
 
-      * `git worktree remove <main>` → `fatal: '<path>' is a main working
-        tree`. The primary tree is not removable by this command at all.
-      * `git worktree remove <dirty>` → `fatal: contains modified or
-        untracked files, use --force to delete it`. Uncommitted work in a
-        CONCURRENT session's worktree is therefore safe from the plain form,
-        which is the cross-session hazard worth caring about here.
-      * `prune` only drops bookkeeping for worktree dirs that are already
-        gone from disk.
+    **The limit of that, stated because the first draft overclaimed it:**
+    git's dirty check only sees what `git status` sees. A worktree whose
+    only uncommitted content is GITIGNORED — an `.env`, build output, and in
+    this repo a `*.xlsm` UW template — reports clean, and plain `remove`
+    deletes it silently. So this allows a command that can destroy ignored
+    files in someone else's clean worktree. That is a real cost, accepted
+    because the branch ref and every tracked file survive, and because the
+    alternative blocks routine cleanup outright. Do not restate the earlier
+    claim that uncommitted work is safe here; it is not, for ignored paths.
 
-    `--force` defeats the second protection, so it stays denied — that is the
-    one spelling that can delete another session's uncommitted work.
+    `prune` STAYS DENIED. It looks like bookkeeping, but it decides
+    "already gone" by whether the directory is reachable RIGHT NOW —
+    adversarial review broke a live worktree permanently by pruning while
+    its directory was temporarily moved, which on a WSL or network mount is
+    not a hypothetical. It was never needed for the cleanup this item is
+    about.
 
-    `move` and `repair` stay denied: both rewrite worktree metadata in the
-    shared .git for every session, and neither is part of any routine flow.
+    `--force`, `move` and `repair` stay denied: the first deletes another
+    session's uncommitted work, the other two rewrite shared .git metadata.
     """
     if _helpish(args) or not args:
         return False
     sub = args[0]
     if sub == "remove":
-        return any(a in ("-f", "--force") for a in args)
-    if sub == "prune":
-        return False
-    return sub in ("move", "repair")
+        short, longs = _short_flags(args[1:])
+        return "f" in short or "--force" in longs
+    return sub in ("prune", "move", "repair")
 
 
 def _helpish(args):
@@ -555,15 +597,19 @@ def _reason(target, sub=""):
         )
     if sub in ("worktree", "branch"):
         return (
-            f"BLOCKED: this `git {sub}` form can disturb a CONCURRENT session's work "
-            f"in the shared clone. Deleting a worktree or a branch is allowed — git "
-            f"refuses those on the main tree, on a dirty worktree, and on a branch "
-            f"anyone has checked out. This form defeats one of those protections: "
-            f"`worktree remove --force` deletes uncommitted work, `worktree "
-            f"move`/`repair` rewrite shared .git metadata, and `branch "
-            f"-m`/`-f`/`--set-upstream-to` repoint a ref or persist config for every "
-            f"later session. Confirm no other session owns it, then re-launch with "
-            f"CIM_SOLO=1, or use the non-forcing spelling."
+            f"BLOCKED: this `git {sub}` form can destroy something durable in "
+            f"the shared clone. Allowed instead: `worktree remove` (unforced) "
+            f"and `branch -d`, which git itself refuses on the main tree, on a "
+            f"worktree with visible changes, and on an unmerged or checked-out "
+            f"branch. This form defeats one of those: `-D`/`--delete --force` "
+            f"drops a branch git says is NOT merged — the ref is the durable "
+            f"copy once a worktree is gone (CLAUDE.md rule 1) — `worktree "
+            f"remove --force` deletes uncommitted work, `worktree prune` can "
+            f"break a worktree whose path is only temporarily unreachable, and "
+            f"`move`/`repair`/`branch -m`/`-f`/`--set-upstream-to` rewrite "
+            f"shared .git state. A stale local ref is harmless; if you really "
+            f"want it gone, confirm no other session owns it and re-launch "
+            f"with CIM_SOLO=1."
         )
     return (
         f"BLOCKED: this mutation targets the PRIMARY working tree of the shared clone "
