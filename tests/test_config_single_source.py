@@ -1,0 +1,368 @@
+"""Item T Category 1 — every moved key has ONE definition, and every
+surface that restated it now follows it.
+
+The characterization suite next door proves this PR changed nothing. That
+is only half the claim. A literal moved into config and then read back
+*wrongly* — the caller binding a stale copy, or reading a different key —
+reproduces the snapshot perfectly, because the value is the same value.
+Byte-for-byte green is exactly what a dead wire looks like.
+
+So these tests move the config value and assert every surface moves WITH
+it. That is the item's actual acceptance criterion ("a ConfigOverride
+delta changes every output the audit found divergent"), and it is the
+test that fails if someone later re-freezes one of these bindings at
+import time.
+
+Patching is done with `monkeypatch.setitem` on the live dict, which is
+precisely what `webapp.services._merge_patch` does for a real
+ConfigOverride row — same mutation, same in-place semantics, so a module
+that survives this survives a settings override. Scalars have no such
+mechanism (a module binding one by value cannot see a patch at all), so
+`MGMT_FEE_TARGET_PCT` is asserted to be read through `cfg.` at call time.
+"""
+
+import pytest
+
+import config as cfg
+from analysis.financials import analyze_financials
+from analysis.market import analyze_market
+from analysis.risks import identify_risks
+from analysis.value_add import identify_value_add
+from engine import AnalysisResult, run_analysis
+from tests.test_characterization import stabilized_deal
+
+
+@pytest.fixture(autouse=True)
+def isolated_comp_db(tmp_path, monkeypatch):
+    """Same reason as the characterization suite: `engine.run_analysis`
+    writes every completed run into the comp DB and
+    `analysis.financials._get_benchmarks` reads it back, so an unisolated
+    run here would change the benchmarks a LATER test resolves. Patch the
+    module attribute, not `config.COMP_DB_PATH` — `data.comp_db` binds it
+    at import."""
+    import data.comp_db as comp_db_module
+    monkeypatch.setattr(comp_db_module, "COMP_DB_PATH",
+                        str(tmp_path / "comps.db"))
+
+
+# ── GATES["max_noi_step_up"] — the flag AND the sentence ─────────────
+
+def _risks_for(cim_data):
+    return identify_risks(cim_data, gate_results=[], financial_analysis={},
+                          scenario_results={})["risks"]
+
+
+def _risk(risks, name):
+    return next((r for r in risks if r["risk"] == name), None)
+
+
+def test_noi_step_up_flag_follows_the_gate(mock_cim_data, monkeypatch):
+    """340k TTM -> 360k Yr1 is a 5.9% step-up: under the 15% default, over
+    a 5% gate. The literal was `0.15` in `analysis/risks.py`."""
+    assert _risk(_risks_for(mock_cim_data), "Aggressive CIM pro forma") is None
+
+    monkeypatch.setitem(cfg.GATES, "max_noi_step_up", 0.05)
+    assert _risk(_risks_for(mock_cim_data), "Aggressive CIM pro forma")
+
+
+def test_noi_step_up_sentence_quotes_the_gate_it_used(mock_cim_data,
+                                                      monkeypatch):
+    """The risk text said "exceeds 15% step-up threshold" as a string
+    literal, so an overridden gate produced a sentence describing a
+    threshold the code had not applied."""
+    monkeypatch.setitem(cfg.GATES, "max_noi_step_up", 0.05)
+    risk = _risk(_risks_for(mock_cim_data), "Aggressive CIM pro forma")
+
+    assert "exceeds 5% step-up threshold" in risk["description"]
+    assert "15%" not in risk["description"]
+
+
+# ── GATES["population_3mi"] — four surfaces, one number ───────────────
+
+def test_population_gate_drives_every_market_surface(mock_cim_data,
+                                                     monkeypatch):
+    """`analysis/market.py` restated the 50,000 gate three times (the
+    adequacy flag, the narrative sentence, the demand negative) and
+    `analysis/risks.py` a fourth (severity).
+
+    60,000 people: above the 50,000 default, below a 65,000 override, and
+    below the separate 75,000 "dense trade area" tier that would otherwise
+    short-circuit the demand branch (see the test below).
+    """
+    mock_cim_data.population_3mi = 60_000
+
+    market = analyze_market(mock_cim_data)
+    assert market["demographics"]["pop_3mi_adequate"] is True
+    assert "Adequate density" in market["demographics"]["pop_narrative"]
+    assert not any("Thin trade area" in n
+                   for n in market["demand_drivers"]["negatives"])
+
+    monkeypatch.setitem(cfg.GATES, "population_3mi", 65_000)
+    market = analyze_market(mock_cim_data)
+
+    assert market["demographics"]["pop_3mi_adequate"] is False
+    assert "Thin trade area" in market["demographics"]["pop_narrative"]
+    assert any("Thin trade area" in n
+               for n in market["demand_drivers"]["negatives"])
+
+
+def test_the_75k_density_tier_still_shadows_the_population_gate(
+        mock_cim_data, monkeypatch):
+    """A KNOWN, deliberate limitation of Category 1 — pinned so it is a
+    documented state rather than a surprise.
+
+    `_assess_demand` reads `pop >= 75_000` first and only falls through to
+    the gate on the `elif`. 75,000 is a "preferred density" tier, NOT the
+    50,000 gate restated, so folding it into `GATES["population_3mi"]`
+    would have changed behaviour — out of scope for a literal move. The
+    consequence is real though: raise the gate above 75,000 and a deal
+    between the two still reports as a POSITIVE demand driver while the
+    adequacy flag beside it says False.
+
+    `risks.py`'s 75,000 trigger and `market.py`'s 100,000 "dense" tier are
+    the same shape. Category 5's occupancy-style reconciliation is where
+    they get one schedule.
+    """
+    mock_cim_data.population_3mi = 80_000
+    monkeypatch.setitem(cfg.GATES, "population_3mi", 100_000)
+    market = analyze_market(mock_cim_data)
+
+    assert market["demographics"]["pop_3mi_adequate"] is False
+    assert any("Dense trade area" in p
+               for p in market["demand_drivers"]["positives"])
+
+
+def test_population_narrative_quotes_the_gate_it_used(mock_cim_data,
+                                                      monkeypatch):
+    """"below 50,000 minimum" was hard-coded into the sentence, so an
+    overridden gate printed the OLD number beside the new verdict."""
+    monkeypatch.setitem(cfg.GATES, "population_3mi", 100_000)
+    narrative = analyze_market(mock_cim_data)["demographics"]["pop_narrative"]
+
+    assert "below 100,000 minimum" in narrative
+    assert "50,000" not in narrative
+
+
+def test_population_severity_follows_the_gate(mock_cim_data, monkeypatch):
+    """`risks.py` grades a thin trade area Medium above the gate, High
+    below it. At 60,000 the fixture is below the "preferred density"
+    trigger either way, so only the SEVERITY should move."""
+    mock_cim_data.population_3mi = 60_000
+    assert _risk(_risks_for(mock_cim_data),
+                 "Limited trade area population")["severity"] == "Medium"
+
+    monkeypatch.setitem(cfg.GATES, "population_3mi", 65_000)
+    assert _risk(_risks_for(mock_cim_data),
+                 "Limited trade area population")["severity"] == "High"
+
+
+def test_the_hhi_thresholds_are_not_the_population_gate(mock_cim_data,
+                                                        monkeypatch):
+    """The trap this move had to avoid: `median_hhi_3mi` is screened at
+    50,000 too — dollars, not people. A sweep that replaced every `50_000`
+    in `market.py` would have wired household income to the population
+    gate, and nothing else in the suite would have noticed."""
+    mock_cim_data.median_hhi_3mi = 55_000
+
+    monkeypatch.setitem(cfg.GATES, "population_3mi", 100_000)
+    demographics = analyze_market(mock_cim_data)["demographics"]
+
+    assert demographics["hhi_adequate"] is True
+    assert "Middle-income" in demographics["hhi_narrative"]
+
+
+# ── MGMT_FEE_TARGET_PCT — one target, two modules, four sites ────────
+
+def test_mgmt_fee_target_drives_the_financials_adjustment(mock_cim_data,
+                                                          monkeypatch):
+    """A CIM fee below the benchmark floor is adjusted UP to the target.
+    `financials.py` restated it twice as a number and twice as text."""
+    mock_cim_data.mgmt_fee_pct = 0.01
+    monkeypatch.setattr(cfg, "MGMT_FEE_TARGET_PCT", 0.08)
+
+    fin = analyze_financials(mock_cim_data)
+    line = next(ln for ln in fin["expense_analysis"]["lines"]
+                if ln["category"] == "Management Fee")
+    egr = fin["income_summary"]["egr"]
+
+    assert line["adjusted_pct"] == 0.08
+    assert line["adjusted_value"] == pytest.approx(egr * 0.08)
+    assert any("Adjusted to 8% of EGR" in a
+               for a in fin["expense_analysis"]["adjustments"])
+
+
+def test_mgmt_fee_target_drives_the_value_add_saving(mock_cim_data,
+                                                     monkeypatch):
+    """`value_add.py` sized the renegotiation saving off its own copy of
+    the 5%, so the two modules could disagree about the same target.
+
+    The fee here is 5.5% — above the target but still INSIDE the (3%, 6%)
+    benchmark band, deliberately. An above-band fee crashes
+    `_expense_opportunities` on `origin/main` today (KeyError
+    'benchmark_range': the management-fee line carries
+    `benchmark_range_pct`, and the loop reads the other key on every
+    ABOVE RANGE line). That is a real pre-existing defect, not this PR's,
+    and fixing it here would be an unrelated behaviour change riding a
+    literal move — so this test stays clear of it.
+    """
+    mock_cim_data.mgmt_fee_pct = 0.055
+    fin = analyze_financials(mock_cim_data)
+    egr = fin["income_summary"]["egr"]
+
+    op = next(o for o in identify_value_add(
+        mock_cim_data, fin)["expense_opportunities"]
+        if o["category"] == "Management Fee Reduction")
+    assert op["est_annual_impact"] == pytest.approx(egr * (0.055 - 0.05))
+
+    monkeypatch.setattr(cfg, "MGMT_FEE_TARGET_PCT", 0.04)
+    op = next(o for o in identify_value_add(
+        mock_cim_data, fin)["expense_opportunities"]
+        if o["category"] == "Management Fee Reduction")
+
+    assert op["est_annual_impact"] == pytest.approx(egr * (0.055 - 0.04))
+    assert "to 4% of EGR" in op["description"]
+
+
+def test_mgmt_fee_target_is_not_the_benchmark_midpoint():
+    """A guard on the ONE judgment this PR deliberately did not make. The
+    band is (3%, 6%) and the target is 5% — not its midpoint. Item T
+    Category 5 owns whether the target should become the band floor; if
+    someone "tidies" it into a derived midpoint, that silently
+    re-underwrites every deal with an understated management fee, and
+    this test is the sentence explaining why that is a decision and not a
+    cleanup."""
+    low, high = cfg.EXPENSE_BENCHMARKS["mgmt_fee_pct"]
+
+    assert low < cfg.MGMT_FEE_TARGET_PCT < high
+    assert cfg.MGMT_FEE_TARGET_PCT != (low + high) / 2
+
+
+# ── The documents — the surfaces the result object cannot prove ──────
+
+def _documents_for(tmp_path, **kwargs):
+    """One real end-to-end run, read back off disk.
+
+    The workbook's grid colors and the max-offer captions are Category 1
+    targets that leave `AnalysisResult`'s own fields untouched, so nothing
+    short of opening the rendered files can show them moving.
+    """
+    from tests.test_characterization import _docx_content, _xlsx_content
+
+    result = AnalysisResult(pdf_path="rt.pdf", cim_data=stabilized_deal())
+    run_analysis(result, output_dir=str(tmp_path), **kwargs)
+    return (_docx_content(result.memo_path),
+            _xlsx_content(result.excel_path))
+
+
+def _recommendation(base_irr: float) -> str:
+    """Section 10 rendered on its own, with every gate passing.
+
+    Called directly rather than through a pipeline run because the
+    threshold sentence is only REACHABLE when no gate failed and none is
+    TBD — a failed gate short-circuits to DECLINE and never reads the IRR
+    at all. Both characterization fixtures that reach the memo have a
+    failing gate, so an end-to-end run cannot exercise this branch.
+    """
+    from docx import Document
+
+    from output.memo_writer import _add_section_10
+
+    doc = Document()
+    _add_section_10(doc, gate_results=[{"gate": 1, "name": "g",
+                                        "result": "PASS"}],
+                    scenario_results={"base": {"irr": base_irr}},
+                    max_offer={}, risk_analysis={}, cim_data=None)
+    return "\n".join(p.text for p in doc.paragraphs)
+
+
+def test_memo_recommendation_threshold_follows_the_gate(monkeypatch):
+    """"meets the 10% IRR target" was a string literal sitting beside a
+    `>= 0.10` comparison — two copies of the gate, neither reading it. A
+    12% deal clears the default and misses a 15% gate, so BOTH the
+    verdict and the number in the sentence have to move."""
+    text = _recommendation(0.12)
+    assert "RECOMMENDATION: PURSUE" in text
+    assert "meet the 10% IRR target" in text
+
+    monkeypatch.setitem(cfg.GATES, "min_irr_5yr", 0.15)
+    text = _recommendation(0.12)
+
+    assert "RECOMMENDATION: PURSUE CONTINGENT ON" in text
+    assert "base case IRR is below 15% target" in text
+    assert "10%" not in text
+
+
+def test_sensitivity_legend_follows_the_gate_and_the_strong_band(
+        tmp_path, monkeypatch):
+    """The workbook legend spelled out "≥ 12% IRR" / "10-12% IRR" /
+    "< 10% IRR" as three literals describing thresholds held as two
+    others. All five are now one pair."""
+    monkeypatch.setitem(cfg.GATES, "min_irr_5yr", 0.08)
+    monkeypatch.setattr(cfg, "IRR_STRONG_THRESHOLD", 0.20)
+    _, workbook = _documents_for(tmp_path)
+
+    legend = [c["v"] for c in workbook["Sensitivity"].values()
+              if isinstance(c["v"], str) and "IRR" in c["v"]]
+
+    assert "  ≥ 20% IRR" in legend
+    assert "  8-20% IRR" in legend
+    assert "  < 8% IRR" in legend
+
+
+def test_sensitivity_colors_follow_the_gate(tmp_path, monkeypatch):
+    """The fills, not just the caption. A gate above every IRR in the
+    grid must leave no green and no yellow cell in it — proof the
+    comparison reads config and not the old `0.12` / `0.10`."""
+    monkeypatch.setitem(cfg.GATES, "min_irr_5yr", 0.90)
+    monkeypatch.setattr(cfg, "IRR_STRONG_THRESHOLD", 0.95)
+    _, workbook = _documents_for(tmp_path)
+
+    fills = {c.get("fill") for c in workbook["Sensitivity"].values()
+             if isinstance(c["v"], float)}
+
+    assert "00C6EFCE" not in fills          # green — none can clear 95%
+    assert "00FFEB9C" not in fills          # yellow — none can clear 90%
+    assert "00FFC7CE" in fills              # red — every cell
+
+
+def test_max_offer_captions_quote_the_target_actually_solved_for(tmp_path):
+    """The captions must name the target the SOLVER used, not a constant
+    that happens to match it today.
+
+    Driven through the per-deal `solver_target_irr`, which is the one
+    route that genuinely moves the solver right now: `solve_max_price`
+    binds `SOLVER_TARGET_IRR` as a default ARGUMENT, frozen at import, so
+    patching config cannot reach it. That frozen binding is a known
+    defect and item T Category 3 owns it — this test is written against
+    the wiring as it is, and will keep passing once Category 3 unfreezes
+    it.
+    """
+    memo, workbook = _documents_for(tmp_path, solver_target_irr=0.14)
+    text = "\n".join(memo["paragraphs"])
+
+    assert "Maximum Offer Price (for 14% Base Case IRR)" in text
+    assert "At a target 14% base case unlevered IRR" in text
+    assert not any("10% Base Case IRR" in p for p in memo["paragraphs"])
+
+    captions = [c["v"] for c in workbook["Max Offer"].values()
+                if isinstance(c["v"], str) and "Max Price" in c["v"]]
+    assert captions and all("10%" not in c for c in captions)
+
+
+def test_max_offer_caption_falls_back_to_the_config_target(mock_cim_data,
+                                                           monkeypatch):
+    """The `.get()` defaults behind those captions were the literal 0.10.
+    A max-offer dict with no `target_irr` — the only case the default
+    fires — must read config, or the fallback quietly re-hard-codes the
+    number the rest of this move just removed."""
+    from docx import Document
+
+    from output.memo_writer import _add_section_1
+
+    monkeypatch.setattr(cfg, "SOLVER_TARGET_IRR", 0.14)
+    doc = Document()
+    _add_section_1(doc, mock_cim_data, gate_results=[], scenario_results={},
+                   max_offer={"max_price": 1_000_000})
+    text = "\n".join(p.text for p in doc.paragraphs)
+
+    assert "Maximum Offer Price (for 14% Base Case IRR)" in text

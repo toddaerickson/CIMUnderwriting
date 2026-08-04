@@ -5,6 +5,7 @@ Identifies value-add opportunities based on the gap between
 current operations and benchmark performance.
 """
 
+import config as cfg
 from config import EXPENSE_BENCHMARKS, GATES
 from registry import asset_age
 
@@ -136,13 +137,15 @@ def _expense_opportunities(cim_data, fin) -> list:
 
     # Third-party management savings
     mgmt_pct = cim_data.mgmt_fee_pct
-    if mgmt_pct and mgmt_pct > 0.05:
+    mgmt_target = cfg.MGMT_FEE_TARGET_PCT
+    if mgmt_pct and mgmt_pct > mgmt_target:
         egr = fin.get("income_summary", {}).get("egr", 0) or 0
-        savings = egr * (mgmt_pct - 0.05)
+        savings = egr * (mgmt_pct - mgmt_target)
         if savings > 0:
             ops.append({
                 "category": "Management Fee Reduction",
-                "description": f"Renegotiate management fee from {mgmt_pct:.1%} to 5% of EGR.",
+                "description": f"Renegotiate management fee from {mgmt_pct:.1%} "
+                               f"to {mgmt_target:.0%} of EGR.",
                 "est_annual_impact": savings,
                 "timeline": "At acquisition",
                 "risk": "Low — standard market rate",
