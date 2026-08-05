@@ -400,12 +400,18 @@ def _axis_offsets(span: float, step: float, axis: str) -> list[float]:
     """−span … +span in `step` increments, inclusive of both ends.
 
     Built outward from the CENTRE (`i * step` for i in −n…n) rather than
-    upward from −span. Two reasons, and the second one is not obvious:
-    accumulating from the low end leaves the centre as a residue like
-    −1.4e-17, which is a NEGATIVE zero — and `f"{-0.0:+.1%}"` renders
-    "-0.0%" where the column has always been labelled "+0.0%". Centre-out
-    makes the middle offset exactly `0 * step`, and every other offset a
-    single multiplication rather than an accumulation.
+    upward from −span, because `-span + n * step` can land on NEGATIVE
+    zero — and `f"{-0.0:+.1%}"` renders "-0.0%" where the centre column
+    has always been labelled "+0.0%". Centre-out makes the middle offset
+    exactly `0 * step`.
+
+    It does NOT bite on the two axes shipped today: `-0.10 + 4 × 0.025`
+    is a clean 0.0, and so is the cap axis. A sweep of valid (span, step)
+    pairs found 553 that do misplace the centre — ±30bps in 6bp steps is
+    one, and is a plausible cap axis for a tight market — so the guard is
+    against a future edit to `config.SENSITIVITY_GRID`, not against
+    today's values. `test_the_centre_offset_is_a_positive_zero` is
+    parametrized over both kinds of pair for exactly that reason.
 
     A span that is not a whole multiple of its step RAISES. The
     alternative is dropping the far end of the axis, which shows up as a

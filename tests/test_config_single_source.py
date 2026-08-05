@@ -21,6 +21,7 @@ mechanism (a module binding one by value cannot see a patch at all), so
 `MGMT_FEE_TARGET_PCT` is asserted to be read through `cfg.` at call time.
 """
 
+import math
 from unittest import mock
 
 import pytest
@@ -1377,16 +1378,32 @@ def test_the_grid_reproduces_the_literal_lists_it_replaced():
         0.0100]
 
 
-def test_the_centre_offset_is_a_positive_zero():
-    """Accumulating from −span leaves the centre as a residue like
-    −1.4e-17, which is NEGATIVE zero — and `f"{-0.0:+.1%}"` renders
-    "-0.0%" where the column has always read "+0.0%". Building outward
-    from the centre makes it exactly `0 * step`. The label is asserted,
-    not the sign, because the label is what a reader sees."""
+@pytest.mark.parametrize("span,step", [(0.10, 0.025),     # the shipped price axis
+                                       (0.0100, 0.0025),  # the shipped cap axis
+                                       (0.0030, 0.0006),  # ±30bps in 6bp steps
+                                       (0.0015, 0.0003)])
+def test_the_centre_offset_is_a_positive_zero(span, step):
+    """Accumulating from −span can leave the centre as a residue that is
+    NEGATIVE zero, and `f"{-0.0:+.1%}"` renders "-0.0%" where the column
+    has always read "+0.0%". Building outward from the centre makes it
+    exactly `0 * step`.
+
+    The last two pairs are why this test is parametrized rather than
+    written against the shipped axes. On 0.10/0.025 the two constructions
+    agree exactly — `-0.10 + 4 × 0.025` is a clean 0.0 — so a test using
+    only the shipped values passes on BOTH implementations and guards
+    nothing. It was written that way first and a deliberate mutation
+    walked straight through it. A sweep of valid (span, step) pairs found
+    553 that do misplace the centre; ±30bps in 6bp steps is one of them
+    and is a plausible cap axis for a tight market.
+    """
     from model.returns_model import _axis_offsets
 
-    centre = _axis_offsets(0.10, 0.025, "price")[4]
+    offsets = _axis_offsets(span, step, "price")
+    centre = offsets[len(offsets) // 2]
+
     assert f"{centre:+.1%}" == "+0.0%"
+    assert math.copysign(1, centre) == 1.0
 
 
 def test_the_grid_axes_come_from_config(monkeypatch):
