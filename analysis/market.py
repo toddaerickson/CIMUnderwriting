@@ -5,9 +5,9 @@ Evaluates demographics, MSA strength, and supply/demand indicators
 from CIM-extracted data.
 """
 
-# GATES is mutated in place by the per-run override patch, so a
+# Both are mutated in place by the per-run override patch, so a
 # module-level binding still sees a ConfigOverride (webapp.services).
-from config import GATES
+from config import GATES, POPULATION_TIERS
 
 
 def analyze_market(cim_data) -> dict:
@@ -73,7 +73,7 @@ def _assess_demographics(cim_data) -> dict:
 def _pop_narrative(pop_3mi) -> str:
     if pop_3mi is None:
         return "3-mile population not available — requires manual verification."
-    if pop_3mi >= 100_000:
+    if pop_3mi >= POPULATION_TIERS["strong_density"]:
         return f"Dense trade area with {pop_3mi:,} people within 3 miles — strong demand driver."
     if pop_3mi >= GATES["population_3mi"]:
         return f"Adequate density with {pop_3mi:,} people within 3 miles — meets minimum threshold."
@@ -130,7 +130,14 @@ def _assess_demand(cim_data) -> dict:
             negatives.append(f"Occupancy at {occ:.1%} — below stabilized threshold.")
 
     pop = cim_data.population_3mi
-    if pop and pop >= 75_000:
+    # `max(...)` is the guard that keeps the two settings from contradicting
+    # each other. These are independently editable now, and a preferred-
+    # density tier set BELOW the gate would otherwise let a deal report as a
+    # demand positive while `pop_3mi_adequate` beside it says False. On the
+    # defaults (75,000 vs 50,000) this is a no-op.
+    preferred = max(POPULATION_TIERS["preferred_density"],
+                    GATES["population_3mi"])
+    if pop and pop >= preferred:
         positives.append(f"Dense trade area ({pop:,} within 3 mi).")
     elif pop and pop < GATES["population_3mi"]:
         negatives.append(f"Thin trade area ({pop:,} within 3 mi).")

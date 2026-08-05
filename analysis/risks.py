@@ -7,7 +7,7 @@ CIM data and analysis outputs.
 
 from typing import Optional
 
-from config import GATES
+from config import GATES, POPULATION_TIERS
 from registry import ScenarioType, asset_age
 
 
@@ -125,7 +125,7 @@ def _market_risks(cim_data) -> list:
     risks = []
 
     pop = cim_data.population_3mi
-    if pop and pop < 75_000:
+    if pop and pop < POPULATION_TIERS["preferred_density"]:
         risks.append({
             "category": "Market",
             "risk": "Limited trade area population",

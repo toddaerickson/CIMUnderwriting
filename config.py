@@ -28,6 +28,23 @@ GATES = {
     "max_sf_per_capita": 10,
 }
 
+# ── Trade-area density tiers (3-mile population) ────────────────────
+#
+# NARRATIVE tiers, not screens. `GATES["population_3mi"]` is the only
+# population number that passes or fails a deal; these two grade how the
+# trade area READS above it, and they are settings-editable so the grading
+# can be tuned per strategy without touching the gate.
+#
+# `preferred_density` is ONE threshold with two faces: at or above it,
+# `market.py` reports density as a demand positive; below it, `risks.py`
+# raises "Limited trade area population". They were two separate 75,000
+# literals in two modules and could drift apart — a market that was not a
+# positive but also not a risk, or both at once.
+POPULATION_TIERS = {
+    "preferred_density": 75_000,   # demand positive at/above, risk below
+    "strong_density": 100_000,     # top narrative tier — "strong demand driver"
+}
+
 # Sensitivity-grid green band. PRESENTATION ONLY — nothing screens on it.
 # The grid's other boundary is `GATES["min_irr_5yr"]`, so a cell reads
 # green above this, yellow down to the gate, red below it. Kept an

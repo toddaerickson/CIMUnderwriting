@@ -183,7 +183,7 @@ def json_safe(obj):
 _PATCHED_DICTS = ("GATES", "EXPENSE_BENCHMARKS", "REPLACEMENT_COST",
                   "SCENARIO_DEFAULTS", "VALUE_ADD_SCENARIOS",
                   "VALUE_ADD_TRIGGERS", "TRANSACTION_COSTS",
-                  "MARKET_CAP_RATES")
+                  "MARKET_CAP_RATES", "POPULATION_TIERS")
 _ORIG_CONFIG = {n: copy.deepcopy(getattr(cfg, n)) for n in _PATCHED_DICTS}
 _ANALYSIS_LOCK = threading.Lock()
 

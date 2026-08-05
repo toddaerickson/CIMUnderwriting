@@ -106,30 +106,140 @@ def test_population_gate_drives_every_market_surface(mock_cim_data,
                for n in market["demand_drivers"]["negatives"])
 
 
-def test_the_75k_density_tier_still_shadows_the_population_gate(
+def test_the_density_tier_can_no_longer_shadow_the_population_gate(
         mock_cim_data, monkeypatch):
-    """A KNOWN, deliberate limitation of Category 1 — pinned so it is a
-    documented state rather than a surprise.
+    """This test previously pinned the OPPOSITE, as a known Category 1
+    limitation: a gate raised above the 75,000 tier left a deal reporting
+    as a POSITIVE demand driver while the adequacy flag beside it said
+    False. Making the tier settings-editable turned that from a fixed
+    quirk into something a user could produce on purpose, so
+    `_assess_demand` now takes `max(preferred_density, population_3mi)`.
 
-    `_assess_demand` reads `pop >= 75_000` first and only falls through to
-    the gate on the `elif`. 75,000 is a "preferred density" tier, NOT the
-    50,000 gate restated, so folding it into `GATES["population_3mi"]`
-    would have changed behaviour — out of scope for a literal move. The
-    consequence is real though: raise the gate above 75,000 and a deal
-    between the two still reports as a POSITIVE demand driver while the
-    adequacy flag beside it says False.
-
-    `risks.py`'s 75,000 trigger and `market.py`'s 100,000 "dense" tier are
-    the same shape. Category 5's occupancy-style reconciliation is where
-    they get one schedule.
+    The two settings are independent, which means nothing stops someone
+    setting the tier below the gate — the guard is that the OUTPUT stays
+    coherent when they do, not that the inputs are policed.
     """
     mock_cim_data.population_3mi = 80_000
     monkeypatch.setitem(cfg.GATES, "population_3mi", 100_000)
     market = analyze_market(mock_cim_data)
 
     assert market["demographics"]["pop_3mi_adequate"] is False
-    assert any("Dense trade area" in p
-               for p in market["demand_drivers"]["positives"])
+    assert not any("Dense trade area" in p
+                   for p in market["demand_drivers"]["positives"])
+
+
+def test_a_tier_set_below_the_gate_cannot_contradict_it(mock_cim_data,
+                                                        monkeypatch):
+    """The same guard from the other direction: an operator lowering the
+    preferred-density tier below the gate must not manufacture a deal
+    that is simultaneously a demand positive and inadequate."""
+    mock_cim_data.population_3mi = 45_000
+    monkeypatch.setitem(cfg.POPULATION_TIERS, "preferred_density", 40_000)
+    market = analyze_market(mock_cim_data)
+
+    assert market["demographics"]["pop_3mi_adequate"] is False
+    assert not any("Dense trade area" in p
+                   for p in market["demand_drivers"]["positives"])
+    assert any("Thin trade area" in n
+               for n in market["demand_drivers"]["negatives"])
+
+
+# ── POPULATION_TIERS — narrative grading, settings-editable ──────────
+
+def test_preferred_density_is_one_threshold_with_two_faces(mock_cim_data,
+                                                           monkeypatch):
+    """It was two separate 75,000 literals — `market.py`'s demand positive
+    and `risks.py`'s "Limited trade area population" trigger — which could
+    drift into a market that is neither a positive nor a risk, or both."""
+    mock_cim_data.population_3mi = 80_000
+    assert any("Dense trade area" in p for p in
+               analyze_market(mock_cim_data)["demand_drivers"]["positives"])
+    assert _risk(_risks_for(mock_cim_data),
+                 "Limited trade area population") is None
+
+    monkeypatch.setitem(cfg.POPULATION_TIERS, "preferred_density", 90_000)
+
+    assert not any("Dense trade area" in p for p in
+                   analyze_market(mock_cim_data)["demand_drivers"]["positives"])
+    assert _risk(_risks_for(mock_cim_data), "Limited trade area population")
+
+
+def test_strong_density_drives_the_top_narrative_tier(mock_cim_data,
+                                                      monkeypatch):
+    """`market.py`'s 100,000 "strong demand driver" tier."""
+    mock_cim_data.population_3mi = 120_000
+    assert "strong demand driver" in analyze_market(
+        mock_cim_data)["demographics"]["pop_narrative"]
+
+    monkeypatch.setitem(cfg.POPULATION_TIERS, "strong_density", 150_000)
+    narrative = analyze_market(mock_cim_data)["demographics"]["pop_narrative"]
+
+    assert "strong demand driver" not in narrative
+    assert "Adequate density" in narrative
+
+
+def test_population_tiers_are_settings_editable_end_to_end():
+    """The registry is what the settings page renders and what
+    `build_config_patch` validates against, so an unregistered key is
+    accepted by the form and then silently skipped at run time — the exact
+    "UI claims the override works" failure item T exists to kill."""
+    from webapp.forms import (format_override_value, override_key_registry,
+                              parse_override_value)
+    from webapp.services import _PATCHED_DICTS, build_config_patch
+
+    reg = override_key_registry()
+    for key in ("POPULATION_TIERS.preferred_density",
+                "POPULATION_TIERS.strong_density"):
+        assert reg[key]["int"] is True and reg[key]["pct"] is False
+        # Counts, not percentages: 90000 must round-trip as 90000, not 900.
+        assert parse_override_value(key, "90,000") == 90_000
+        assert format_override_value(key, 90_000) == "90000"
+
+    # In _PATCHED_DICTS, so the patch actually reaches the analysis modules
+    # that bound the dict at import.
+    assert "POPULATION_TIERS" in _PATCHED_DICTS
+    patch, _solver, skipped = build_config_patch(
+        {"POPULATION_TIERS.preferred_density": 90_000})
+    assert patch == {"POPULATION_TIERS": {"preferred_density": 90_000}}
+    assert skipped == []
+
+
+@pytest.mark.django_db
+def test_a_stored_override_row_reaches_the_analysis(mock_cim_data):
+    """The whole chain, from a row in the database to a changed narrative:
+    ConfigOverride -> resolve -> build_config_patch -> _patched_config ->
+    the module-level dict `analysis.market` bound at import.
+
+    Every earlier link is unit-tested above; this is the one assertion
+    that fails if any of them stops composing. The others would all still
+    pass with a dict that no consumer reads.
+    """
+    from django.utils import timezone
+
+    from webapp.models import ConfigOverride
+    from webapp.services import (_patched_config, build_config_patch,
+                                 resolve_config_overrides)
+
+    mock_cim_data.population_3mi = 80_000
+    assert any("Dense trade area" in p for p in
+               analyze_market(mock_cim_data)["demand_drivers"]["positives"])
+
+    ConfigOverride.objects.create(key="POPULATION_TIERS.preferred_density",
+                                  value=90_000,
+                                  effective_date=timezone.localdate())
+    deltas = resolve_config_overrides("", timezone.localdate())
+    patch, _solver, skipped = build_config_patch(deltas)
+    assert skipped == []
+
+    with _patched_config(patch):
+        positives = analyze_market(mock_cim_data)["demand_drivers"]["positives"]
+        risks = _risks_for(mock_cim_data)
+    assert not any("Dense trade area" in p for p in positives)
+    assert _risk(risks, "Limited trade area population")
+
+    # And the patch is REVERTED on exit — a leaked mutation would silently
+    # reprice every later deal in the same worker process.
+    assert cfg.POPULATION_TIERS["preferred_density"] == 75_000
 
 
 def test_population_narrative_quotes_the_gate_it_used(mock_cim_data,
