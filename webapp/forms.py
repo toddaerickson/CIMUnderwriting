@@ -1256,6 +1256,24 @@ def override_key_registry() -> dict:
         reg[f"EXPENSE_BENCHMARKS.{k}"] = {
             "group": "Expense Benchmarks ($/NRSF/yr)", "kind": "range",
             "pct": k in EXPENSE_PCT_KEYS, "int": False, "label": _label(k)}
+    # The OpEx load the projection assumes when the financials produce
+    # none, and the tolerance that widens `opex_revenue_ratio` above into
+    # the clamp (item T Category 3). Both were module constants in
+    # registry.py, where no operator could see them and every published
+    # IRR depended on them.
+    #
+    # Its own group rather than sharing the benchmarks': that group is
+    # labelled $/NRSF and these two are shares of revenue, so a number
+    # typed under the wrong heading would be wrong by three orders of
+    # magnitude.
+    # The heading is short because the two row labels — "Default" and
+    # "Clamp Tolerance" — already say which is which under it. The
+    # settings page lays groups out in up to three columns, so a heading
+    # long enough to wrap costs a line in every column beside it.
+    for k in cfg.EXPENSE_RATIO:
+        reg[f"EXPENSE_RATIO.{k}"] = {
+            "group": "OpEx / Revenue Ratio",
+            "kind": "scalar", "pct": True, "int": False, "label": _label(k)}
     for k in cfg.REPLACEMENT_COST:
         if k in RC_LEGACY_ALIASES:
             continue                     # synced automatically by the patcher

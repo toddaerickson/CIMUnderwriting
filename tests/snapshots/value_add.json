@@ -1960,25 +1960,25 @@
           "v": "CapEx Budget"
         },
         "B10": {
-          "v": 45656.226562
+          "v": 45295.664062
         },
         "B11": {
-          "v": 4611278.882812
+          "v": 4574862.070312
         },
         "B12": {
-          "v": 0.099693
+          "v": 0.10032
         },
         "B15": {
           "v": 6400000
         },
         "B16": {
-          "v": 4565622.65625
+          "v": 4529566.40625
         },
         "B17": {
-          "v": 0.286621
+          "v": 0.292255
         },
         "B18": {
-          "v": 1834377.34375
+          "v": 1870433.59375
         },
         "B21": {
           "v": 0.15
@@ -1987,25 +1987,25 @@
           "v": "Yes"
         },
         "B23": {
-          "v": 7
+          "v": 8
         },
         "B25": {
-          "v": 4105905.46875
+          "v": 4103651.953125
         },
         "B26": {
-          "v": 0.084303
+          "v": 0.084349
         },
         "B27": {
-          "v": 0.150324
+          "v": 0.150426
         },
         "B28": {
-          "v": 1.847009
+          "v": 1.847538
         },
         "B3": {
           "v": 0.1
         },
         "B30": {
-          "v": 2668838.554688
+          "v": 2667373.769531
         },
         "B31": {
           "v": 0.639449
@@ -2014,19 +2014,19 @@
           "v": "Max LTV"
         },
         "B33": {
-          "v": 26688.385547
+          "v": 26673.737695
         },
         "B34": {
-          "v": 1504814.354297
+          "v": 1503988.44082
         },
         "B35": {
-          "v": 4146964.523438
+          "v": 4144688.472656
         },
         "B36": {
-          "v": 4173652.908984
+          "v": 4171362.210352
         },
         "B37": {
-          "v": 0.108507
+          "v": 0.108556
         },
         "B4": {
           "v": "Yes"
@@ -2050,10 +2050,10 @@
           "v": 7
         },
         "B7": {
-          "v": 4565622.65625
+          "v": 4529566.40625
         },
         "B8": {
-          "v": 0.075814
+          "v": 0.076418
         },
         "B9": {
           "v": 0
@@ -3233,7 +3233,7 @@
         "5 of 13 integrity checks flagged. Blocking findings were accepted by the analyst with the discrepancy recorded; advisory findings do not stop the model but change how its outputs should be read.",
         "Screening Gates",
         "Returns Snapshot (Unlevered)",
-        "Maximum Offer Price (for 10% Base Case IRR): $4,565,623",
+        "Maximum Offer Price (for 10% Base Case IRR): $4,529,566",
         "2. Market Overview",
         "Demographics",
         "Adequate density with 64,000 people within 3 miles \u2014 meets minimum threshold.",
@@ -3322,8 +3322,8 @@
         "Above the waterfall (deal expense) \u2014 1.00% of invested equity, measured at the start of each period \u2014 AM fee above the waterfall or netted from LP",
         "20% promote on the LP-attributable residual (90% of it) \u2014 Promote on 100% of residual or LP-attributable only",
         "Maximum Offer Price",
-        "At a target 10% base case unlevered IRR, the maximum offer price is $4,565,623 (implied entry cap: 7.6%).",
-        "At a target 15% LP NET IRR \u2014 after debt service, the asset-management fee and the GP promote \u2014 the maximum offer price is $4,105,905 (implied entry cap: 8.4%). At that price the deal supports $2,668,839 of senior debt (63.9% LTV, bound by Max LTV) and requires $1,504,814 of equity.",
+        "At a target 10% base case unlevered IRR, the maximum offer price is $4,529,566 (implied entry cap: 7.6%).",
+        "At a target 15% LP NET IRR \u2014 after debt service, the asset-management fee and the GP promote \u2014 the maximum offer price is $4,103,652 (implied entry cap: 8.4%). At that price the deal supports $2,667,374 of senior debt (63.9% LTV, bound by Max LTV) and requires $1,503,988 of equity.",
         "This price is computed on the levered assumption set stated under Levered Returns above: 8.00% pref, annually compounded; Contributed / unreturned capital; Return of capital first (presentation only: the pref compounds, so no dollar moves); Above the waterfall (deal expense) \u2014 1.00% of invested equity, measured at the start of each period; 20% promote on the LP-attributable residual (90% of it).",
         "7. Value-Add Opportunities",
         "Identified 4 revenue enhancement opportunities. Identified 3 expense reduction opportunities. Estimated total annual NOI uplift: $201,659. 5 capital improvement item(s) identified for evaluation.",
@@ -3360,7 +3360,7 @@
         "Gate 3 (Price \u2264 Replacement Cost): Asking $123/SF vs replacement $112/SF",
         "Gate 4 (5-Yr Unlevered IRR \u2265 10%): Below target IRR (value-add model)",
         "Gate 7 (Major City / Top-50 MSA): MSA not auto-matched to top-50 \u2014 set Market Verification in assumptions to resolve",
-        "Maximum Offer: $4,565,623 (28.7% discount to asking price of $6,400,000)",
+        "Maximum Offer: $4,529,566 (29.2% discount to asking price of $6,400,000)",
         "Note: This analysis is based on CIM-provided data supplemented by benchmark assumptions. All figures should be verified during due diligence."
       ],
       "tables": [
@@ -4014,17 +4014,17 @@
     }
   },
   "levered_max_offer": {
-    "achieved_irr": 0.150324,
+    "achieved_irr": 0.150426,
     "coerced_region": true,
-    "max_price": 4105905.46875,
+    "max_price": 4103651.953125,
     "monotonicity_warning": null,
     "target_irr": 0.15
   },
   "max_offer": {
-    "achieved_irr": 0.099693,
-    "max_price": 4565622.65625,
+    "achieved_irr": 0.10032,
+    "max_price": 4529566.40625,
     "target_irr": 0.1,
-    "total_basis": 4611278.882812
+    "total_basis": 4574862.070312
   },
   "risks": [
     [

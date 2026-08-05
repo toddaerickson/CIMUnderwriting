@@ -78,10 +78,18 @@ def test_zero_reserve_reproduces_the_pre_item_d_projection(scen):
 
 
 def test_zero_reserve_solver_reproduces_the_item_b_pin():
-    """The pin captured at commit bb15311 in tests/test_transaction_costs."""
+    """The pin captured at commit bb15311 in tests/test_transaction_costs.
+
+    Re-baselined 3,625,000 -> 3,609,375 by item T Category 3, which gave
+    the three solvers one shared bracket at the wider dear cap. The
+    reasoning is recorded once, beside `_SOLVER_PINS` in
+    tests/test_transaction_costs.py — this is the same case with a reserve
+    argument, and what it is here to prove is that reserve=0 changes
+    nothing, not what the price is.
+    """
     result = solve_max_price(adjusted_ttm_noi=300_000, capex=200_000,
                              transaction_costs=NO_COSTS)
-    assert result["max_price"] == pytest.approx(3_625_000.0, abs=1e-6)
+    assert result["max_price"] == pytest.approx(3_609_375.0, abs=1e-6)
     assert result["reserve"] == 0.0
 
 

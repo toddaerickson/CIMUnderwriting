@@ -28,7 +28,7 @@ The flat oracle case, used throughout:
 import numpy_financial as npf
 import pytest
 
-from config import SCENARIO_DEFAULTS
+from config import SCENARIO_DEFAULTS, SOLVER_TOLERANCE
 
 from analysis.valuation import (COERCED_SCENARIOS, project_cash_flows,
                                 resolve_market_cap, run_scenarios)
@@ -140,13 +140,41 @@ def test_zero_cost_sensitivity_grid_reproduces_pre_refactor_exactly():
     assert grid[8][8] == pytest.approx(0.059934021666702364, abs=1e-9)
 
 
-@pytest.mark.parametrize("capex,max_price", [(0, 4_089_843.75),
-                                             (200_000, 3_625_000.0)])
-def test_zero_cost_solver_reproduces_pre_refactor_exactly(capex, max_price):
+#: Re-baselined by item T Category 3, which gave all three solvers ONE
+#: bracket (`config.SOLVER_BOUNDS`) at the wider of the two they carried
+#: — the dear end moved from a 3% implied entry cap to 2%.
+#:
+#: Bisection stops at the first price whose IRR is within
+#: `SOLVER_TOLERANCE` of the target, so the price it lands on depends on
+#: where its midpoints fall, and a different opening bracket walks a
+#: different sequence to a different point in the SAME 10bp-wide band.
+#: The pins moved 0.15% and 0.43%; both prices then and now sit inside
+#: the tolerance, which is the property actually worth pinning and is
+#: asserted below alongside the number.
+_SOLVER_PINS = [
+    # capex,   max_price,   the pre-Category-3 value this replaces
+    (0,        4_083_984.375,  4_089_843.75),
+    (200_000,  3_609_375.0,    3_625_000.0),
+]
+
+
+@pytest.mark.parametrize("capex,max_price,superseded", _SOLVER_PINS)
+def test_zero_cost_solver_reproduces_pre_refactor_exactly(capex, max_price,
+                                                          superseded):
     result = solve_max_price(adjusted_ttm_noi=300_000, capex=capex,
                              transaction_costs=NO_COSTS,
                              market_cap=PIN_MARKET_CAP)
     assert result["max_price"] == pytest.approx(max_price, abs=1e-6)
+
+    # The bracket-independent half, and the reason re-baselining this pin
+    # does not throw the guard away: whatever price the search lands on,
+    # it has to be a price that actually achieves the target. A solver
+    # returning its own ceiling passes the number above only if someone
+    # copies the ceiling into it; it can never pass this.
+    assert result["converged"] is True
+    assert result["achieved_irr"] == pytest.approx(result["target_irr"],
+                                                   abs=SOLVER_TOLERANCE)
+    assert abs(max_price - superseded) / superseded < 0.01
 
 
 # ── 2. Hand-computed oracles: hold period ────────────────────────────

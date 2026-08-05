@@ -6,8 +6,12 @@ that were previously scattered across 8+ files.
 """
 
 import datetime
+import logging
+import math
 from dataclasses import dataclass
 from enum import Enum
+
+logger = logging.getLogger("cim_analyst")
 
 
 # ── Scenario Names ─────────────────────────────────────────────────
@@ -67,18 +71,196 @@ EXPENSE_KEYWORD_MAP = {c.key: list(c.parse_keywords) for c in EXPENSE_CATEGORIES
 
 # ── Expense Ratio Defaults ─────────────────────────────────────────
 
-DEFAULT_EXPENSE_RATIO = 0.40
-EXPENSE_RATIO_CLAMP = (0.25, 0.65)
+#: Hard limits on the DERIVED clamp, which is the one thing the
+#: settings page cannot bound for itself.
+#:
+#: `_bounds_for` bounds each editable field on its own shape, and both
+#: inputs to the clamp are shares in (0, 1) — individually legal at every
+#: value. Their SUM is not: `opex_revenue_ratio` high of 0.90 plus a
+#: `clamp_tolerance` of 0.10 is a clamp ceiling of exactly 1.0, and
+#: `analysis/valuation.py` then computes `yr1_noi / (1 - ratio)` on a
+#: deal whose expenses reach revenue — a ZeroDivisionError, a 500, and
+#: two settings edits that each passed validation to get there.
+#:
+#: This is a defect the derivation INTRODUCED. The clamp used to be the
+#: constant `(0.25, 0.65)`, which no operator could reach at all; making
+#: it follow the band is what put a composed value in reach.
+#:
+#: 0.95 rather than something closer to 1: at a 95% expense ratio the
+#: implied revenue is twenty times NOI, which is already far past any
+#: credible deal, so nothing real is being clipped. The floor at 0.0 is
+#: the same argument from the other side — a band low under the tolerance
+#: derives a NEGATIVE clamp floor, which would let a deal be underwritten
+#: on expenses below zero.
+EXPENSE_RATIO_LIMITS = (0.0, 0.95)
+
+#: Messages already emitted, so a misconfiguration is reported once
+#: rather than once per evaluation.
+#:
+#: `expense_ratio_clamp` is called from `clamp_expense_ratio`, which
+#: `project_cash_flows` calls on EVERY projection — up to 50 bisection
+#: iterations in each of three solvers, plus 81 sensitivity cells, plus
+#: three scenarios. An unthrottled warning is ~200 identical lines for
+#: one deal, which buries the one line anybody needed to read.
+#:
+#: Keyed on the MESSAGE, so a different misconfiguration still speaks
+#: up. It does NOT re-warn for a combination already reported in this
+#: process, even if the setting was corrected and broken again the same
+#: way — the entry never expires. That is deliberate (the condition
+#: describes config, not a deal, so repeating it says nothing new) and
+#: it is stated here because an earlier version of this comment claimed
+#: the opposite, which an audit caught by testing the claim.
+#:
+#: A race between threads costs a duplicate line, the harmless direction.
+_WARNED = set()
+
+
+def _warn_once(message: str) -> None:
+    if message not in _WARNED:
+        _WARNED.add(message)
+        logger.warning("%s", message)
+
+
+def _finite(value):
+    """-> float, or None if `value` is not a usable finite number.
+
+    The settings form rejects both cases, so this only fires on a row
+    that reached the database another way — an older schema, a hand-run
+    UPDATE, a fixture. `build_config_patch` applies a stored value
+    without re-checking its bounds, so the form is not the last line of
+    defence it looks like.
+
+    NaN is the one worth naming: it is not caught by any comparison
+    (`nan > 0` and `nan < 0` are both False, and `min`/`max` pass it
+    straight through), so it would flow into the projection, out through
+    `json_safe` as a null, and surface as an empty cell rather than as a
+    problem.
+    """
+    try:
+        v = float(value)
+    except (TypeError, ValueError):
+        return None
+    return v if math.isfinite(v) else None
+
+
+def expense_ratio_clamp() -> tuple[float, float]:
+    """The (low, high) a stated OpEx/Revenue ratio is believed within.
+
+    DERIVED from `EXPENSE_BENCHMARKS["opex_revenue_ratio"]` widened by
+    `EXPENSE_RATIO["clamp_tolerance"]`, rather than restated — see the
+    argument beside `config.EXPENSE_RATIO`. It used to be the module
+    constant `EXPENSE_RATIO_CLAMP = (0.25, 0.65)`, which is what the
+    band ± 0.10 evaluates to today.
+
+    Config is imported INSIDE the function on purpose: `config.py`
+    imports `ScenarioType` from this module, so a module-level import
+    here is a cycle. It also happens to be what makes the value live —
+    `EXPENSE_BENCHMARKS` is a `_PATCHED_DICTS` entry mutated in place for
+    the duration of one run, and only a call-time read can see the patch.
+    """
+    import config as cfg
+
+    floor, ceiling = EXPENSE_RATIO_LIMITS
+
+    # The two inputs are VALIDATED, not trusted, and that is what makes
+    # the ordering argument below a fact rather than a hope. An audit
+    # broke the previous version with `clamp_tolerance = -0.5`: a
+    # negative tolerance NARROWS the band instead of widening it, so
+    # (0.35, 0.55) derived (0.85, 0.05) — inverted, and with both
+    # endpoints inside the limits, so the bound below saw nothing wrong
+    # and no warning fired. `clamp_expense_ratio` then returned a
+    # constant 0.85 for every input, having stopped reading its argument
+    # entirely. Silent, and wrong in the expensive direction.
+    #
+    # Only reachable off-form — `_bounds_for` refuses a negative
+    # tolerance and a NaN — but `build_config_patch` applies a STORED
+    # override without re-checking its bounds, so a row written by an
+    # older version, a fixture or a hand-run UPDATE arrives here
+    # unvalidated. The house rule for stored overrides is this one:
+    # log and carry on, never take a run down (`resolve_capital_structure`
+    # settles an unknown basis the same way).
+    band = cfg.EXPENSE_BENCHMARKS["opex_revenue_ratio"]
+    try:
+        low, high = (_finite(band[0]), _finite(band[1]))
+    except (TypeError, KeyError, IndexError, ValueError):
+        low = high = None
+    if low is None or high is None or low > high:
+        # No credible band to widen. Falling back to the LIMITS rather
+        # than to some invented pair: the limits are the widest interval
+        # that keeps `1 - ratio` positive, so the clamp stops clipping
+        # instead of clipping to a number nobody chose.
+        _warn_once(
+            f"EXPENSE_BENCHMARKS['opex_revenue_ratio'] is {band!r}, which "
+            f"is not a usable (low, high) pair — the OpEx/revenue clamp "
+            f"falls back to {EXPENSE_RATIO_LIMITS} and clips nothing.")
+        return (floor, ceiling)
+
+    tolerance = _finite(cfg.EXPENSE_RATIO["clamp_tolerance"])
+    if tolerance is None or tolerance < 0:
+        _warn_once(
+            f"EXPENSE_RATIO['clamp_tolerance'] is "
+            f"{cfg.EXPENSE_RATIO['clamp_tolerance']!r}; a tolerance widens "
+            f"the band and cannot be negative or non-numeric — using 0, so "
+            f"the clamp is the benchmark band itself.")
+        tolerance = 0.0
+
+    # Rounded because the subtraction is not exact in binary: 0.35 − 0.10
+    # is 0.24999999999999997, and a clamp floor a quintillionth below the
+    # value it is supposed to be makes `clamp(0.10) == 0.25` false. Ten
+    # decimals is finer than any input can be — the settings form rounds
+    # a stored override to six — and coarser than float noise.
+    derived = (round(low - tolerance, 10), round(high + tolerance, 10))
+
+    # The composed value is bounded here because nothing upstream can
+    # bound it — see EXPENSE_RATIO_LIMITS. Logged rather than raised: a
+    # stored override must not take a run down, and the settings page
+    # cannot cross-validate two rows an operator edits months apart. The
+    # repo already settles this the same way for the density tiers — the
+    # guard is that the OUTPUT stays coherent, not that the inputs are
+    # policed.
+    #
+    # BOTH ends go through the same clamp, and that is the whole
+    # correctness argument. Bounding only the high end — which is what
+    # the first version of this did — leaves the low end free to climb
+    # past the ceiling: a band of (1.0, 1.0) with a zero tolerance
+    # derived (1.0, 1.0) and bounded it to (1.0, 0.95), an INVERTED pair.
+    # `max(lo, min(hi, r))` then returns `lo` for every input, so the
+    # clamp stopped reading its own argument and handed back 1.0 — the
+    # exact ZeroDivisionError the limits exist to prevent, now reached
+    # THROUGH the guard. Clamping both ends with one monotone function
+    # cannot invert them, and `derived` is now ordered BY CONSTRUCTION —
+    # the block above rejects a band with low > high and a negative
+    # tolerance, which were the only two ways the pair could arrive out
+    # of order. A monotone map preserves that order.
+    bounded = tuple(min(max(v, floor), ceiling) for v in derived)
+    if bounded != derived:
+        _warn_once(
+            "the OpEx/revenue clamp derived from the benchmark band and "
+            f"EXPENSE_RATIO['clamp_tolerance'] is {derived}, outside the "
+            f"limits {EXPENSE_RATIO_LIMITS} that keep `1 - ratio` a "
+            f"positive number — using {bounded}. Narrow the "
+            "opex_revenue_ratio band or the tolerance.")
+    return bounded
 
 
 def clamp_expense_ratio(ratio: float | None) -> float:
     """Apply default and clamp to the expense ratio.
 
-    Used in valuation.py, returns_model.py, and solver.py to avoid
-    duplicating the same 2-line pattern.
+    `None` means the financials produced no ratio at all, not zero — a
+    property with no expenses is not what a missing figure describes. It
+    resolves to `EXPENSE_RATIO["default"]` and is then clamped like any
+    other value: the clamp is the range the model believes, and a default
+    outside it would be a number the model does not believe in.
+
+    Called from `analysis.valuation.project_cash_flows`, which is the ONE
+    projection — so this is the single point where the assumed expense
+    load enters every scenario, every sensitivity cell and every solver
+    iteration.
     """
-    r = ratio if ratio is not None else DEFAULT_EXPENSE_RATIO
-    lo, hi = EXPENSE_RATIO_CLAMP
+    import config as cfg
+
+    r = ratio if ratio is not None else cfg.EXPENSE_RATIO["default"]
+    lo, hi = expense_ratio_clamp()
     return max(lo, min(hi, r))
 
 
