@@ -1104,6 +1104,11 @@ RC_LEGACY_ALIASES = {"non_cc_per_sf", "cc_per_sf", "site_work_per_sf"}
 # (config.py:394-396) — an override would show in the preview but never
 # reach a run with a known state. Derived, not editable.
 EXPENSE_DERIVED_KEYS = {"total_opex"}
+# Shapes inside `config.VALUE_ADD_ASSUMPTIONS`, which is otherwise flat
+# shares. Both ranges are (low, high) bands rendered into memo prose by
+# `analysis.value_add._pct_band`; the tenure is a whole number of months.
+VA_ASSUMPTION_RANGE_KEYS = {"ecri_increase_range", "ancillary_target_share"}
+VA_ASSUMPTION_INT_KEYS = {"ecri_tenant_tenure_months"}
 
 # ── Sanity bounds for the settings value box ────────────────────────
 #
@@ -1285,6 +1290,17 @@ def override_key_registry() -> dict:
         reg[f"VALUE_ADD_TRIGGERS.{k}"] = {
             "group": "Value-Add Triggers", "kind": "scalar",
             "pct": True, "int": False, "label": _label(k)}
+    # The opportunity-sizing layer (item T Category 2). Two keys are
+    # bands rendered into memo prose, one is a tenure in months; the rest
+    # are plain shares. `config.RENOVATION_COST` is deliberately absent —
+    # it moves no number, see the note in webapp.services._PATCHED_DICTS.
+    for k in cfg.VALUE_ADD_ASSUMPTIONS:
+        is_range = k in VA_ASSUMPTION_RANGE_KEYS
+        is_int = k in VA_ASSUMPTION_INT_KEYS
+        reg[f"VALUE_ADD_ASSUMPTIONS.{k}"] = {
+            "group": "Value-Add Opportunity Assumptions",
+            "kind": "range" if is_range else "scalar",
+            "pct": not is_int, "int": is_int, "label": _label(k)}
     for k in cfg.TRANSACTION_COSTS:
         reg[f"TRANSACTION_COSTS.{k}"] = {
             "group": "Transaction Costs", "kind": "scalar",

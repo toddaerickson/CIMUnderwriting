@@ -362,6 +362,155 @@ VALUE_ADD_TRIGGERS = {
     "min_rent_gap_pct": 0.10,     # in-place rent 10%+ below market
 }
 
+# ── Value-Add Opportunity Assumptions (item T Category 2) ───────────
+# The policy layer behind `analysis/value_add.py` — which operational
+# gaps count as an opportunity, and how much of each is underwritten as
+# recoverable. Every value below was a literal inside that module, which
+# meant the settings page could move `VALUE_ADD_TRIGGERS` (what makes a
+# deal value-add) while the size of the upside stayed frozen.
+#
+# These are NOT the same numbers as VALUE_ADD_SCENARIOS above, and the
+# overlap is the trap. That dict is the monthly lease-up ENGINE's
+# per-scenario inputs (`model/value_add_model.py`); this one sizes the
+# narrative opportunities in section 7 of the memo. `occupancy_target`
+# here (0.93) is deliberately higher than any `target_occupancy` there
+# (0.85/0.88/0.92): the engine underwrites what the deal is priced at,
+# this states what a well-run asset reaches. Reconciling them is item T
+# Category 5's call, not this block's.
+#
+# Every value EQUALS the literal it replaced, so shipping this block
+# moved no number — the characterization snapshots reproduce
+# byte-for-byte. What the values SHOULD be is a separate, per-value
+# decision (scoped-backlog item T, "Out of scope").
+VALUE_ADD_ASSUMPTIONS = {
+    # Occupancy upside. Below this physical occupancy the gap to it is
+    # credited as revenue upside, scaled by the current occupancy.
+    "occupancy_target": 0.93,
+
+    # Economic-occupancy recovery. The share of the physical-to-economic
+    # spread assumed recoverable through concession burn-off, tighter
+    # collections and repricing below-street in-place rents. A HAIRCUT on
+    # a measured gap, not a measurement — the other half is assumed
+    # structural. `GATES["econ_phys_spread_flag"]` is what makes the
+    # spread visible in the first place; this is what it is worth.
+    "spread_recovery_share": 0.50,
+
+    # Revenue management / ECRI. Only credible on an asset already full
+    # enough to raise rents without bleeding occupancy, hence the floor.
+    # The uplift is a share of EGR; the increase range and tenure are
+    # narrative, rendered as f-strings so the prose cannot drift from the
+    # number the model actually books.
+    "ecri_min_occupancy": 0.88,
+    "ecri_egr_uplift": 0.03,
+    "ecri_increase_range": (0.08, 0.10),
+    "ecri_tenant_tenure_months": 6,
+
+    # Ancillary revenue (tenant insurance, late/admin fees, merchandise).
+    # Below `ancillary_min_share` of total revenue, the line is treated as
+    # under-exploited; `ancillary_target_share` is the band the narrative
+    # points at and `ancillary_revenue_uplift` is what is actually booked.
+    # The booked figure is deliberately BELOW the bottom of the target
+    # band — reaching the band is the plan, three points is the underwrite.
+    "ancillary_min_share": 0.05,
+    "ancillary_target_share": (0.05, 0.08),
+    "ancillary_revenue_uplift": 0.03,
+}
+
+# ── Renovation / CapEx Schedule (item T Category 2) ─────────────────
+# The physical-improvement checklist section 7 renders, with its age
+# triggers and cost ranges. PRESENTATION ONLY: `identify_value_add` sums
+# `est_annual_impact` over the revenue and expense opportunities and
+# never over these, so no capex item moves NOI, an IRR, or a gate. That
+# is why the block is a plain module dict and NOT a
+# `webapp.services._PATCHED_DICTS` entry — see `VALUE_ADD_ASSUMPTIONS`
+# above, which is one, because it does move money.
+#
+# `min_age` is years since `year_built`, evaluated by `registry.asset_age`.
+# An item with no `min_age` is always listed. `per_sf` costs multiply
+# NRSF; `amount` costs are flat dollars. Order here is render order.
+#
+# ⚑ THE AGE LADDER IS STILL THREE LADDERS, ON PURPOSE — see
+# ASSET_AGE_LADDERS below, which is the register.
+RENOVATION_COST = {
+    "roof": {
+        "item": "Roof Replacement / Repair",
+        "description": "Property is {age} years old — inspect roof condition.",
+        "min_age": 20,
+        "high_priority_age": 30,
+        "per_sf": (1.50, 3.00),
+        "priority": "Medium",
+    },
+    "led_lighting": {
+        "item": "LED Lighting Upgrade",
+        "description": "Convert to LED lighting for energy savings.",
+        "min_age": 15,
+        "per_sf": (0.30, 0.75),
+        "priority": "Medium",
+    },
+    "security": {
+        "item": "Security System Upgrade",
+        "description": "Upgrade cameras, access control, and gate systems.",
+        "min_age": 10,
+        "amount": (15_000, 50_000),
+        "priority": "Medium",
+    },
+    "signage": {
+        "item": "Signage & Curb Appeal",
+        "description": "Evaluate signage visibility and property aesthetics.",
+        "amount": (5_000, 25_000),
+        "priority": "Low",
+    },
+    "website": {
+        "item": "Website & Digital Presence",
+        "description": "Optimize online listings, website, and SEO.",
+        "amount": (2_000, 10_000),
+        "priority": "Medium",
+    },
+}
+
+# ── Risk Triggers (item T Category 2) ───────────────────────────────
+# Thresholds `analysis/risks.py` raises a narrative risk on, which are
+# NOT gates — nothing here passes or fails a deal. Kept out of
+# `_PATCHED_DICTS` on the same line as RENOVATION_COST: this PR made
+# settings-editable exactly the things that move a dollar, and a risk
+# paragraph does not. It reaches `risk_count` and the memo's "why this
+# could fail" list, so it is a fair candidate for a later category.
+RISK_TRIGGERS = {
+    "aging_plant_age": 25,     # years — deferred-maintenance risk
+}
+
+# ── The asset-age register (item T Category 2) ──────────────────────
+#
+# THE POINT OF THIS BLOCK: there are three building-age ladders in this
+# repo, they disagree, and until now they disagreed in three different
+# files. They still disagree. What changed is that the disagreement is
+# now declarable, greppable, and CI-guarded —
+# `tests/test_config_single_source.py::test_no_age_threshold_survives
+# _as_a_bare_literal` walks `analysis/`, `model/` and `output/` and
+# fails on any age compared against a bare numeric literal, so a
+# FOURTH ladder cannot appear quietly.
+#
+#   registry.AGE_BANDS          5 / 15 / 30   the canonical one.
+#                               `analysis/physical.py` reconciled onto it
+#                               (its comment says why), and the exit-cap
+#                               market table keys off it, which is what
+#                               made it load-bearing.
+#   RENOVATION_COST[*].min_age  20 / 15 / 10  roof / LED / security,
+#                               plus 30 for the roof's High priority.
+#   RISK_TRIGGERS               25            aging physical plant.
+#
+# Reconciling them to ONE schedule was measured and DEFERRED on
+# 2026-08-05 (operator's call). Snapping the triggers to band boundaries
+# would newly flag 6-10 year assets for security and LED, newly flag
+# 16-20 year assets for a roof, and — the one that decided it — would
+# STOP 26-30 year assets flagging deferred maintenance. That is
+# re-underwriting, which item T's own scope excludes ("this item moves
+# values into config and labels them; what the values *should* be is a
+# separate, per-value decision"). Do not snap them as a tidy-up.
+ASSET_AGE_LADDERS = (
+    "registry.AGE_BANDS", "RENOVATION_COST", "RISK_TRIGGERS",
+)
+
 # ── Comp Database Parameters ───────────────────────────────────────
 
 COMP_DB_PATH = os.environ.get(

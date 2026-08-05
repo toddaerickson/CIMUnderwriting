@@ -6,8 +6,18 @@ current operations and benchmark performance.
 """
 
 from analysis.financials import resolve_mgmt_fee_target
-from config import EXPENSE_BENCHMARKS, GATES
+from config import GATES, RENOVATION_COST, VALUE_ADD_ASSUMPTIONS
 from registry import asset_age
+
+# Dicts, not scalars, and imported by NAME on purpose: `_patched_config`
+# mutates these objects IN PLACE for the duration of one run, so a
+# module-level binding still sees a ConfigOverride (same reason
+# `analysis/market.py` records at its own import). A scalar pulled out of
+# one of them at import time would NOT — read them by key at call time.
+#
+# `EXPENSE_BENCHMARKS` used to be imported here and never used. It is
+# gone: an unused import of a settings-editable dict reads like this
+# module benchmarks against it, and it does not.
 
 
 def identify_value_add(cim_data, financial_analysis: dict,
@@ -44,14 +54,23 @@ def identify_value_add(cim_data, financial_analysis: dict,
     }
 
 
+def _pct_band(pair) -> str:
+    """(0.08, 0.10) -> '8-10%'. Not `f"{lo:.0%}-{hi:.0%}"`, which reads
+    '8%-10%' — the prose these land in predates the config move and there
+    is no reason to change how it reads just because the numbers now come
+    from somewhere else."""
+    lo, hi = pair
+    return f"{lo * 100:.0f}-{hi * 100:.0f}%"
+
+
 def _revenue_opportunities(cim_data, fin) -> list:
     ops = []
-    nrsf = cim_data.nrsf or 0
+    va = VALUE_ADD_ASSUMPTIONS
 
     # Occupancy upside
     occ = cim_data.physical_occupancy
-    if occ and occ < 0.93:
-        target = 0.93
+    target = va["occupancy_target"]
+    if occ and occ < target:
         occ_delta = target - occ
         rev = fin.get("income_summary", {}).get("total_revenue", 0) or 0
         if rev > 0:
@@ -71,31 +90,37 @@ def _revenue_opportunities(cim_data, fin) -> list:
             and occ - econ >= GATES["econ_phys_spread_flag"]):
         gpr = fin.get("income_summary", {}).get("gpr", 0) or 0
         if gpr > 0:
-            # Assume half the spread is recoverable through concession burn-off,
-            # collections, and repricing below-street in-place rents.
-            recoverable = gpr * (occ - econ) * 0.5
+            # A haircut on the measured spread — the rest is assumed
+            # structural. The sentence quotes the same key it books, so
+            # a settings change cannot leave the prose claiming "half"
+            # while the model credits something else.
+            share = va["spread_recovery_share"]
+            recoverable = gpr * (occ - econ) * share
             ops.append({
                 "category": "Economic Occupancy Recovery",
                 "description": f"Economic occupancy of {econ:.1%} trails physical of "
                                f"{occ:.1%} by {(occ - econ) * 100:.0f} pts. Burn off "
                                f"concessions, tighten collections, and reprice "
-                               f"below-street in-place rents (assumes half the "
-                               f"spread is recoverable).",
+                               f"below-street in-place rents (assumes {share:.0%} of "
+                               f"the spread is recoverable).",
                 "est_annual_impact": recoverable,
                 "timeline": "6-12 months",
                 "risk": "Low-Moderate — controllable operations, not market dependent",
             })
 
     # Rate management / ECRI
-    if occ and occ >= 0.88:
+    if occ and occ >= va["ecri_min_occupancy"]:
+        band = _pct_band(va["ecri_increase_range"])
+        tenure = va["ecri_tenant_tenure_months"]
         ops.append({
             "category": "Revenue Management / ECRI",
-            "description": "Implement systematic existing-customer rate increases (ECRI) "
-                           "targeting 8-10% annual increases for tenants > 6 months. "
-                           "Confirm street rates are flat-to-rising first — ECRI "
-                           "against falling street rates closes the in-place-to-market "
-                           "gap from above.",
-            "est_annual_impact": (fin.get("income_summary", {}).get("egr", 0) or 0) * 0.03,
+            "description": f"Implement systematic existing-customer rate increases (ECRI) "
+                           f"targeting {band} annual increases for tenants > "
+                           f"{tenure} months. Confirm street rates are flat-to-rising "
+                           f"first — ECRI against falling street rates closes the "
+                           f"in-place-to-market gap from above.",
+            "est_annual_impact": (fin.get("income_summary", {}).get("egr", 0) or 0)
+                                 * va["ecri_egr_uplift"],
             "timeline": "Immediate",
             "risk": "Low — industry standard practice",
         })
@@ -103,12 +128,13 @@ def _revenue_opportunities(cim_data, fin) -> list:
     # Other income enhancement
     other_inc = cim_data.other_income or 0
     rev = fin.get("income_summary", {}).get("total_revenue", 0) or 0
-    if rev > 0 and other_inc / rev < 0.05:
+    if rev > 0 and other_inc / rev < va["ancillary_min_share"]:
+        band = _pct_band(va["ancillary_target_share"])
         ops.append({
             "category": "Ancillary Revenue",
-            "description": "Add/expand tenant insurance program, late fees, admin fees, "
-                           "and merchandise sales to target 5-8% of revenue.",
-            "est_annual_impact": rev * 0.03,
+            "description": f"Add/expand tenant insurance program, late fees, admin fees, "
+                           f"and merchandise sales to target {band} of revenue.",
+            "est_annual_impact": rev * va["ancillary_revenue_uplift"],
             "timeline": "3-6 months",
             "risk": "Low",
         })
@@ -166,48 +192,48 @@ def _expense_opportunities(cim_data, fin, mgmt_fee_target_pct=None) -> list:
     return ops
 
 
+def _cost_range(spec: dict, nrsf: float) -> str:
+    """A spec priced `per_sf` needs an NRSF to be worth anything; a spec
+    priced as a flat `amount` does not. "TBD" on a missing NRSF is the
+    pre-existing behaviour and stays — this line is a diligence prompt,
+    not an underwriting input, so fabricating a square footage to fill it
+    would be the fallback item T Category 4 exists to delete."""
+    if "per_sf" in spec:
+        if not nrsf:
+            return "TBD"
+        lo, hi = spec["per_sf"]
+        return f"${nrsf * lo:,.0f} - ${nrsf * hi:,.0f}"
+    lo, hi = spec["amount"]
+    return f"${lo:,.0f} - ${hi:,.0f}"
+
+
 def _capex_opportunities(cim_data) -> list:
+    """Render `config.RENOVATION_COST` in declaration order. Age-gated
+    specs need a vintage AND an age past their trigger; the rest are
+    always listed. This was five hand-written branches whose triggers and
+    costs were literals — the schedule is data now, so adding an item is
+    a config edit and the age ladder is auditable in one place."""
     items = []
-    year_built = cim_data.year_built
+    age = asset_age(cim_data.year_built)      # None iff no vintage
     nrsf = cim_data.nrsf or 0
 
-    if year_built:
-        age = asset_age(year_built)
-        if age > 20:
-            items.append({
-                "item": "Roof Replacement / Repair",
-                "description": f"Property is {age} years old — inspect roof condition.",
-                "est_cost_range": f"${nrsf * 1.50:,.0f} - ${nrsf * 3.00:,.0f}" if nrsf else "TBD",
-                "priority": "High" if age > 30 else "Medium",
-            })
-        if age > 15:
-            items.append({
-                "item": "LED Lighting Upgrade",
-                "description": "Convert to LED lighting for energy savings.",
-                "est_cost_range": f"${nrsf * 0.30:,.0f} - ${nrsf * 0.75:,.0f}" if nrsf else "TBD",
-                "priority": "Medium",
-            })
-        if age > 10:
-            items.append({
-                "item": "Security System Upgrade",
-                "description": "Upgrade cameras, access control, and gate systems.",
-                "est_cost_range": f"${15_000:,.0f} - ${50_000:,.0f}",
-                "priority": "Medium",
-            })
-
-    items.append({
-        "item": "Signage & Curb Appeal",
-        "description": "Evaluate signage visibility and property aesthetics.",
-        "est_cost_range": "$5,000 - $25,000",
-        "priority": "Low",
-    })
-
-    items.append({
-        "item": "Website & Digital Presence",
-        "description": "Optimize online listings, website, and SEO.",
-        "est_cost_range": "$2,000 - $10,000",
-        "priority": "Medium",
-    })
+    for spec in RENOVATION_COST.values():
+        min_age = spec.get("min_age")
+        if min_age is not None:
+            if age is None or age <= min_age:
+                continue
+        priority = spec["priority"]
+        high_at = spec.get("high_priority_age")
+        if high_at is not None and age is not None and age > high_at:
+            priority = "High"
+        items.append({
+            "item": spec["item"],
+            # `.format(age=age)` is a no-op on the specs with no
+            # placeholder, so one call covers the table.
+            "description": spec["description"].format(age=age),
+            "est_cost_range": _cost_range(spec, nrsf),
+            "priority": priority,
+        })
 
     return items
 
