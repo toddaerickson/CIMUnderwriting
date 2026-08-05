@@ -1594,3 +1594,72 @@ def test_the_registry_constants_are_gone():
 
     assert not hasattr(registry, "DEFAULT_EXPENSE_RATIO")
     assert not hasattr(registry, "EXPENSE_RATIO_CLAMP")
+
+
+def test_the_composed_clamp_cannot_reach_a_division_by_zero(caplog):
+    """The defect the derivation INTRODUCED, found by the pre-push audit.
+
+    `_bounds_for` bounds each editable field on its own shape, and both
+    inputs here are shares in (0, 1) — individually legal at every value.
+    Their sum is not: an `opex_revenue_ratio` high of 0.90 and a
+    `clamp_tolerance` of 0.10 compose to a clamp ceiling of exactly 1.0,
+    and `analysis/valuation.py` then evaluates `yr1_noi / (1 - ratio)` on
+    a deal whose expenses reach revenue. That is a ZeroDivisionError and
+    an unhandled 500, reached by two settings edits that each passed
+    validation.
+
+    Unreachable before this PR — the clamp was the constant (0.25, 0.65),
+    which no operator could touch. Making it follow the band is what put
+    a composed value in reach, so the bound belongs with the derivation.
+    """
+    import logging
+
+    from analysis.valuation import project_cash_flows
+    from registry import EXPENSE_RATIO_LIMITS, expense_ratio_clamp
+
+    with mock.patch.dict(cfg.EXPENSE_BENCHMARKS,
+                         {"opex_revenue_ratio": (0.35, 0.90)}), \
+            mock.patch.dict(cfg.EXPENSE_RATIO, {"clamp_tolerance": 0.10}):
+        with caplog.at_level(logging.WARNING, logger="cim_analyst"):
+            low, high = expense_ratio_clamp()
+
+        assert high == EXPENSE_RATIO_LIMITS[1]
+        assert high < 1.0
+        assert "outside the limits" in caplog.text
+
+        # and the projection it protects survives a deal whose stated
+        # expenses exceed its revenue
+        out = project_cash_flows(
+            ttm_noi=300_000, price=4_000_000, capex=0,
+            params=cfg.SCENARIO_DEFAULTS[ScenarioType.BASE],
+            expense_ratio=1.20, exit_cap=0.0625)
+        assert out["revenue"][0] > 0
+
+
+def test_a_band_low_under_the_tolerance_cannot_derive_a_negative_floor():
+    """The same composition from the other side: a band low of 0.05 minus
+    a 0.10 tolerance derives a clamp FLOOR of −0.05, which would let a
+    deal be underwritten on expenses below zero — free money, and no
+    exception to notice it by."""
+    from registry import EXPENSE_RATIO_LIMITS, clamp_expense_ratio, \
+        expense_ratio_clamp
+
+    with mock.patch.dict(cfg.EXPENSE_BENCHMARKS,
+                         {"opex_revenue_ratio": (0.05, 0.55)}):
+        low, _high = expense_ratio_clamp()
+
+        assert low == EXPENSE_RATIO_LIMITS[0] == 0.0
+        assert clamp_expense_ratio(-0.30) == 0.0
+
+
+def test_the_limits_are_not_reached_on_the_shipped_defaults():
+    """The bound must be a backstop, not a live constraint — if it bound
+    today it would be silently re-underwriting every deal, and the
+    warning above would fire on every run."""
+    from registry import EXPENSE_RATIO_LIMITS, expense_ratio_clamp
+
+    floor, ceiling = EXPENSE_RATIO_LIMITS
+    low, high = expense_ratio_clamp()
+
+    assert (low, high) == (0.25, 0.65)
+    assert floor < low and high < ceiling

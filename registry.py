@@ -6,8 +6,11 @@ that were previously scattered across 8+ files.
 """
 
 import datetime
+import logging
 from dataclasses import dataclass
 from enum import Enum
+
+logger = logging.getLogger("cim_analyst")
 
 
 # ── Scenario Names ─────────────────────────────────────────────────
@@ -67,6 +70,29 @@ EXPENSE_KEYWORD_MAP = {c.key: list(c.parse_keywords) for c in EXPENSE_CATEGORIES
 
 # ── Expense Ratio Defaults ─────────────────────────────────────────
 
+#: Hard limits on the DERIVED clamp, which is the one thing the
+#: settings page cannot bound for itself.
+#:
+#: `_bounds_for` bounds each editable field on its own shape, and both
+#: inputs to the clamp are shares in (0, 1) — individually legal at every
+#: value. Their SUM is not: `opex_revenue_ratio` high of 0.90 plus a
+#: `clamp_tolerance` of 0.10 is a clamp ceiling of exactly 1.0, and
+#: `analysis/valuation.py` then computes `yr1_noi / (1 - ratio)` on a
+#: deal whose expenses reach revenue — a ZeroDivisionError, a 500, and
+#: two settings edits that each passed validation to get there.
+#:
+#: This is a defect the derivation INTRODUCED. The clamp used to be the
+#: constant `(0.25, 0.65)`, which no operator could reach at all; making
+#: it follow the band is what put a composed value in reach.
+#:
+#: 0.95 rather than something closer to 1: at a 95% expense ratio the
+#: implied revenue is twenty times NOI, which is already far past any
+#: credible deal, so nothing real is being clipped. The floor at 0.0 is
+#: the same argument from the other side — a band low under the tolerance
+#: derives a NEGATIVE clamp floor, which would let a deal be underwritten
+#: on expenses below zero.
+EXPENSE_RATIO_LIMITS = (0.0, 0.95)
+
 
 def expense_ratio_clamp() -> tuple[float, float]:
     """The (low, high) a stated OpEx/Revenue ratio is believed within.
@@ -92,7 +118,25 @@ def expense_ratio_clamp() -> tuple[float, float]:
     # value it is supposed to be makes `clamp(0.10) == 0.25` false. Ten
     # decimals is finer than any input can be — the settings form rounds
     # a stored override to six — and coarser than float noise.
-    return (round(low - tolerance, 10), round(high + tolerance, 10))
+    derived = (round(low - tolerance, 10), round(high + tolerance, 10))
+
+    # The composed value is bounded here because nothing upstream can
+    # bound it — see EXPENSE_RATIO_LIMITS. Logged rather than raised: a
+    # stored override must not take a run down, and the settings page
+    # cannot cross-validate two rows an operator edits months apart. The
+    # repo already settles this the same way for the density tiers — the
+    # guard is that the OUTPUT stays coherent, not that the inputs are
+    # policed.
+    floor, ceiling = EXPENSE_RATIO_LIMITS
+    bounded = (max(floor, derived[0]), min(ceiling, derived[1]))
+    if bounded != derived:
+        logger.warning(
+            "the OpEx/revenue clamp derived from the benchmark band and "
+            "EXPENSE_RATIO['clamp_tolerance'] is %s, outside the limits "
+            "%s that keep `1 - ratio` a positive number — using %s. "
+            "Narrow the opex_revenue_ratio band or the tolerance.",
+            derived, EXPENSE_RATIO_LIMITS, bounded)
+    return bounded
 
 
 def clamp_expense_ratio(ratio: float | None) -> float:
