@@ -1143,6 +1143,12 @@ def override_key_registry() -> dict:
                 "group": f"Market Cap Rates (as of {cfg.MARKET_CAP_AS_OF})",
                 "kind": "scalar", "pct": True, "int": False,
                 "label": f"{asset_class} — {_label(band)}"}
+    # Population counts, so int and not pct — same treatment
+    # `GATES.population_3mi` already gets via GATES_INT_KEYS.
+    for k in cfg.POPULATION_TIERS:
+        reg[f"POPULATION_TIERS.{k}"] = {
+            "group": "Trade-Area Density Tiers (3-mile population)",
+            "kind": "scalar", "pct": False, "int": True, "label": _label(k)}
     for k in cfg.VALUE_ADD_TRIGGERS:
         reg[f"VALUE_ADD_TRIGGERS.{k}"] = {
             "group": "Value-Add Triggers", "kind": "scalar",

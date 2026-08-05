@@ -7,7 +7,7 @@ CIM data and analysis outputs.
 
 from typing import Optional
 
-from config import GATES
+from config import GATES, POPULATION_TIERS
 from registry import ScenarioType, asset_age
 
 
@@ -125,7 +125,14 @@ def _market_risks(cim_data) -> list:
     risks = []
 
     pop = cim_data.population_3mi
-    if pop and pop < 75_000:
+    # The SAME `max(...)` guard `market._assess_demand` applies, and it has
+    # to be here too: `preferred_density` is one threshold with two faces,
+    # so guarding only the market face is the drift the shared key exists
+    # to prevent. A tier lowered below the gate would otherwise let a deal
+    # fail the population gate outright while this risk — which carries its
+    # own mitigation text — never fires. No-op on the defaults.
+    if pop and pop < max(POPULATION_TIERS["preferred_density"],
+                         GATES["population_3mi"]):
         risks.append({
             "category": "Market",
             "risk": "Limited trade area population",
