@@ -191,9 +191,10 @@ _SUMMARY_NOTE_COL = 6              # F
 _SUMMARY_STRENGTH_ROWS = range(6, 11)
 _SUMMARY_WEAKNESS_ROWS = range(12, 17)
 
-# Benchmark bands are (low, high) tuples.
+# Benchmark bands are (low, high) tuples. `_BAND_HIGH` went with the
+# management-fee cell when it started reading `resolve_mgmt_fee_target`
+# instead of the band's top end.
 _BAND_LOW = 0
-_BAND_HIGH = 1
 
 
 def generate_template(
