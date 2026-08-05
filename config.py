@@ -578,8 +578,19 @@ SOLVER_MAX_ITERATIONS = 50
 # **2% wins, and it was MEASURED, not reasoned.** The value-add engine
 # grows NOI well above TTM, so a lease-up deal's max price legitimately
 # implies an entry cap below 3% on the TTM figure — which is what
-# "value-add" means. On the `value_add` characterization fixture with its
-# adjusted TTM NOI at 30% of stabilized:
+# "value-add" means.
+#
+# The case, stated precisely enough to re-run — a review could not
+# reproduce an earlier, vaguer version of this paragraph and reasonably
+# concluded it was false. Take the `value_add` characterization fixture,
+# run `analyze_financials`, and set
+# `financial_analysis["adjusted_ttm_noi"]["analyst_adjusted_noi"]` to 30%
+# of what it returns ($346,140 -> $103,842). That dict is the lever:
+# `solve_max_price_value_add` reads it BEFORE `cim.ttm_noi`, and
+# `analyze_financials` derives it from the T12 expense lines, so scaling
+# the CIM's own NOI or its occupancy moves nothing. Pinned by
+# `test_the_measurement_that_chose_the_two_percent_bracket`, so this is
+# a fact CI checks rather than a paragraph asking to be believed:
 #
 #   3% bracket -> max_price $3,461,400, converged=False, achieved 13.48%
 #   2% bracket -> max_price $4,261,173, converged=True,  achieved 10.01%

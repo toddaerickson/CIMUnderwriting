@@ -1866,3 +1866,55 @@ def test_no_off_form_input_can_reach_a_division_by_zero():
                 expense_ratio=None, exit_cap=0.0625)
             assert math.isfinite(out["revenue"][0]) and out["revenue"][0] > 0, \
                 f"band={band!r} tolerance={tolerance!r}"
+
+
+def test_the_measurement_that_chose_the_two_percent_bracket():
+    """The one argument for moving published max-offer numbers, pinned.
+
+    `config.SOLVER_BOUNDS` justifies the wider bracket with a measured
+    case, and a code review could not reproduce it from the comment: the
+    reviewer scaled the CIM's `ttm_noi`, which does NOT move the figure
+    the solver brackets on. `solve_max_price_value_add` reads
+    `financial_analysis["adjusted_ttm_noi"]["analyst_adjusted_noi"]`
+    first, and `analyze_financials` derives that from the T12 expense
+    lines, not from occupancy or from `cim.ttm_noi`. So the lever is the
+    ANALYSIS dict, not the CIM.
+
+    A load-bearing number that a careful reader cannot reproduce reads as
+    a false claim — which is exactly what happened. Pinning it here makes
+    it a fact CI checks rather than prose asking to be trusted.
+    """
+    from analysis.financials import analyze_financials
+    from model.solver import solve_max_price_value_add
+    from tests.test_characterization import value_add_deal
+
+    cim = value_add_deal()
+    fin = analyze_financials(cim)
+    stabilized = fin["adjusted_ttm_noi"]["analyst_adjusted_noi"]
+
+    def solve_at(dear_entry_cap):
+        lean = dict(fin)
+        lean["adjusted_ttm_noi"] = dict(fin["adjusted_ttm_noi"])
+        lean["adjusted_ttm_noi"]["analyst_adjusted_noi"] = stabilized * 0.30
+        with mock.patch.dict(cfg.SOLVER_BOUNDS,
+                             {"dear_entry_cap": dear_entry_cap}):
+            return solve_max_price_value_add(cim, lean, capex=0)
+
+    narrow = solve_at(0.03)          # what static and levered used to use
+    wide = solve_at(0.02)            # what the value-add solver used
+
+    # The narrow bracket returns its own CEILING, to the dollar, and
+    # calls a deal clearing 13.5% a 10% max offer.
+    assert narrow["converged"] is False
+    assert narrow["max_price"] == pytest.approx(stabilized * 0.30 / 0.03)
+    assert narrow["achieved_irr"] == pytest.approx(0.1348, abs=1e-4)
+
+    # The wide bracket finds the real root.
+    assert wide["converged"] is True
+    assert wide["achieved_irr"] == pytest.approx(wide["target_irr"],
+                                                 abs=cfg.SOLVER_TOLERANCE)
+    assert wide["max_price"] == pytest.approx(4_261_173, abs=1.0)
+
+    # and the size of the error the narrow bracket would have shipped
+    assert wide["max_price"] - narrow["max_price"] == pytest.approx(799_773,
+                                                                    abs=1.0)
