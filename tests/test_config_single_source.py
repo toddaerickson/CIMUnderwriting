@@ -1614,9 +1614,11 @@ def test_the_composed_clamp_cannot_reach_a_division_by_zero(caplog):
     """
     import logging
 
+    import registry
     from analysis.valuation import project_cash_flows
     from registry import EXPENSE_RATIO_LIMITS, expense_ratio_clamp
 
+    registry._WARNED.clear()          # the warning is once-per-process
     with mock.patch.dict(cfg.EXPENSE_BENCHMARKS,
                          {"opex_revenue_ratio": (0.35, 0.90)}), \
             mock.patch.dict(cfg.EXPENSE_RATIO, {"clamp_tolerance": 0.10}):
@@ -1663,3 +1665,88 @@ def test_the_limits_are_not_reached_on_the_shipped_defaults():
 
     assert (low, high) == (0.25, 0.65)
     assert floor < low and high < ceiling
+
+
+@pytest.mark.parametrize("band,tolerance", [((1.00, 1.00), 0.0),
+                                            ((0.97, 0.99), 0.0),
+                                            ((0.99, 1.00), 0.05)])
+def test_the_bounded_clamp_can_never_come_back_inverted(band, tolerance):
+    """The hole the FIRST version of the bound left, found by the second
+    audit pass — and it is the same shape as the bug it was fixing.
+
+    Bounding only the high end leaves the low end free to climb past the
+    ceiling: a band of (1.0, 1.0) with a zero tolerance derived
+    (1.0, 1.0) and bounded it to (1.0, 0.95). `max(lo, min(hi, r))` on an
+    inverted pair returns `lo` for EVERY input — the clamp stops reading
+    its argument and hands back 1.0, which is the exact
+    ZeroDivisionError the limits exist to prevent, now reached THROUGH
+    the guard.
+
+    The first fix's own test could not see this: it used a band of
+    (0.35, 0.90), where only the high end needed clamping. Coincidence,
+    not coverage — the third time that pattern has bitten in this item.
+    """
+    from analysis.valuation import project_cash_flows
+    from registry import EXPENSE_RATIO_LIMITS, clamp_expense_ratio, \
+        expense_ratio_clamp
+
+    floor, ceiling = EXPENSE_RATIO_LIMITS
+    with mock.patch.dict(cfg.EXPENSE_BENCHMARKS,
+                         {"opex_revenue_ratio": band}), \
+            mock.patch.dict(cfg.EXPENSE_RATIO,
+                            {"clamp_tolerance": tolerance}):
+        low, high = expense_ratio_clamp()
+
+        assert low <= high, "inverted clamp — max(lo, min(hi, r)) is now lo"
+        assert floor <= low and high <= ceiling
+
+        # the clamp still READS its argument rather than returning a
+        # constant, which is what an inverted pair silently does
+        assert clamp_expense_ratio(0.40) <= ceiling
+        assert clamp_expense_ratio(0.99) <= ceiling
+
+        # and the projection the whole guard protects survives
+        out = project_cash_flows(
+            ttm_noi=300_000, price=4_000_000, capex=0,
+            params=cfg.SCENARIO_DEFAULTS[ScenarioType.BASE],
+            expense_ratio=None, exit_cap=0.0625)
+        assert out["revenue"][0] > 0
+
+
+def test_the_limit_warning_is_reported_once_not_once_per_projection(caplog):
+    """`expense_ratio_clamp` runs inside `project_cash_flows`, which the
+    three solvers call up to 50 times each and the sensitivity grid 81
+    more — so an unthrottled warning is ~200 identical lines for one
+    deal, which buries the one line anybody needed to read."""
+    import logging
+
+    import registry
+    from analysis.valuation import project_cash_flows
+
+    registry._WARNED.clear()
+    with mock.patch.dict(cfg.EXPENSE_BENCHMARKS,
+                         {"opex_revenue_ratio": (0.35, 0.90)}):
+        with caplog.at_level(logging.WARNING, logger="cim_analyst"):
+            for _ in range(25):
+                project_cash_flows(
+                    ttm_noi=300_000, price=4_000_000, capex=0,
+                    params=cfg.SCENARIO_DEFAULTS[ScenarioType.BASE],
+                    expense_ratio=None, exit_cap=0.0625)
+
+    hits = [r for r in caplog.records if "outside the limits" in r.getMessage()]
+    assert len(hits) == 1, f"{len(hits)} lines for one misconfiguration"
+
+
+def test_a_different_misconfiguration_still_speaks_up():
+    """The throttle keys on the MESSAGE, not on a fired-once flag, so a
+    second, different bad combination is not swallowed by the first."""
+    import registry
+    from registry import expense_ratio_clamp
+
+    registry._WARNED.clear()
+    for band in ((0.35, 0.90), (0.35, 1.00)):
+        with mock.patch.dict(cfg.EXPENSE_BENCHMARKS,
+                             {"opex_revenue_ratio": band}):
+            expense_ratio_clamp()
+
+    assert len(registry._WARNED) == 2

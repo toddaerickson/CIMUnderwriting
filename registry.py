@@ -93,6 +93,28 @@ EXPENSE_KEYWORD_MAP = {c.key: list(c.parse_keywords) for c in EXPENSE_CATEGORIES
 #: on expenses below zero.
 EXPENSE_RATIO_LIMITS = (0.0, 0.95)
 
+#: Messages already emitted, so a misconfiguration is reported once
+#: rather than once per evaluation.
+#:
+#: `expense_ratio_clamp` is called from `clamp_expense_ratio`, which
+#: `project_cash_flows` calls on EVERY projection — up to 50 bisection
+#: iterations in each of three solvers, plus 81 sensitivity cells, plus
+#: three scenarios. An unthrottled warning is ~200 identical lines for
+#: one deal, which buries the one line anybody needed to read.
+#:
+#: Keyed on the message, so a DIFFERENT misconfiguration still speaks up
+#: and a corrected-then-broken-again setting speaks up again. Process
+#: lifetime is the right scope: the condition describes config, not a
+#: deal, so repeating it per deal adds nothing. A race between threads
+#: costs a duplicate line, which is the harmless direction.
+_WARNED = set()
+
+
+def _warn_once(message: str) -> None:
+    if message not in _WARNED:
+        _WARNED.add(message)
+        logger.warning("%s", message)
+
 
 def expense_ratio_clamp() -> tuple[float, float]:
     """The (low, high) a stated OpEx/Revenue ratio is believed within.
@@ -127,15 +149,28 @@ def expense_ratio_clamp() -> tuple[float, float]:
     # repo already settles this the same way for the density tiers — the
     # guard is that the OUTPUT stays coherent, not that the inputs are
     # policed.
+    #
+    # BOTH ends go through the same clamp, and that is the whole
+    # correctness argument. Bounding only the high end — which is what
+    # the first version of this did — leaves the low end free to climb
+    # past the ceiling: a band of (1.0, 1.0) with a zero tolerance
+    # derived (1.0, 1.0) and bounded it to (1.0, 0.95), an INVERTED pair.
+    # `max(lo, min(hi, r))` then returns `lo` for every input, so the
+    # clamp stopped reading its own argument and handed back 1.0 — the
+    # exact ZeroDivisionError the limits exist to prevent, now reached
+    # THROUGH the guard. Clamping both ends with one monotone function
+    # cannot invert them: `derived` is always ordered (the band enforces
+    # low <= high and the same tolerance widens each side), and a
+    # monotone map preserves that order.
     floor, ceiling = EXPENSE_RATIO_LIMITS
-    bounded = (max(floor, derived[0]), min(ceiling, derived[1]))
+    bounded = tuple(min(max(v, floor), ceiling) for v in derived)
     if bounded != derived:
-        logger.warning(
+        _warn_once(
             "the OpEx/revenue clamp derived from the benchmark band and "
-            "EXPENSE_RATIO['clamp_tolerance'] is %s, outside the limits "
-            "%s that keep `1 - ratio` a positive number — using %s. "
-            "Narrow the opex_revenue_ratio band or the tolerance.",
-            derived, EXPENSE_RATIO_LIMITS, bounded)
+            f"EXPENSE_RATIO['clamp_tolerance'] is {derived}, outside the "
+            f"limits {EXPENSE_RATIO_LIMITS} that keep `1 - ratio` a "
+            f"positive number — using {bounded}. Narrow the "
+            "opex_revenue_ratio band or the tolerance.")
     return bounded
 
 
