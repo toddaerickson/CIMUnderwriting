@@ -396,6 +396,36 @@ def _build_summary_table(scenarios: dict) -> list[dict]:
     return rows
 
 
+def _axis_offsets(span: float, step: float, axis: str) -> list[float]:
+    """−span … +span in `step` increments, inclusive of both ends.
+
+    Built outward from the CENTRE (`i * step` for i in −n…n) rather than
+    upward from −span. Two reasons, and the second one is not obvious:
+    accumulating from the low end leaves the centre as a residue like
+    −1.4e-17, which is a NEGATIVE zero — and `f"{-0.0:+.1%}"` renders
+    "-0.0%" where the column has always been labelled "+0.0%". Centre-out
+    makes the middle offset exactly `0 * step`, and every other offset a
+    single multiplication rather than an accumulation.
+
+    A span that is not a whole multiple of its step RAISES. The
+    alternative is dropping the far end of the axis, which shows up as a
+    table one column narrower than the one beside it — read as a layout
+    quirk, not as a lost 100bps of downside. `config.SENSITIVITY_GRID` is
+    not settings-editable, so the only way here is editing config.py, and
+    `test_the_grid_axes_divide_evenly` fails in CI the moment one does.
+    """
+    if step <= 0 or span < 0:
+        raise ValueError(
+            f"sensitivity {axis} axis: span={span} step={step} — the step "
+            "must be positive and the span non-negative.")
+    n = round(span / step)
+    if abs(n * step - span) > 1e-12:
+        raise ValueError(
+            f"sensitivity {axis} axis: span={span} is not a whole multiple "
+            f"of step={step}, so the axis would stop short of its own span.")
+    return [round(i * step, 10) for i in range(-n, n + 1)]
+
+
 def _build_sensitivity(ttm_noi: float, base_price: float,
                        capex: float, nrsf: float,
                        expense_ratio: float = None,
@@ -430,18 +460,24 @@ def _build_sensitivity(ttm_noi: float, base_price: float,
     defaults = custom_scenarios or SCENARIO_DEFAULTS
     base_params = defaults.get(ScenarioType.BASE) or SCENARIO_DEFAULTS[ScenarioType.BASE]
 
-    # Price steps: -10% to +10% in 2.5% increments
-    price_steps = [-0.10, -0.075, -0.05, -0.025, 0.0, 0.025, 0.05, 0.075, 0.10]
+    # Both axes come from `config.SENSITIVITY_GRID`, which states the span
+    # and the step; the nine offsets each used to be written out as a
+    # literal list beside them.
+    axes = cfg.SENSITIVITY_GRID
+
+    price_steps = _axis_offsets(axes["price_span"], axes["price_step"],
+                                "price")
     prices = [base_price * (1 + s) for s in price_steps]
     price_labels = [f"{s:+.1%}" for s in price_steps]
 
-    # Exit cap steps: -100bps to +100bps in 25bps increments, centred on the
-    # DERIVED base cap (market cap for this class and age band, plus the base
-    # spread and drift) so the centre cell still equals the headline base IRR.
+    # The exit-cap axis is centred on the DERIVED base cap (market cap for
+    # this class and age band, plus the base spread and drift) so the
+    # centre cell still equals the headline base IRR.
     mc = market_cap or resolve_market_cap()
     base_exit_cap = resolve_exit_cap(mc["market_cap"], ScenarioType.BASE,
                                      hold_years)["exit_cap"]
-    cap_offsets = [-0.0100, -0.0075, -0.0050, -0.0025, 0.0, 0.0025, 0.0050, 0.0075, 0.0100]
+    cap_offsets = _axis_offsets(axes["exit_cap_span"], axes["exit_cap_step"],
+                                "exit cap")
     exit_caps = [base_exit_cap + o for o in cap_offsets]
     cap_labels = [f"{c:.2%}" for c in exit_caps]
 

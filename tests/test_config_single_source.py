@@ -31,6 +31,7 @@ from analysis.market import analyze_market
 from analysis.risks import identify_risks
 from analysis.value_add import identify_value_add
 from engine import AnalysisResult, run_analysis
+from registry import ScenarioType
 from tests.test_characterization import stabilized_deal
 
 
@@ -1202,3 +1203,377 @@ def test_the_aging_plant_risk_reads_its_trigger_from_config(mock_cim_data,
     risk = _risk(_risks_for(mock_cim_data), "Aging physical plant")
     assert risk is not None
     assert "20 years old" in risk["description"]
+
+
+# ── Item T Category 3: the model layer's own hard-codes ──────────────
+#
+# Three moves, and the characterization net can only see one of them.
+# `SENSITIVITY_GRID` and `EXPENSE_RATIO` are pure literal→config moves,
+# so byte-for-byte green over there is exactly what a dead wire looks
+# like (Category 1's lesson). `SOLVER_BOUNDS` is the opposite problem:
+# it MOVED the snapshots deliberately, and a moved snapshot proves the
+# wire is live but nothing about whether it is right. Both halves get
+# asserted here.
+
+
+# ── SOLVER_BOUNDS — one bracket, three solvers ───────────────────────
+
+def test_the_bracket_is_read_at_call_time_not_frozen_at_import(monkeypatch):
+    """The whole point of a config key. `model.solver` imports four other
+    config names by value at the top of the file; the bracket must not
+    join them.
+
+    The REBIND at the end is the half that discriminates. `setitem` on the
+    live dict is visible even to a module that did `from config import
+    SOLVER_BOUNDS`, because both names point at the same object — so a
+    setitem-only test passes on a frozen import and proves nothing.
+    Replacing the attribute is the mutation a frozen binding cannot see.
+    """
+    from model.solver import solver_price_bracket
+
+    assert solver_price_bracket(300_000) == (1_500_000.0, 15_000_000.0)
+
+    monkeypatch.setitem(cfg.SOLVER_BOUNDS, "dear_entry_cap", 0.03)
+    assert solver_price_bracket(300_000) == (1_500_000.0, 10_000_000.0)
+
+    monkeypatch.setitem(cfg.SOLVER_BOUNDS, "cheap_entry_cap", 0.25)
+    assert solver_price_bracket(300_000) == (1_200_000.0, 10_000_000.0)
+
+    monkeypatch.setattr(cfg, "SOLVER_BOUNDS",
+                        {"cheap_entry_cap": 0.10, "dear_entry_cap": 0.05,
+                         "zero_noi_low_price": 1, "zero_noi_high_price": 2})
+    assert solver_price_bracket(300_000) == (3_000_000.0, 6_000_000.0)
+
+
+def test_a_non_positive_noi_falls_back_to_the_dollar_window(monkeypatch):
+    """An implied cap rate on zero or negative NOI is meaningless — the
+    division would return 0 or flip the bracket's ends. All three solvers
+    carried the same pair of raw dollar bounds for it."""
+    from model.solver import solver_price_bracket
+
+    for noi in (0, None, -50_000):
+        assert solver_price_bracket(noi) == (100_000.0, 50_000_000.0)
+
+    monkeypatch.setitem(cfg.SOLVER_BOUNDS, "zero_noi_high_price", 9_000_000)
+    assert solver_price_bracket(0) == (100_000.0, 9_000_000.0)
+
+
+def test_all_three_solvers_bisect_the_same_bracket():
+    """The defect this key closes was a DISAGREEMENT, not an absence: the
+    static and levered solvers stopped at a 3% implied entry cap and the
+    value-add solver went to 2%, with nothing recording that they
+    differed. An AST walk is the only check that stays true — a test that
+    calls the three solvers and compares answers cannot tell a shared
+    bracket from two brackets that happen to bracket the same root.
+    """
+    import ast
+    from pathlib import Path
+
+    source = (Path(__file__).resolve().parent.parent
+              / "model" / "solver.py").read_text()
+    tree = ast.parse(source)
+
+    users = set()
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.FunctionDef):
+            continue
+        if not node.name.startswith("solve_max_price"):
+            continue
+        calls = {n.func.id for n in ast.walk(node)
+                 if isinstance(n, ast.Call) and isinstance(n.func, ast.Name)}
+        assert "solver_price_bracket" in calls, (
+            f"{node.name} does not call solver_price_bracket — it has a "
+            "bracket of its own again")
+        users.add(node.name)
+
+    assert users == {"solve_max_price", "solve_max_price_value_add",
+                     "solve_max_price_levered"}
+
+
+def test_a_truncated_answer_is_reported_not_returned_silently(caplog):
+    """The measurement that chose 2% over 3%, asserted as behaviour.
+
+    Bisection cannot find a root outside its bracket: every iteration
+    pushes `low` up and the loop ends holding `high`, which is a price, in
+    the shape of an answer, at an IRR nowhere near the target. Nothing on
+    any surface reads `converged`, so before this the only signal was a
+    number that happened to be round.
+
+    Driven by squeezing the bracket rather than by contriving a deal —
+    same arithmetic, and it does not depend on any fixture continuing to
+    be extreme enough.
+    """
+    import logging
+
+    from model.solver import solve_max_price
+
+    with mock.patch.dict(cfg.SOLVER_BOUNDS, {"dear_entry_cap": 0.19}):
+        with caplog.at_level(logging.WARNING, logger="cim_analyst"):
+            out = solve_max_price(adjusted_ttm_noi=300_000, capex=0,
+                                  expense_ratio=0.40)
+
+    assert out["converged"] is False
+    # The answer IS the ceiling, to the dollar — 300,000 / 0.19.
+    assert out["max_price"] == pytest.approx(300_000 / 0.19)
+    assert "the answer is the search ceiling" in caplog.text
+    assert "SOLVER_BOUNDS" in caplog.text
+
+
+def test_a_converged_answer_says_nothing(caplog):
+    """The other half, and the one that makes the warning worth having: a
+    warning that fires on every deal is noise nobody reads. The default
+    bracket converges on the default fixture."""
+    import logging
+
+    from model.solver import solve_max_price
+
+    with caplog.at_level(logging.WARNING, logger="cim_analyst"):
+        out = solve_max_price(adjusted_ttm_noi=300_000, capex=0,
+                              expense_ratio=0.40)
+
+    assert out["converged"] is True
+    assert "the answer is the search" not in caplog.text
+
+
+def test_the_bracket_moves_a_real_max_offer(tmp_path, monkeypatch):
+    """End to end, through the pipeline rather than the solver, because
+    what a squeezed bracket does to a REPORTED max offer is the thing
+    worth pinning. `run_analysis` reaches the static solver; a bracket
+    frozen anywhere along that path leaves this unchanged."""
+    import data.comp_db as comp_db_module
+    monkeypatch.setattr(comp_db_module, "COMP_DB_PATH",
+                        str(tmp_path / "comps.db"))
+
+    def _max_offer(out_name):
+        out = tmp_path / out_name
+        out.mkdir()
+        r = AnalysisResult(pdf_path="b.pdf", cim_data=stabilized_deal())
+        run_analysis(r, output_dir=str(out))
+        return r.max_offer
+
+    base = _max_offer("base")
+    assert base["converged"] is True
+
+    monkeypatch.setitem(cfg.SOLVER_BOUNDS, "dear_entry_cap", 0.08)
+    squeezed = _max_offer("squeezed")
+
+    assert squeezed["max_price"] < base["max_price"]
+    assert squeezed["converged"] is False
+
+
+# ── SENSITIVITY_GRID — the axes, not the nine offsets ────────────────
+
+def test_the_grid_reproduces_the_literal_lists_it_replaced():
+    """The exact nine-and-nine `_build_sensitivity` carried inline. Not
+    approx: these multiply a price and add to a cap rate, and the labels
+    are formatted from them, so a value one float-ulp off changes a
+    rendered column header."""
+    from model.returns_model import _axis_offsets
+
+    assert _axis_offsets(0.10, 0.025, "price") == [
+        -0.10, -0.075, -0.05, -0.025, 0.0, 0.025, 0.05, 0.075, 0.10]
+    assert _axis_offsets(0.0100, 0.0025, "exit cap") == [
+        -0.0100, -0.0075, -0.0050, -0.0025, 0.0, 0.0025, 0.0050, 0.0075,
+        0.0100]
+
+
+def test_the_centre_offset_is_a_positive_zero():
+    """Accumulating from −span leaves the centre as a residue like
+    −1.4e-17, which is NEGATIVE zero — and `f"{-0.0:+.1%}"` renders
+    "-0.0%" where the column has always read "+0.0%". Building outward
+    from the centre makes it exactly `0 * step`. The label is asserted,
+    not the sign, because the label is what a reader sees."""
+    from model.returns_model import _axis_offsets
+
+    centre = _axis_offsets(0.10, 0.025, "price")[4]
+    assert f"{centre:+.1%}" == "+0.0%"
+
+
+def test_the_grid_axes_come_from_config(monkeypatch):
+    """Both axes, both dimensions: a wider span adds cells, a coarser
+    step removes them, and the labels follow."""
+    from model.returns_model import build_returns_model
+
+    def _grid():
+        return build_returns_model(adjusted_ttm_noi=300_000,
+                                   asking_price=4_000_000, nrsf=50_000,
+                                   capex=0)["sensitivity"]
+
+    base = _grid()
+    assert len(base["price_labels"]) == 9 and len(base["cap_labels"]) == 9
+    assert base["price_labels"][0] == "-10.0%"
+
+    monkeypatch.setitem(cfg.SENSITIVITY_GRID, "price_span", 0.20)
+    monkeypatch.setitem(cfg.SENSITIVITY_GRID, "exit_cap_step", 0.0050)
+    moved = _grid()
+
+    assert len(moved["price_labels"]) == 17
+    assert moved["price_labels"][0] == "-20.0%"
+    assert len(moved["cap_labels"]) == 5
+    assert len(moved["irr_grid"]) == 17 and len(moved["irr_grid"][0]) == 5
+    # The centre cell is still the base case, whatever the axes do.
+    assert moved["irr_grid"][8][2] == pytest.approx(base["irr_grid"][4][4])
+
+
+def test_the_grid_axes_divide_evenly():
+    """config.py's own values, checked live — the same discipline
+    `test_every_default_sits_inside_its_own_bounds` applies to bounds. A
+    span that is not a whole multiple of its step silently stops the axis
+    short, which reads as a layout quirk rather than as lost downside."""
+    from model.returns_model import _axis_offsets
+
+    grid = cfg.SENSITIVITY_GRID
+    for span, step, axis in (("price_span", "price_step", "price"),
+                             ("exit_cap_span", "exit_cap_step", "exit cap")):
+        offsets = _axis_offsets(grid[span], grid[step], axis)
+        assert offsets[0] == pytest.approx(-grid[span])
+        assert offsets[-1] == pytest.approx(grid[span])
+
+
+@pytest.mark.parametrize("span,step", [(0.10, 0.03), (0.10, 0.0), (0.10, -0.01)])
+def test_a_bad_axis_raises_instead_of_truncating(span, step):
+    from model.returns_model import _axis_offsets
+
+    with pytest.raises(ValueError):
+        _axis_offsets(span, step, "price")
+
+
+# ── EXPENSE_RATIO — the default, the clamp, and their relation ───────
+
+def test_the_expense_ratio_default_sits_inside_the_benchmark_band():
+    """The relation the scope asked to be stated once. A band edited past
+    the default would leave `clamp_expense_ratio(None)` returning a ratio
+    the benchmarks themselves call implausible."""
+    low, high = cfg.EXPENSE_BENCHMARKS["opex_revenue_ratio"]
+
+    assert low <= cfg.EXPENSE_RATIO["default"] <= high
+    # And deliberately NOT the midpoint — same argument as the management
+    # fee target. A derived `(low + high) / 2` looks like a tidy-up and
+    # silently re-underwrites every deal whose financials yield no ratio.
+    assert cfg.EXPENSE_RATIO["default"] != (low + high) / 2
+
+
+def test_the_clamp_is_the_band_widened_not_a_second_pair(monkeypatch):
+    """It was `EXPENSE_RATIO_CLAMP = (0.25, 0.65)` in registry.py, beside
+    a band of (0.35, 0.55) it had no stated relation to. Editing the band
+    now moves the clamp with it; before, an operator who widened the band
+    kept the old clamp and had ratios clipped that they had just declared
+    credible."""
+    from registry import clamp_expense_ratio, expense_ratio_clamp
+
+    assert expense_ratio_clamp() == (0.25, 0.65)
+
+    monkeypatch.setitem(cfg.EXPENSE_BENCHMARKS, "opex_revenue_ratio",
+                        (0.30, 0.70))
+    assert expense_ratio_clamp() == (0.20, 0.80)
+    assert clamp_expense_ratio(0.75) == 0.75          # was clipped to 0.65
+
+    monkeypatch.setitem(cfg.EXPENSE_RATIO, "clamp_tolerance", 0.0)
+    assert expense_ratio_clamp() == (0.30, 0.70)
+    assert clamp_expense_ratio(0.75) == 0.70
+
+
+def test_the_default_and_the_clamp_are_two_different_readings(monkeypatch):
+    """The coincident-values trap: today `clamp_expense_ratio(None)`
+    returns 0.40 because the default happens to sit inside the clamp, so
+    a test asserting 0.40 passes whichever of the two the code reads.
+
+    Moving the band until the clamp EXCLUDES the default separates them —
+    the default is applied first and then clamped, so the answer is the
+    clamp floor, not the default.
+    """
+    from registry import clamp_expense_ratio
+
+    assert clamp_expense_ratio(None) == 0.40
+
+    monkeypatch.setitem(cfg.EXPENSE_RATIO, "default", 0.30)
+    assert clamp_expense_ratio(None) == 0.30
+
+    monkeypatch.setitem(cfg.EXPENSE_BENCHMARKS, "opex_revenue_ratio",
+                        (0.55, 0.60))
+    assert clamp_expense_ratio(None) == 0.45         # clamp floor wins
+    assert clamp_expense_ratio(0.30) == 0.45         # and it is not the default
+
+
+def test_the_expense_ratio_default_reaches_the_projection(monkeypatch):
+    """`project_cash_flows` is the ONE projection, so this single call
+    site carries the assumed expense load into every scenario, every
+    sensitivity cell and every solver iteration. `expense_ratio=None` is
+    the path a deal takes when the financials yield no ratio at all.
+
+    What the ratio actually does is worth stating, because the obvious
+    assertion is wrong: Year 1 NOI is `ttm_noi × (1 + bump)` and does not
+    depend on it at all. The ratio SPLITS that NOI into revenue and
+    expenses so the two can grow at different rates — so it shows up from
+    Year 2 onward, and a heavier assumed load means a bigger expense base
+    compounding at `exp_growth`, which drags the terminal NOI and the IRR
+    with it. Asserting `noi[0]` would have passed on a dead wire.
+    """
+    from analysis.valuation import project_cash_flows
+
+    def _run():
+        return project_cash_flows(ttm_noi=300_000, price=4_000_000, capex=0,
+                                  params=cfg.SCENARIO_DEFAULTS[
+                                      ScenarioType.BASE],
+                                  expense_ratio=None,
+                                  exit_cap=0.0625)
+
+    base = _run()
+    assert base["revenue"][0] == pytest.approx(315_000 / (1 - 0.40))
+
+    monkeypatch.setitem(cfg.EXPENSE_RATIO, "default", 0.50)
+    heavier = _run()
+
+    assert heavier["revenue"][0] == pytest.approx(315_000 / (1 - 0.50))
+    assert heavier["noi"][0] == base["noi"][0]        # Year 1 is unaffected
+    assert heavier["noi"][-1] < base["noi"][-1]
+    assert heavier["irr"] < base["irr"]
+
+
+@pytest.mark.django_db
+def test_a_stored_row_reaches_the_expense_ratio(monkeypatch):
+    """The Category 3 twin of the market and value-add tests above: a real
+    row in the database moving a real IRR. Pins that `EXPENSE_RATIO` is
+    BOTH a `_PATCHED_DICTS` entry and an `override_key_registry` key —
+    one without the other is silent in the way item T exists to kill."""
+    from django.utils import timezone
+
+    from analysis.valuation import project_cash_flows
+    from webapp.models import ConfigOverride
+    from webapp.services import (_patched_config, build_config_patch,
+                                 resolve_config_overrides)
+
+    def _irr():
+        return project_cash_flows(ttm_noi=300_000, price=4_000_000, capex=0,
+                                  params=cfg.SCENARIO_DEFAULTS[
+                                      ScenarioType.BASE],
+                                  expense_ratio=None,
+                                  exit_cap=0.0625)["irr"]
+
+    before = _irr()
+
+    ConfigOverride.objects.create(key="EXPENSE_RATIO.default", value=0.50,
+                                  effective_date=timezone.localdate())
+    deltas = resolve_config_overrides("", timezone.localdate())
+    patch, _solver, skipped = build_config_patch(deltas)
+    assert skipped == [], "the key is not reachable from the settings page"
+
+    with _patched_config(patch):
+        after = _irr()
+    assert after < before
+
+    # reverted on exit — a leaked mutation reprices every later deal in
+    # the same worker process
+    assert cfg.EXPENSE_RATIO["default"] == 0.40
+
+
+def test_the_registry_constants_are_gone():
+    """`registry.DEFAULT_EXPENSE_RATIO` and `EXPENSE_RATIO_CLAMP` were
+    module scalars: a module binding one by value at import can never see
+    a settings patch, so leaving them behind as aliases would leave a
+    second, frozen source of the same numbers — the exact shape item T
+    is removing."""
+    import registry
+
+    assert not hasattr(registry, "DEFAULT_EXPENSE_RATIO")
+    assert not hasattr(registry, "EXPENSE_RATIO_CLAMP")

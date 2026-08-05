@@ -111,6 +111,75 @@ def resolve_target_irr(target_irr=None) -> float:
         return cfg.SOLVER_TARGET_IRR
     return float(target_irr)
 
+def solver_price_bracket(ttm_noi: float) -> tuple[float, float]:
+    """THE price bracket every solver in this module bisects between.
+
+    All three searched the same axis and each carried its own copy of the
+    bracket, and two of the copies disagreed: static and levered stopped
+    at a 3% implied entry cap, value-add went to 2%. `config.SOLVER_BOUNDS`
+    now states it once, at the wider 2% — the argument for which end wins,
+    and the measurement behind it, are recorded there.
+
+    Read through `cfg.` at call time, never bound at import: a bracket
+    frozen at first import of this module is exactly the defect
+    `resolve_target_irr` above exists to undo.
+
+    Returns dollars. Below a positive TTM NOI an implied cap rate means
+    nothing, so the fallback is a raw dollar window rather than a
+    division that would return zero or flip the bracket's ends.
+    """
+    bounds = cfg.SOLVER_BOUNDS
+    if ttm_noi and ttm_noi > 0:
+        return (ttm_noi / bounds["cheap_entry_cap"],
+                ttm_noi / bounds["dear_entry_cap"])
+    return (float(bounds["zero_noi_low_price"]),
+            float(bounds["zero_noi_high_price"]))
+
+
+def _warn_if_truncated(solver: str, price, converged: bool, achieved,
+                       low: float, high: float, target: float) -> None:
+    """Say so when the answer is the BRACKET rather than the deal.
+
+    Bisection cannot report a root outside the window it was given: if the
+    price that hits the target sits above `high`, every iteration pushes
+    `low` up and the loop ends holding `high` — a number, in exactly the
+    shape of an answer, at an IRR nowhere near the target.
+
+    Measured on the `value_add` fixture at 30% of stabilized adjusted NOI
+    (see `config.SOLVER_BOUNDS`): a 3% dear cap returned its own ceiling
+    to the dollar, at 13.48% against a 10% target, $799,773 light.
+    Widening to 2% fixed that case and only that case — a fixed bracket
+    still binds somewhere, so the condition is reported rather than
+    assumed away.
+
+    Reporting, not fixing: the real fix is a bracketing sweep, and it
+    belongs to all three solvers at once. `converged` has always been in
+    the returned dict and no surface reads it, which is why silence here
+    was indistinguishable from an answer.
+
+    `low` and `high` must be the OPENING bracket. The loops narrow their
+    own copies to a hair's width, so the converged pair sits against the
+    ceiling on every run and would make this fire on all of them.
+    """
+    if converged or price is None or achieved is None:
+        return
+    span = high - low
+    at_edge = span > 0 and (abs(price - high) <= span * 1e-9
+                            or abs(price - low) <= span * 1e-9)
+    if not at_edge:
+        return
+    edge = "ceiling" if abs(price - high) < abs(price - low) else "floor"
+    # Pre-formatted: %-style logging has no thousands separator, and an
+    # unpunctuated eight-digit price in a warning is unreadable.
+    logger.warning(
+        "%s: the answer is the search %s, not the deal — $%s achieves %s "
+        "against a %s target, so the price that hits the target lies "
+        "outside the bracket $%s-$%s. Treat this max offer as a bound: "
+        "widen config.SOLVER_BOUNDS, or read it as 'at least this'.",
+        solver, edge, f"{price:,.0f}", f"{achieved:.4%}", f"{target:.4%}",
+        f"{low:,.0f}", f"{high:,.0f}")
+
+
 #: An IRR rise this small across a price step is float noise on a
 #: converged bracket, not the coerced-region inversion. The real pocket
 #: moves the exit value by ~16% of price, which is orders of magnitude
@@ -185,11 +254,12 @@ def solve_max_price(adjusted_ttm_noi: float,
         return (price * capex_pct_of_price if capex_pct_of_price
                 else (capex or 0.0))
 
-    # Bounds
-    # Low: very cheap → high IRR
-    low = adjusted_ttm_noi / 0.20 if adjusted_ttm_noi > 0 else 100_000  # 20% cap
-    # High: very expensive → low/negative IRR
-    high = adjusted_ttm_noi / 0.03 if adjusted_ttm_noi > 0 else 50_000_000  # ~3% cap
+    # Low: very cheap → high IRR. High: very expensive → low/negative IRR.
+    # The loop MUTATES low and high as it narrows, so the opening bracket
+    # is kept separately — `_warn_if_truncated` asks whether the answer is
+    # the ORIGINAL ceiling, and the narrowed pair always sits against it.
+    bracket = solver_price_bracket(adjusted_ttm_noi)
+    low, high = bracket
 
     best_price = None
     best_irr = None
@@ -229,6 +299,9 @@ def solve_max_price(adjusted_ttm_noi: float,
 
         best_price = mid
         best_irr = irr
+
+    _warn_if_truncated("unlevered max-offer solver", best_price, converged,
+                       best_irr, *bracket, target_irr)
 
     implied_cap = adjusted_ttm_noi / best_price if best_price and best_price > 0 else None
     acquisition_cost = (best_price * costs["acquisition_closing_pct"]
@@ -284,8 +357,8 @@ def solve_max_price_value_add(cim_data, financial_analysis: dict,
     adj_noi = financial_analysis.get("adjusted_ttm_noi", {}).get("analyst_adjusted_noi")
     ttm_noi = adj_noi or cim_data.ttm_noi or 100_000
 
-    low = ttm_noi / 0.20 if ttm_noi > 0 else 100_000
-    high = ttm_noi / 0.02 if ttm_noi > 0 else 50_000_000
+    bracket = solver_price_bracket(ttm_noi)      # kept — the loop mutates
+    low, high = bracket
 
     best_price = None
     best_irr = None
@@ -319,6 +392,9 @@ def solve_max_price_value_add(cim_data, financial_analysis: dict,
 
         best_price = mid
         best_irr = irr
+
+    _warn_if_truncated("value-add max-offer solver", best_price, converged,
+                       best_irr, *bracket, target_irr)
 
     implied_cap = ttm_noi / best_price if best_price and best_price > 0 else None
     va_acquisition_cost = (best_price * costs["acquisition_closing_pct"]
@@ -502,11 +578,11 @@ def solve_max_price_levered(adjusted_ttm_noi: float,
         return {"projection": projection, "debt": debt,
                 "sources_uses": sources_uses, "levered": levered}
 
-    # Same bracket as the unlevered solver: a 20% cap is cheap enough
-    # that any structure clears the target, a 3% cap dear enough that
-    # none does.
-    low = adjusted_ttm_noi / 0.20 if adjusted_ttm_noi > 0 else 100_000
-    high = adjusted_ttm_noi / 0.03 if adjusted_ttm_noi > 0 else 50_000_000
+    # The same bracket as both unlevered solvers, and now literally the
+    # same code: a 20% cap is cheap enough that any structure clears the
+    # target, `dear_entry_cap` dear enough that none does.
+    bracket = solver_price_bracket(adjusted_ttm_noi)   # kept — loop mutates
+    low, high = bracket
 
     best_price = best_irr = best_stack = None
     samples = []
@@ -547,15 +623,20 @@ def solve_max_price_levered(adjusted_ttm_noi: float,
     warning = _monotonicity_warning(samples)
     if warning:
         logger.warning("levered max-offer solver: %s", warning)
+    _warn_if_truncated("levered max-offer solver", best_price, converged,
+                       best_irr, *bracket, target_lp_irr)
 
     if best_price is None:
         # Every candidate failed to produce an LP IRR. Report it rather
         # than returning a price of None dressed as an answer — the
         # results page and the memo both branch on `max_price`.
+        # The OPENING bracket, not `low`/`high` — those have been narrowed
+        # to a hair's width by the loop, so the old message named a range
+        # the search had long since left.
         logger.warning(
             "levered max-offer solver found no price with a convergent LP "
             "net IRR between $%.0f and $%.0f — reporting no answer rather "
-            "than a bound.", low, high)
+            "than a bound.", *bracket)
         # EVERY key the success branch returns, or none of them. A branch
         # that omits keys makes `levered_max_offer` a different shape
         # depending on whether it found an answer, so a consumer reading

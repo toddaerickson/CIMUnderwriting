@@ -186,7 +186,18 @@ def json_safe(obj):
 # `estimated_noi_uplift` — so it moves no number, and a nested dict of
 # mixed shapes (int ages, $/SF pairs, flat-dollar pairs) would need
 # registry and bounds machinery to buy nothing.
-_PATCHED_DICTS = ("GATES", "EXPENSE_BENCHMARKS", "REPLACEMENT_COST",
+# `SOLVER_BOUNDS` and `SENSITIVITY_GRID` (item T Category 3) are also
+# absent, for two different reasons. The bracket is the bisection's search
+# window — a numeric-method detail that must never change what a deal is
+# worth, only whether the solver can find it — and sits in the same lane
+# as `SOLVER_TOLERANCE` and `SOLVER_MAX_ITERATIONS`. The grid axes are
+# presentation, like `RENOVATION_COST`; its coloring thresholds are the
+# editable part and they live in `GATES` / `IRR_STRONG_THRESHOLD`.
+# `EXPENSE_RATIO` IS here: it is the OpEx load every projection runs on
+# when the financials yield none, which is a per-market underwriting
+# assumption of exactly the shape `EXPENSE_BENCHMARKS` already carries.
+_PATCHED_DICTS = ("GATES", "EXPENSE_BENCHMARKS", "EXPENSE_RATIO",
+                  "REPLACEMENT_COST",
                   "SCENARIO_DEFAULTS", "VALUE_ADD_SCENARIOS",
                   "VALUE_ADD_TRIGGERS", "VALUE_ADD_ASSUMPTIONS",
                   "TRANSACTION_COSTS", "MARKET_CAP_RATES",

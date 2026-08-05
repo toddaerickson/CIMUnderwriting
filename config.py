@@ -68,6 +68,37 @@ EXPENSE_BENCHMARKS = {
     "opex_revenue_ratio": (0.35, 0.55),
 }
 
+# ── The OpEx/Revenue ratio the PROJECTION runs on ───────────────────
+# `registry.clamp_expense_ratio` is the ONE resolver, and these were its
+# two shadow defaults — `DEFAULT_EXPENSE_RATIO = 0.40` and
+# `EXPENSE_RATIO_CLAMP = (0.25, 0.65)` living in registry.py, where the
+# settings page could not see them and no operator could reach them.
+# They drive `analysis.valuation.project_cash_flows`, so they move every
+# published IRR; a modeling input of that weight does not belong in a
+# constants module (item T Category 3).
+#
+# **The clamp is DERIVED from `opex_revenue_ratio` above, not restated.**
+# (0.35, 0.55) widened by 0.10 is exactly the (0.25, 0.65) registry.py
+# held — the same pair, now with its relation to the band written down
+# instead of inferred. That relation is the point: the band is
+# settings-editable, and a hard-coded clamp beside an edited band would
+# clip ratios the operator had just declared credible. Widen-by-tolerance
+# also says what the clamp is FOR — the band is the range a stabilized
+# asset is UNDERWRITTEN to, the clamp is the range a stated ratio is
+# BELIEVED in, and the second is deliberately looser than the first.
+#
+# `default` is NOT derived and must not become so. It is the ratio used
+# when the financials yield none at all, and 0.40 sits low in the band —
+# below the 0.45 midpoint — because an unknown expense load underwritten
+# at the middle of the band is an assumption dressed as an average. What
+# it *should* be is a per-value decision item T's scope excludes; this
+# move only gives it a home. `test_the_expense_ratio_default_sits_inside
+# _the_benchmark_band` is the CI guard that a band edit cannot orphan it.
+EXPENSE_RATIO = {
+    "default": 0.40,
+    "clamp_tolerance": 0.10,   # clamp = opex_revenue_ratio band ± this
+}
+
 # The ONE management-fee target, as % of EGR — the pro-forma fee the model
 # underwrites TO. `mgmt_fee_pct` above is the benchmark BAND, the range a
 # STATED fee is judged against; this is the single value used when the CIM
@@ -529,6 +560,86 @@ CENSUS_API_KEY = os.environ.get("CENSUS_API_KEY", "")
 SOLVER_TARGET_IRR = 0.10
 SOLVER_TOLERANCE = 0.001
 SOLVER_MAX_ITERATIONS = 50
+
+# ── The bisection bracket, for all three solvers ────────────────────
+# Every solver in `model/solver.py` searches the same axis — purchase
+# price — and each one carried its own bracket. Two of them disagreed:
+# the static and levered solvers stopped at a 3% implied entry cap, the
+# value-add solver went to 2%. Nothing recorded that, and the difference
+# is not cosmetic: bisection answers only within the bracket it is
+# given, so a root above `high` comes back as a price at the ceiling
+# with `converged=False` — a number, in the same shape as an answer.
+#
+# The bracket is expressed as IMPLIED ENTRY CAPS on the analyst-adjusted
+# TTM NOI, which is how it was written in all three places: `low` is the
+# price at a 20% cap (so cheap that any structure clears any target),
+# `high` the price at `dear_entry_cap` (so dear that none does).
+#
+# **2% wins, and it was MEASURED, not reasoned.** The value-add engine
+# grows NOI well above TTM, so a lease-up deal's max price legitimately
+# implies an entry cap below 3% on the TTM figure — which is what
+# "value-add" means. On the `value_add` characterization fixture with its
+# adjusted TTM NOI at 30% of stabilized:
+#
+#   3% bracket -> max_price $3,461,400, converged=False, achieved 13.48%
+#   2% bracket -> max_price $4,261,173, converged=True,  achieved 10.01%
+#
+# The 3% run returns its own ceiling — the price is the bracket, to the
+# dollar — and calls a deal that clears 13.5% a 10% max offer, $799,773
+# (18.8%) light. Nothing on any surface reads `converged`, so it arrives
+# looking exactly like an answer. That is the failure mode this key
+# exists to avoid, and it is why the wider bound is not a preference.
+#
+# The cost of the wider bracket is bounded and small, also measured:
+# across all three fixtures it moved the static and levered max offers by
+# ≤ 0.8%, every case still converging inside `SOLVER_TOLERANCE` of its
+# target. Bisection halves 50 times, so the extra span is spent in the
+# first iteration or two.
+#
+# **A fixed bracket can still bind, and 2% only moves the wall.** Below
+# roughly $70k of adjusted NOI the same fixture truncates at 2% as well.
+# The genuine fix is a bracketing sweep — expand `high` until the
+# objective actually crosses the target — which belongs to all three
+# solvers and is not this item. Until then `model.solver` LOGS a
+# truncated answer rather than returning it silently.
+#
+# NOT settings-editable, and not a `_PATCHED_DICTS` entry, for the same
+# reason `SOLVER_TOLERANCE` and `SOLVER_MAX_ITERATIONS` beside it are
+# not: this is the numeric method's search window, not an underwriting
+# assumption. Nothing here should ever change what a deal is worth —
+# only whether the solver can find it.
+SOLVER_BOUNDS = {
+    "cheap_entry_cap": 0.20,
+    "dear_entry_cap": 0.02,
+    # Used only when TTM NOI is missing or non-positive, where an
+    # implied cap rate has no meaning. A raw dollar window, deliberately
+    # enormous, because there is nothing to scale it against.
+    "zero_noi_low_price": 100_000,
+    "zero_noi_high_price": 50_000_000,
+}
+
+# ── Sensitivity grid axes ───────────────────────────────────────────
+# `model.returns_model._build_sensitivity` held these as two literal
+# lists of nine offsets each. The span and the step are the two numbers
+# actually being chosen; the lists were their expansion, and an expansion
+# is where a typo hides (one offset off by 25bps changes a column label
+# and the IRR under it, and reads as a rounding artifact).
+#
+# Offsets run from −span to +span in `step` increments, so `span` must
+# divide evenly by `step` — `_axis_offsets` raises if it does not, rather
+# than silently dropping the end of an axis.
+#
+# PRESENTATION ONLY, like `RENOVATION_COST`: the grid displays IRRs the
+# projection already computes and nothing screens on it, so it is not
+# settings-editable and not a `_PATCHED_DICTS` entry. Its COLORING
+# thresholds are a different matter and live with the gates —
+# `GATES["min_irr_5yr"]` and `IRR_STRONG_THRESHOLD`, both editable.
+SENSITIVITY_GRID = {
+    "price_span": 0.10,        # ± this share of the asking price
+    "price_step": 0.025,
+    "exit_cap_span": 0.0100,   # ± this much cap rate, in decimal
+    "exit_cap_step": 0.0025,
+}
 
 # The LEVERED solver's target (item E4): the maximum price at which the
 # fund still clears its LP net IRR, after debt service, the AM fee and

@@ -67,18 +67,52 @@ EXPENSE_KEYWORD_MAP = {c.key: list(c.parse_keywords) for c in EXPENSE_CATEGORIES
 
 # ── Expense Ratio Defaults ─────────────────────────────────────────
 
-DEFAULT_EXPENSE_RATIO = 0.40
-EXPENSE_RATIO_CLAMP = (0.25, 0.65)
+
+def expense_ratio_clamp() -> tuple[float, float]:
+    """The (low, high) a stated OpEx/Revenue ratio is believed within.
+
+    DERIVED from `EXPENSE_BENCHMARKS["opex_revenue_ratio"]` widened by
+    `EXPENSE_RATIO["clamp_tolerance"]`, rather than restated — see the
+    argument beside `config.EXPENSE_RATIO`. It used to be the module
+    constant `EXPENSE_RATIO_CLAMP = (0.25, 0.65)`, which is what the
+    band ± 0.10 evaluates to today.
+
+    Config is imported INSIDE the function on purpose: `config.py`
+    imports `ScenarioType` from this module, so a module-level import
+    here is a cycle. It also happens to be what makes the value live —
+    `EXPENSE_BENCHMARKS` is a `_PATCHED_DICTS` entry mutated in place for
+    the duration of one run, and only a call-time read can see the patch.
+    """
+    import config as cfg
+
+    low, high = cfg.EXPENSE_BENCHMARKS["opex_revenue_ratio"]
+    tolerance = cfg.EXPENSE_RATIO["clamp_tolerance"]
+    # Rounded because the subtraction is not exact in binary: 0.35 − 0.10
+    # is 0.24999999999999997, and a clamp floor a quintillionth below the
+    # value it is supposed to be makes `clamp(0.10) == 0.25` false. Ten
+    # decimals is finer than any input can be — the settings form rounds
+    # a stored override to six — and coarser than float noise.
+    return (round(low - tolerance, 10), round(high + tolerance, 10))
 
 
 def clamp_expense_ratio(ratio: float | None) -> float:
     """Apply default and clamp to the expense ratio.
 
-    Used in valuation.py, returns_model.py, and solver.py to avoid
-    duplicating the same 2-line pattern.
+    `None` means the financials produced no ratio at all, not zero — a
+    property with no expenses is not what a missing figure describes. It
+    resolves to `EXPENSE_RATIO["default"]` and is then clamped like any
+    other value: the clamp is the range the model believes, and a default
+    outside it would be a number the model does not believe in.
+
+    Called from `analysis.valuation.project_cash_flows`, which is the ONE
+    projection — so this is the single point where the assumed expense
+    load enters every scenario, every sensitivity cell and every solver
+    iteration.
     """
-    r = ratio if ratio is not None else DEFAULT_EXPENSE_RATIO
-    lo, hi = EXPENSE_RATIO_CLAMP
+    import config as cfg
+
+    r = ratio if ratio is not None else cfg.EXPENSE_RATIO["default"]
+    lo, hi = expense_ratio_clamp()
     return max(lo, min(hi, r))
 
 
