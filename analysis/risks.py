@@ -130,7 +130,7 @@ def _market_risks(cim_data) -> list:
             "category": "Market",
             "risk": "Limited trade area population",
             "description": f"3-mile population of {pop:,} is below preferred density.",
-            "severity": "Medium" if pop >= 50_000 else "High",
+            "severity": "Medium" if pop >= GATES["population_3mi"] else "High",
             "mitigation": "Verify limited competition and strong market share.",
         })
 
@@ -185,12 +185,13 @@ def _financial_risks(cim_data, fin) -> list:
     yr1 = cim_data.cim_yr1_noi
     if ttm and yr1 and ttm > 0:
         step_up = (yr1 - ttm) / ttm
-        if step_up > 0.15:
+        if step_up > GATES["max_noi_step_up"]:
             risks.append({
                 "category": "Financial",
                 "risk": "Aggressive CIM pro forma",
                 "description": f"CIM Year 1 NOI is {step_up:.1%} above TTM — "
-                               f"exceeds 15% step-up threshold.",
+                               f"exceeds {GATES['max_noi_step_up']:.0%} step-up "
+                               f"threshold.",
                 "severity": "High",
                 "mitigation": "Use analyst-adjusted NOI (anchored to TTM) for underwriting. "
                               "Verify specific drivers of projected growth.",

@@ -205,7 +205,8 @@ def _add_section_1(doc, cim_data, gate_results, scenario_results, max_offer,
         doc.add_paragraph()
         mp = max_offer.get("max_price")
         doc.add_paragraph(
-            f"Maximum Offer Price (for {max_offer.get('target_irr', 0.10):.0%} "
+            f"Maximum Offer Price (for "
+            f"{max_offer.get('target_irr', cfg.SOLVER_TARGET_IRR):.0%} "
             f"Base Case IRR): {_fmt_currency(mp)}"
         ).bold = True
 
@@ -543,7 +544,9 @@ def _add_section_6(doc, scenario_results, max_offer, sources_uses=None,
         doc.add_heading("Maximum Offer Price", level=2)
     if max_offer:
         doc.add_paragraph(
-            f"At a target {max_offer.get('target_irr', 0.10):.0%} base case unlevered IRR, "
+            f"At a target "
+            f"{max_offer.get('target_irr', cfg.SOLVER_TARGET_IRR):.0%} "
+            f"base case unlevered IRR, "
             f"the maximum offer price is {_fmt_currency(max_offer.get('max_price'))} "
             f"(implied entry cap: {_fmt_pct(max_offer.get('implied_entry_cap'))})."
         )
@@ -832,7 +835,9 @@ def _add_section_7(doc, value_add, va_results=None, va_max_offer=None):
         if va_max_offer and va_max_offer.get("max_price"):
             doc.add_paragraph()
             doc.add_paragraph(
-                f"Value-Add Maximum Offer Price (for 10% IRR): "
+                f"Value-Add Maximum Offer Price (for "
+                f"{va_max_offer.get('target_irr', cfg.SOLVER_TARGET_IRR):.0%} "
+                f"IRR): "
                 f"{_fmt_currency(va_max_offer['max_price'])} "
                 f"(implied entry cap: {_fmt_pct(va_max_offer.get('implied_entry_cap'))})"
             ).bold = True
@@ -912,12 +917,14 @@ def _add_section_10(doc, gate_results, scenario_results, max_offer, risk_analysi
     elif tbd:
         rec = "PURSUE CONTINGENT ON"
         rationale = "Screening gates passed but the following require verification:"
-    elif base_irr and base_irr >= 0.10:
+    elif base_irr and base_irr >= cfg.GATES["min_irr_5yr"]:
         rec = "PURSUE"
-        rationale = "All screening gates passed and base case returns meet the 10% IRR target."
+        rationale = (f"All screening gates passed and base case returns meet "
+                     f"the {cfg.GATES['min_irr_5yr']:.0%} IRR target.")
     else:
         rec = "PURSUE CONTINGENT ON"
-        rationale = "Screening gates passed but base case IRR is below 10% target."
+        rationale = (f"Screening gates passed but base case IRR is below "
+                     f"{cfg.GATES['min_irr_5yr']:.0%} target.")
 
     p = doc.add_paragraph()
     run = p.add_run(f"RECOMMENDATION: {rec}")

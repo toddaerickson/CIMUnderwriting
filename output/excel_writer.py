@@ -456,9 +456,9 @@ def _build_sensitivity_tab(ws, sensitivity: dict):
                     cell.value = irr
                     cell.number_format = PCT_FORMAT
                     # Color code
-                    if irr >= 0.12:
+                    if irr >= cfg.IRR_STRONG_THRESHOLD:
                         cell.fill = green_fill
-                    elif irr >= 0.10:
+                    elif irr >= cfg.GATES["min_irr_5yr"]:
                         cell.fill = yellow_fill
                     else:
                         cell.fill = red_fill
@@ -470,13 +470,19 @@ def _build_sensitivity_tab(ws, sensitivity: dict):
     row += 2
     ws.cell(row=row, column=1, value="Legend:").font = BOLD_FONT
     row += 1
-    c = ws.cell(row=row, column=1, value="  ≥ 12% IRR")
+    strong = cfg.IRR_STRONG_THRESHOLD
+    gate = cfg.GATES["min_irr_5yr"]
+    c = ws.cell(row=row, column=1, value=f"  ≥ {strong:.0%} IRR")
     c.fill = green_fill
     row += 1
-    c = ws.cell(row=row, column=1, value="  10-12% IRR")
+    # The band label carries ONE "%" across both bounds, so the low bound
+    # is formatted bare — `{gate:.0%}` here would read "10%-12% IRR" and
+    # break the characterization snapshot on a pure literal→config move.
+    c = ws.cell(row=row, column=1,
+                value=f"  {gate * 100:.0f}-{strong:.0%} IRR")
     c.fill = yellow_fill
     row += 1
-    c = ws.cell(row=row, column=1, value="  < 10% IRR")
+    c = ws.cell(row=row, column=1, value=f"  < {gate:.0%} IRR")
     c.fill = red_fill
 
 
@@ -781,7 +787,9 @@ def _build_value_add_tab(ws, va_results: dict, va_max_offer: dict, cim_data):
     if va_max_offer and va_max_offer.get("max_price"):
         row = _write_section_header(ws, row, "Value-Add Max Offer Price", cols=2)
         va_items = [
-            ("Max Price (10% VA IRR)", va_max_offer.get("max_price"), CURRENCY_FULL),
+            (f"Max Price "
+             f"({va_max_offer.get('target_irr', cfg.SOLVER_TARGET_IRR):.0%} "
+             f"VA IRR)", va_max_offer.get("max_price"), CURRENCY_FULL),
             ("Implied Entry Cap", va_max_offer.get("implied_entry_cap"), PCT_FORMAT),
             ("Achieved IRR", va_max_offer.get("achieved_irr"), PCT_FORMAT),
         ]

@@ -5,6 +5,10 @@ Evaluates demographics, MSA strength, and supply/demand indicators
 from CIM-extracted data.
 """
 
+# GATES is mutated in place by the per-run override patch, so a
+# module-level binding still sees a ConfigOverride (webapp.services).
+from config import GATES
+
 
 def analyze_market(cim_data) -> dict:
     """
@@ -59,7 +63,7 @@ def _assess_demographics(cim_data) -> dict:
         "population_3mi": pop_3,
         "population_5mi": pop_5,
         "median_hhi_3mi": hhi,
-        "pop_3mi_adequate": pop_3 >= 50_000 if pop_3 else None,
+        "pop_3mi_adequate": pop_3 >= GATES["population_3mi"] if pop_3 else None,
         "hhi_adequate": hhi >= 50_000 if hhi else None,
         "pop_narrative": _pop_narrative(pop_3),
         "hhi_narrative": _hhi_narrative(hhi),
@@ -71,9 +75,10 @@ def _pop_narrative(pop_3mi) -> str:
         return "3-mile population not available — requires manual verification."
     if pop_3mi >= 100_000:
         return f"Dense trade area with {pop_3mi:,} people within 3 miles — strong demand driver."
-    if pop_3mi >= 50_000:
+    if pop_3mi >= GATES["population_3mi"]:
         return f"Adequate density with {pop_3mi:,} people within 3 miles — meets minimum threshold."
-    return f"Thin trade area with only {pop_3mi:,} people within 3 miles — below 50,000 minimum."
+    return (f"Thin trade area with only {pop_3mi:,} people within 3 miles — "
+            f"below {GATES['population_3mi']:,} minimum.")
 
 
 def _hhi_narrative(hhi) -> str:
@@ -127,7 +132,7 @@ def _assess_demand(cim_data) -> dict:
     pop = cim_data.population_3mi
     if pop and pop >= 75_000:
         positives.append(f"Dense trade area ({pop:,} within 3 mi).")
-    elif pop and pop < 50_000:
+    elif pop and pop < GATES["population_3mi"]:
         negatives.append(f"Thin trade area ({pop:,} within 3 mi).")
 
     hhi = cim_data.median_hhi_3mi

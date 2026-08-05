@@ -28,6 +28,13 @@ GATES = {
     "max_sf_per_capita": 10,
 }
 
+# Sensitivity-grid green band. PRESENTATION ONLY — nothing screens on it.
+# The grid's other boundary is `GATES["min_irr_5yr"]`, so a cell reads
+# green above this, yellow down to the gate, red below it. Kept an
+# independent value rather than gate + 200bps: the spread between "clears
+# the gate" and "genuinely strong" is a judgment, not an arithmetic fact.
+IRR_STRONG_THRESHOLD = 0.12
+
 # ── Expense Benchmarks ($/NRSF/yr, stabilized non-climate-controlled) ─
 
 EXPENSE_BENCHMARKS = {
@@ -43,6 +50,17 @@ EXPENSE_BENCHMARKS = {
     "total_opex":        (3.00, 5.50),
     "opex_revenue_ratio": (0.35, 0.55),
 }
+
+# The ONE management-fee target, as % of EGR. `mgmt_fee_pct` above is the
+# benchmark BAND — the range a stated fee is judged against. This is the
+# single value the model adjusts TO when the CIM states a fee below the
+# band or states none at all, and the value `analysis/value_add.py`
+# renegotiates an above-market fee down to. It sat as four separate 0.05
+# literals across financials.py and value_add.py until item T Category 1.
+# Note it is NOT the band midpoint (0.045): whether the target should be
+# the band floor instead is item T Category 5's decision, deliberately
+# not taken here — this move preserves behavior exactly.
+MGMT_FEE_TARGET_PCT = 0.05
 
 # ── Replacement Cost Benchmarks ─────────────────────────────────────
 # Per-SF hard costs by facility type (2025/2026 construction costs).

@@ -9,6 +9,12 @@ return calculations.
 The program never trusts CIM expenses at face value.
 """
 
+import config as cfg
+# Scalars are read through `cfg.` at call time, never bound by value at
+# import — a `from config import MGMT_FEE_TARGET_PCT` would freeze it and
+# make the module deaf to monkeypatching (the defect item T Category 3
+# still owes `model/solver.py`). Dicts below are patched in place, so a
+# direct binding is safe for those.
 from config import (EXPENSE_BENCHMARKS, STATE_PROPERTY_TAX_MULTIPLIER,
                     STATE_PROPERTY_TAX_FORMULAS, get_regional_benchmarks)
 from registry import EXPENSE_CATEGORIES, EXPENSE_KEYWORD_MAP, EXPENSE_KEYS
@@ -224,18 +230,21 @@ def _analyze_expenses(cim_data, nrsf: float, egr: float, state: str = "",
     mgmt_value = egr * mgmt_pct if (egr and mgmt_pct) else None
     mgmt_adjusted = mgmt_value
 
+    mgmt_target = cfg.MGMT_FEE_TARGET_PCT
+
     if mgmt_pct is not None:
         if mgmt_pct < mgmt_low:
-            mgmt_adjusted = egr * 0.05 if egr else None  # Adjust to 5%
+            mgmt_adjusted = egr * mgmt_target if egr else None
             adjustments.append(
                 f"Management Fee: CIM {mgmt_pct:.1%} below minimum {mgmt_low:.0%}. "
-                f"Adjusted to 5% of EGR."
+                f"Adjusted to {mgmt_target:.0%} of EGR."
             )
         elif mgmt_pct > mgmt_high:
             pass  # Keep CIM value
     elif egr:
-        mgmt_adjusted = egr * 0.05
-        adjustments.append("Management Fee: Not found in CIM. Assumed 5% of EGR.")
+        mgmt_adjusted = egr * mgmt_target
+        adjustments.append(f"Management Fee: Not found in CIM. "
+                           f"Assumed {mgmt_target:.0%} of EGR.")
 
     if mgmt_value:
         total_cim_expenses += mgmt_value
@@ -249,7 +258,8 @@ def _analyze_expenses(cim_data, nrsf: float, egr: float, state: str = "",
         "cim_pct": mgmt_pct,
         "benchmark_range_pct": (mgmt_low, mgmt_high),
         "adjusted_value": mgmt_adjusted,
-        "adjusted_pct": 0.05 if (mgmt_pct and mgmt_pct < mgmt_low) else mgmt_pct,
+        "adjusted_pct": (mgmt_target if (mgmt_pct and mgmt_pct < mgmt_low)
+                         else mgmt_pct),
         "flag": "BELOW RANGE" if (mgmt_pct and mgmt_pct < mgmt_low) else
                 "ABOVE RANGE" if (mgmt_pct and mgmt_pct > mgmt_high) else
                 "IN RANGE" if mgmt_pct else "NOT FOUND",
