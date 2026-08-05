@@ -68,16 +68,24 @@ EXPENSE_BENCHMARKS = {
     "opex_revenue_ratio": (0.35, 0.55),
 }
 
-# The ONE management-fee target, as % of EGR. `mgmt_fee_pct` above is the
-# benchmark BAND — the range a stated fee is judged against. This is the
-# single value the model adjusts TO when the CIM states a fee below the
-# band or states none at all, and the value `analysis/value_add.py`
-# renegotiates an above-market fee down to. It sat as four separate 0.05
-# literals across financials.py and value_add.py until item T Category 1.
-# Note it is NOT the band midpoint (0.045): whether the target should be
-# the band floor instead is item T Category 5's decision, deliberately
-# not taken here — this move preserves behavior exactly.
-MGMT_FEE_TARGET_PCT = 0.05
+# The ONE management-fee target, as % of EGR — the pro-forma fee the model
+# underwrites TO. `mgmt_fee_pct` above is the benchmark BAND, the range a
+# STATED fee is judged against; this is the single value used when the CIM
+# states a fee below the band or states none at all, and the value
+# `analysis/value_add.py` renegotiates an above-market fee down to.
+#
+# 6% is the TOP of the band, and that is the point: a CIM that omits its
+# management fee is the common case, and underwriting the omission at the
+# most expensive credible number is the conservative read. It was 5% —
+# in-band but arbitrary, and unreachable by anyone tuning a deal — until
+# the operator set it here on 2026-08-04.
+#
+# Per-deal editable on the assumptions page (`mgmt_fee_target_pct`), which
+# supersedes this default for that one run. Deliberately NOT a
+# `_PATCHED_DICTS` entry: it is a plain scalar, and modules that bind a
+# scalar by value at import can never see a patch — the same reason
+# SOLVER_TARGET_IRR and DEFAULT_HOLD_YEARS travel as parameters.
+MGMT_FEE_TARGET_PCT = 0.06
 
 # ── Replacement Cost Benchmarks ─────────────────────────────────────
 # Per-SF hard costs by facility type (2025/2026 construction costs).

@@ -202,7 +202,8 @@ def deal_assumptions(request, pk):
         from analysis.financials import analyze_financials
         fin = analyze_financials(
             cim, expense_line_overrides=(
-                ov.get("expense_line_overrides") or saved_exp_overrides))
+                ov.get("expense_line_overrides") or saved_exp_overrides),
+            mgmt_fee_target_pct=ov.get("mgmt_fee_target_pct"))
         strip_ctx = services.model_strip_context(deal, cim, fin, form)
     except Exception:
         logger.exception("assumptions initial strip failed for deal %s", deal.pk)
@@ -255,6 +256,7 @@ def deal_assumptions(request, pk):
         "rc_soft": [form["rc_soft_cost_pct_low"], form["rc_soft_cost_pct_high"],
                     form["rc_dev_profit_pct_low"], form["rc_dev_profit_pct_high"]],
         "solver_field": form["solver_target_irr"],
+        "mgmt_fee_target_field": form["mgmt_fee_target_pct"],
         "hold_years_field": form["hold_years"],
         "market_cap_field": form["market_cap_rate"],
         "txn_cost_fields": [{"label": label, "field": form[name]}
@@ -292,7 +294,8 @@ def assumptions_preview(request, pk):
     try:
         cim, ov = services.build_preview_cim(deal, cleaned, request.POST)
         fin = analyze_financials(
-            cim, expense_line_overrides=ov.get("expense_line_overrides"))
+            cim, expense_line_overrides=ov.get("expense_line_overrides"),
+            mgmt_fee_target_pct=ov.get("mgmt_fee_target_pct"))
         strip_ctx = services.model_strip_context(deal, cim, fin, form)
         # Distinct from preview_error below: the strip DID recompute, but
         # against a form that failed Django cleaning on at least one field

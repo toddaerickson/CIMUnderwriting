@@ -862,6 +862,10 @@ def _analysis_worker(run_pk):
                     enrich=True,
                     expense_line_overrides=overrides.get(
                         "expense_line_overrides"),
+                    # `.get()` with no `or` fallback: a per-deal 0% target
+                    # is legitimate (self-managed) and `or` would swap it
+                    # for the config default.
+                    mgmt_fee_target_pct=overrides.get("mgmt_fee_target_pct"),
                     hold_years=hold_years,
                     transaction_costs=txn_costs,
                     capital_structure=capital,

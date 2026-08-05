@@ -211,6 +211,15 @@
               </tbody>
             </table>
           </div>
+          <!-- Sits under the table, not in it: the table's columns are
+               $/NRSF and a total-$/yr input, and a % of EGR belongs to
+               neither. Same 10rem label track as every other labelled
+               input on the page; the max-w keeps a lone field from
+               stretching the full table width and reading as a header. -->
+          <label class="mt-2 grid grid-cols-[10rem_1fr] items-center gap-x-2 max-w-sm text-xs text-slate-600">
+            <span title="Pro-forma fee the model underwrites to when the CIM understates or omits one. Default 6% — the top of the 3-6% benchmark band.">Mgmt Fee Target (%)</span>
+            {{ mgmt_fee_target_field }}
+          </label>
         </div>
       </div>
     </details>
