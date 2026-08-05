@@ -3039,7 +3039,7 @@
         "Key Metrics",
         "Capital Stack",
         "Plan to Achieve the Return",
-        "Identified NOI uplift: $208,169 per year at stabilization.",
+        "Identified NOI uplift: $201,659 per year at stabilization.",
         "Underwritten bridge: occupancy 91% -> 88% over 24 months; rent $1.08 -> $1.28/SF against a $1.28 market.",
         "Scenario Returns (5-Year Hold)",
         "Principal Risks & Mitigants",
@@ -3326,7 +3326,7 @@
         "At a target 15% LP NET IRR \u2014 after debt service, the asset-management fee and the GP promote \u2014 the maximum offer price is $4,105,905 (implied entry cap: 8.4%). At that price the deal supports $2,668,839 of senior debt (63.9% LTV, bound by Max LTV) and requires $1,504,814 of equity.",
         "This price is computed on the levered assumption set stated under Levered Returns above: 8.00% pref, annually compounded; Contributed / unreturned capital; Return of capital first (presentation only: the pref compounds, so no dollar moves); Above the waterfall (deal expense) \u2014 1.00% of invested equity, measured at the start of each period; 20% promote on the LP-attributable residual (90% of it).",
         "7. Value-Add Opportunities",
-        "Identified 4 revenue enhancement opportunities. Identified 4 expense reduction opportunities. Estimated total annual NOI uplift: $208,169. 5 capital improvement item(s) identified for evaluation.",
+        "Identified 4 revenue enhancement opportunities. Identified 3 expense reduction opportunities. Estimated total annual NOI uplift: $201,659. 5 capital improvement item(s) identified for evaluation.",
         "Value-Add Financial Model",
         "In-place rent of $1.08/SF/mo vs market of $1.28/SF/mo represents a 19% rent gap. Current occupancy of 91.0% with target stabilization at 88.0%.",
         "Value-Add Returns (Unlevered)",
@@ -4364,12 +4364,11 @@
     }
   },
   "value_add": {
-    "estimated_noi_uplift": 208169.230769,
+    "estimated_noi_uplift": 201659.230769,
     "expense_categories": [
       "Reduce Repairs & Maintenance",
       "Reduce Payroll",
-      "Reduce General & Administrative",
-      "Management Fee Reduction"
+      "Reduce General & Administrative"
     ],
     "revenue_categories": [
       "Occupancy Improvement",

@@ -338,7 +338,8 @@ def fake_run(monkeypatch):
               expense_line_overrides=None, hold_years=None,
               transaction_costs=None, capital_structure=None,
               market_cap_rate=None, market_cap=None,
-              debt_terms=None, waterfall_terms=None, am_fee_pct=None):
+              debt_terms=None, waterfall_terms=None, am_fee_pct=None,
+              mgmt_fee_target_pct=None):
         calls["cim_data"] = result.cim_data
         calls["output_dir"] = output_dir
         calls["custom_scenarios"] = custom_scenarios

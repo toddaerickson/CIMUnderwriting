@@ -1,6 +1,8 @@
 """Tests for financial analysis module."""
 
 import pytest
+
+import config as cfg
 from analysis.financials import analyze_financials
 from analysis.value_add import identify_value_add
 
@@ -124,7 +126,11 @@ def test_an_above_band_mgmt_fee_does_not_crash_value_add(mock_cim_data):
     assert "Management Fee Reduction" in categories
     egr = fin["income_summary"]["egr"]
     mgmt_op = next(o for o in ops if o["category"] == "Management Fee Reduction")
-    assert mgmt_op["est_annual_impact"] == pytest.approx(egr * (0.09 - 0.05))
+    # Against the resolved target, not a literal: this test is about the
+    # crash and the basis, and re-stating the target here would make it
+    # fail every time the operator retunes a number it does not test.
+    assert mgmt_op["est_annual_impact"] == pytest.approx(
+        egr * (0.09 - cfg.MGMT_FEE_TARGET_PCT))
 
     # ...and the $/NRSF loop does NOT also emit a bogus duplicate for it.
     assert "Reduce Management Fee" not in categories

@@ -361,6 +361,14 @@ class AssumptionsForm(forms.Form):
                 required=False, min_value=0, widget=_num())
         self.fields["solver_target_irr"] = forms.FloatField(
             required=False, min_value=0, widget=_num())
+        # Pro-forma management fee, % of EGR. Sits with the expense
+        # benchmarks it modifies rather than in the timing block: it is
+        # the fee the model underwrites TO when the CIM understates or
+        # omits one. `max_value=100` is the field bound; the semantic
+        # bound is the resolver's, and 0 is allowed on purpose (a
+        # self-managed property underwritten with no third-party fee).
+        self.fields["mgmt_fee_target_pct"] = forms.FloatField(
+            required=False, min_value=0, max_value=100, widget=_num())
         # The market cap this asset's class and age band trade at. Blank
         # means "use the config table cell". Exit cap is DERIVED from this
         # (market + scenario spread + obsolescence drift x hold), which is
@@ -649,6 +657,10 @@ def build_initial(deal, eff=None) -> dict:
         initial[f"rc_{key}_high"] = round(float(high), 4)
     initial["solver_target_irr"] = _pct_display(
         saved.get("solver_target_irr", eff["SOLVER_TARGET_IRR"]))
+    # From `cfg`, not `eff`: this one is per-deal only, so there is no
+    # ConfigOverride lane for it and no effective_config entry to read.
+    initial["mgmt_fee_target_pct"] = _pct_display(
+        saved.get("mgmt_fee_target_pct", cfg.MGMT_FEE_TARGET_PCT))
     # Blank unless the analyst set one: the placeholder is the table cell
     # for this deal's class and age band, which build_initial cannot know
     # (it has no cim_data). Seeding a number here would look like a
@@ -1013,6 +1025,12 @@ def build_overrides(cleaned, post, deal, eff=None) -> dict:
         tgt = round(tgt / 100.0, 6)
         if not _same(tgt, eff["SOLVER_TARGET_IRR"]):
             out["solver_target_irr"] = tgt
+
+    mgmt = cleaned.get("mgmt_fee_target_pct")
+    if mgmt is not None:
+        mgmt = round(mgmt / 100.0, 6)
+        if not _same(mgmt, cfg.MGMT_FEE_TARGET_PCT):
+            out["mgmt_fee_target_pct"] = mgmt
 
     # No default to diff against — the table cell depends on the asset, so
     # any entered figure is by definition an override.

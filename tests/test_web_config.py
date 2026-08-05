@@ -300,7 +300,8 @@ def test_worker_applies_global_overrides_and_stamps_run(deals_dir, monkeypatch):
               transaction_costs=None, capital_structure=None,
               market_cap_rate=None, market_cap=None,
               debt_terms=None, waterfall_terms=None,
-              am_fee_pct=None):
+              am_fee_pct=None,
+              mgmt_fee_target_pct=None):
         from analysis.filters import GATES
         seen["min_irr_during_run"] = GATES["min_irr_5yr"]
         seen["solver_target_irr"] = solver_target_irr
@@ -353,7 +354,8 @@ def test_worker_stamps_global_solver_without_per_deal_override(deals_dir,
               transaction_costs=None, capital_structure=None,
               market_cap_rate=None, market_cap=None,
               debt_terms=None, waterfall_terms=None,
-              am_fee_pct=None):
+              am_fee_pct=None,
+              mgmt_fee_target_pct=None):
         seen["solver_target_irr"] = solver_target_irr
         result.gate_results = []
         result.gate_summary = {"passed": 0, "failed": 0, "tbd": 0, "total": 0,
@@ -376,7 +378,8 @@ def _capture_run_kwargs(monkeypatch, seen):
               expense_line_overrides=None, hold_years=None,
               transaction_costs=None, capital_structure=None,
               market_cap_rate=None, market_cap=None,
-              debt_terms=None, waterfall_terms=None, am_fee_pct=None):
+              debt_terms=None, waterfall_terms=None, am_fee_pct=None,
+              mgmt_fee_target_pct=None):
         seen["hold_years"] = hold_years
         seen["transaction_costs"] = transaction_costs
         seen["market_cap_rate"] = market_cap_rate

@@ -379,12 +379,39 @@ def test_credit_loss_and_bank_fees_come_from_config(tmp_path, stub_template):
     assert cells["I155"] == inputs["bank_fee_pct_stabilized"]
 
 
-def test_benchmark_bands_drive_reserve_and_mgmt_fee(tmp_path, stub_template):
+def test_benchmark_band_drives_the_capital_reserve(tmp_path, stub_template):
     cells = _generate(tmp_path)
     assert cells["I164"] == cfg.EXPENSE_BENCHMARKS["cap_reserve"][0]
-    assert cells["G157"] == cfg.EXPENSE_BENCHMARKS["mgmt_fee_pct"][1]
-    # A CIM that states its own rate wins over the benchmark.
-    cells = _generate(tmp_path, cim=_CIM(mgmt_fee_pct=0.045))
+
+
+def test_the_mgmt_fee_follows_the_resolved_target_not_the_band(
+        tmp_path, stub_template):
+    """This assertion used to read
+    `cfg.EXPENSE_BENCHMARKS["mgmt_fee_pct"][1]`, and it still PASSES that
+    way today by coincidence — `MGMT_FEE_TARGET_PCT` is now 6%, which is
+    the band's high end. Same number, two routes, and the test could not
+    tell them apart.
+
+    It matters because the routes diverge the moment a deal sets a
+    per-deal target: the memo and the .xlsx would move and this workbook
+    — a real deliverable — would keep writing 6%, two output files
+    asserting different management fees on the same deal with nothing on
+    screen saying so. So the target is moved away from the band high here
+    to prove which one the cell actually follows.
+    """
+    cells = _generate(tmp_path, mgmt_fee_target_pct=0.02)
+    assert cells["G157"] == 0.02
+    assert cells["I157"] == 0.02
+    assert cells["G157"] != cfg.EXPENSE_BENCHMARKS["mgmt_fee_pct"][1]
+
+    # Unset, it falls back to the config default (which IS the band high
+    # today — asserted against the target, not the band).
+    cells = _generate(tmp_path)
+    assert cells["G157"] == cfg.MGMT_FEE_TARGET_PCT
+
+    # A CIM that states its own rate still wins over either.
+    cells = _generate(tmp_path, cim=_CIM(mgmt_fee_pct=0.045),
+                      mgmt_fee_target_pct=0.02)
     assert cells["G157"] == 0.045
 
 

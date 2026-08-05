@@ -60,6 +60,7 @@ from datetime import datetime
 import openpyxl
 
 import config as cfg
+from analysis.financials import resolve_mgmt_fee_target
 from output import safe_filename
 from model.debt import MONTHS_PER_YEAR
 from registry import ScenarioType
@@ -190,9 +191,10 @@ _SUMMARY_NOTE_COL = 6              # F
 _SUMMARY_STRENGTH_ROWS = range(6, 11)
 _SUMMARY_WEAKNESS_ROWS = range(12, 17)
 
-# Benchmark bands are (low, high) tuples.
+# Benchmark bands are (low, high) tuples. `_BAND_HIGH` went with the
+# management-fee cell when it started reading `resolve_mgmt_fee_target`
+# instead of the band's top end.
 _BAND_LOW = 0
-_BAND_HIGH = 1
 
 
 def generate_template(
@@ -209,6 +211,7 @@ def generate_template(
     waterfall_terms=None,
     am_fee_pct: float = None,
     sources_uses: dict = None,
+    mgmt_fee_target_pct: float = None,
 ) -> str:
     """
     Copy the XLSM template and populate input cells with CIM data.
@@ -290,7 +293,7 @@ def generate_template(
     _write_unit_mix(ws, cim_data, params)
     _write_other_income(ws, cim_data)
     _write_vacancy(ws, cim_data, params)
-    _write_opex(ws, cim_data, financial_analysis)
+    _write_opex(ws, cim_data, financial_analysis, mgmt_fee_target_pct)
     _write_capex(ws)
     _write_reversion(ws, cim_data, financial_analysis, costs, scenario_results)
     _write_waterfall(ws, waterfall, am_fee)
@@ -608,7 +611,8 @@ def _write_vacancy(ws, cim_data, params: dict):
 
 # ── Operating Expenses (rows 150-159, 164) ───────────────────────────
 
-def _write_opex(ws, cim_data, financial_analysis: dict):
+def _write_opex(ws, cim_data, financial_analysis: dict,
+                mgmt_fee_target_pct=None):
     """
     Populate OpEx from CIM data and analyst adjustments.
 
@@ -649,13 +653,19 @@ def _write_opex(ws, cim_data, financial_analysis: dict):
             stabilized_psf, _DOLLARS_DP)
 
     # Management fee — % of EGR (row 157). The CIM's own rate when it
-    # states one; otherwise the top of the benchmark band, which is the
-    # conservative end and the value this replaced. Which end is the
-    # right underwriting target is item T's (scoped-backlog rule 3).
+    # states one; otherwise the resolved pro-forma target.
+    #
+    # This used to read the top of the benchmark band directly. Same
+    # NUMBER as the target's default, but arriving by a second route, so
+    # a per-deal `mgmt_fee_target_pct` moved the memo and the .xlsx while
+    # this workbook — a real deliverable — kept writing 6%. Two output
+    # files asserting different management fees on the same deal, with
+    # nothing on screen saying so. It reads the ONE resolver now.
+    #
     # `is not None` for the same reason as `_physical_occupancy`: a
     # self-managed property stating a 0% fee is data, not a blank.
     mgmt_pct = (cim_data.mgmt_fee_pct if cim_data.mgmt_fee_pct is not None
-                else cfg.EXPENSE_BENCHMARKS["mgmt_fee_pct"][_BAND_HIGH])
+                else resolve_mgmt_fee_target(mgmt_fee_target_pct))
     ws["G157"] = mgmt_pct
     ws["I157"] = mgmt_pct
 

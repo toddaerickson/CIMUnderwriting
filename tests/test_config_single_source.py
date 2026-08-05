@@ -318,46 +318,247 @@ def test_mgmt_fee_target_drives_the_financials_adjustment(mock_cim_data,
 def test_mgmt_fee_target_drives_the_value_add_saving(mock_cim_data,
                                                      monkeypatch):
     """`value_add.py` sized the renegotiation saving off its own copy of
-    the 5%, so the two modules could disagree about the same target.
+    the target, so the two modules could disagree about the same number.
+    Both now resolve it through `resolve_mgmt_fee_target`.
 
-    The fee here is 5.5% — above the target but still INSIDE the (3%, 6%)
-    benchmark band, deliberately. An above-band fee crashes
-    `_expense_opportunities` on `origin/main` today (KeyError
-    'benchmark_range': the management-fee line carries
-    `benchmark_range_pct`, and the loop reads the other key on every
-    ABOVE RANGE line). That is a real pre-existing defect, not this PR's,
-    and fixing it here would be an unrelated behaviour change riding a
-    literal move — so this test stays clear of it.
+    The fee is 8% — above the (3%, 6%) band, which is the case that used
+    to crash `_expense_opportunities` outright (KeyError
+    'benchmark_range'). Fixed in #41, so an above-band fee is now the
+    natural fixture for "there is a real fee to renegotiate".
     """
-    mock_cim_data.mgmt_fee_pct = 0.055
+    mock_cim_data.mgmt_fee_pct = 0.08
     fin = analyze_financials(mock_cim_data)
     egr = fin["income_summary"]["egr"]
 
     op = next(o for o in identify_value_add(
         mock_cim_data, fin)["expense_opportunities"]
         if o["category"] == "Management Fee Reduction")
-    assert op["est_annual_impact"] == pytest.approx(egr * (0.055 - 0.05))
+    assert op["est_annual_impact"] == pytest.approx(
+        egr * (0.08 - cfg.MGMT_FEE_TARGET_PCT))
 
     monkeypatch.setattr(cfg, "MGMT_FEE_TARGET_PCT", 0.04)
     op = next(o for o in identify_value_add(
         mock_cim_data, fin)["expense_opportunities"]
         if o["category"] == "Management Fee Reduction")
 
-    assert op["est_annual_impact"] == pytest.approx(egr * (0.055 - 0.04))
+    assert op["est_annual_impact"] == pytest.approx(egr * (0.08 - 0.04))
     assert "to 4% of EGR" in op["description"]
 
 
-def test_mgmt_fee_target_is_not_the_benchmark_midpoint():
-    """A guard on the ONE judgment this PR deliberately did not make. The
-    band is (3%, 6%) and the target is 5% — not its midpoint. Item T
-    Category 5 owns whether the target should become the band floor; if
-    someone "tidies" it into a derived midpoint, that silently
-    re-underwrites every deal with an understated management fee, and
-    this test is the sentence explaining why that is a decision and not a
-    cleanup."""
+def test_the_two_modules_cannot_resolve_different_targets(mock_cim_data):
+    """The double-count this parameter could have introduced. If
+    `analyze_financials` underwrote to 6% while `identify_value_add`
+    credited a walk down to the config default, the same dollar would be
+    counted twice — once as an expense the model already removed, once as
+    upside still to come. Both read the ONE resolver, so a per-deal target
+    handed to the engine reaches both or neither.
+    """
+    mock_cim_data.mgmt_fee_pct = 0.08
+    fin = analyze_financials(mock_cim_data, mgmt_fee_target_pct=0.04)
+    egr = fin["income_summary"]["egr"]
+
+    op = next(o for o in identify_value_add(
+        mock_cim_data, fin, mgmt_fee_target_pct=0.04)["expense_opportunities"]
+        if o["category"] == "Management Fee Reduction")
+
+    assert op["est_annual_impact"] == pytest.approx(egr * (0.08 - 0.04))
+    assert "to 4% of EGR" in op["description"]
+
+
+def test_a_zero_target_is_honoured_not_swallowed(mock_cim_data):
+    """0.0 is a legitimate target — a self-managed property underwritten
+    with no third-party fee — so the resolver keys on `is None`. A falsy
+    check would silently substitute the 6% config default and quietly add
+    an expense the analyst deliberately removed."""
+    from analysis.financials import resolve_mgmt_fee_target
+
+    assert resolve_mgmt_fee_target(0.0) == 0.0
+    assert resolve_mgmt_fee_target(None) == cfg.MGMT_FEE_TARGET_PCT
+
+    mock_cim_data.mgmt_fee_pct = None
+    fin = analyze_financials(mock_cim_data, mgmt_fee_target_pct=0.0)
+    line = next(ln for ln in fin["expense_analysis"]["lines"]
+                if ln["category"] == "Management Fee")
+
+    assert line["adjusted_value"] == 0.0
+
+
+def test_an_omitted_fee_is_underwritten_at_the_target(mock_cim_data):
+    """The highest-impact path, and the one the characterization net does
+    NOT reach: a CIM that omits its management fee entirely.
+
+    All three snapshot fixtures miss it — `stabilized` states 5%,
+    `value_add` states 6%, and `thin` omits the fee but also has no EGR,
+    so `elif egr:` never fires and no fee is assumed at all. So the
+    default moving 5% -> 6% shows up in the snapshots only as a lost
+    value-add opportunity, never as the NOI reduction it mainly is. This
+    test is that missing coverage, asserted directly.
+    """
+    mock_cim_data.mgmt_fee_pct = None
+    fin = analyze_financials(mock_cim_data)
+    egr = fin["income_summary"]["egr"]
+    line = next(ln for ln in fin["expense_analysis"]["lines"]
+                if ln["category"] == "Management Fee")
+
+    assert line["flag"] == "NOT FOUND"
+    assert line["adjusted_value"] == pytest.approx(egr * 0.06)
+    assert any("Assumed 6% of EGR" in a
+               for a in fin["expense_analysis"]["adjustments"])
+
+
+@pytest.mark.django_db
+def test_the_mgmt_fee_target_round_trips_through_the_assumptions_form():
+    """The percent-vs-decimal boundary, which is where a field of this
+    shape usually breaks: the form takes a WHOLE number (4 meaning 4%)
+    and every consumer wants a decimal. A one-way conversion stores 4.0
+    as a 400% fee, or redisplays 0.04 in a box labelled "%".
+
+    Also asserts the delta discipline the section uses: a field left at
+    the config default writes NO key, so the deal stays on whatever the
+    default later becomes rather than freezing today's value into every
+    deal ever saved.
+    """
+    from django.http import QueryDict
+
+    from webapp.forms import AssumptionsForm, build_initial, build_overrides
+    from webapp.models import Deal
+
+    deal = Deal.objects.create(deal_id="mf-rt", property_name="RT")
+
+    form = AssumptionsForm(data={"mgmt_fee_target_pct": "4"})
+    assert form.is_valid(), form.errors
+    stored = build_overrides(form.cleaned_data, QueryDict(""), deal)
+    assert stored["mgmt_fee_target_pct"] == pytest.approx(0.04)
+
+    # Redisplay lands on the whole number the analyst typed, not 0.04.
+    deal.assumption_overrides = stored
+    deal.save()
+    assert build_initial(deal)["mgmt_fee_target_pct"] == pytest.approx(4.0)
+
+    # At the default: no key stored.
+    at_default = AssumptionsForm(
+        data={"mgmt_fee_target_pct": str(cfg.MGMT_FEE_TARGET_PCT * 100)})
+    assert at_default.is_valid(), at_default.errors
+    assert "mgmt_fee_target_pct" not in build_overrides(
+        at_default.cleaned_data, QueryDict(""), deal)
+
+
+def test_the_engine_accepts_a_per_deal_mgmt_fee_target():
+    """`webapp.services` hands the stored override straight to
+    `run_analysis`, so the parameter has to exist by that exact name.
+    Pinned by signature rather than by a full run — the arithmetic is
+    covered above; what breaks silently is a rename."""
+    import inspect
+
+    from engine import run_analysis
+
+    params = inspect.signature(run_analysis).parameters
+    assert "mgmt_fee_target_pct" in params
+    assert params["mgmt_fee_target_pct"].default is None
+
+
+@pytest.mark.django_db
+def test_a_saved_mgmt_fee_target_actually_reaches_the_run(monkeypatch,
+                                                          tmp_path, settings):
+    """The link every other test in this file would pass without: the
+    worker reading the stored override and handing it to the engine.
+
+    Found by mutation — deleting the `mgmt_fee_target_pct=` line from
+    `webapp/services.py`'s `run_analysis` call left the whole suite green.
+    The analyst would type 4%, the page would save it, redisplay it, and
+    the model would quietly underwrite at 6% — the exact "UI claims the
+    override works and the model proves otherwise" failure item T exists
+    to kill, reintroduced by the very PR adding the field.
+
+    A 0.0 target is used deliberately: it is both a legitimate value and
+    the one an `or`-style fallback would swallow.
+    """
+    from tests.test_web_runs import _make_extracted_deal, _start_run
+
+    # `deals_dir` is a local fixture in three other test modules; inlined
+    # here rather than copied a fourth time.
+    deals_dir = tmp_path / "deals"
+    deals_dir.mkdir()
+    settings.CIM_DEALS_DIR = str(deals_dir)
+    seen = {}
+
+    def _fake(result, progress=None, output_dir=None, custom_scenarios=None,
+              custom_va_scenarios=None, solver_target_irr=None, enrich=False,
+              expense_line_overrides=None, hold_years=None,
+              transaction_costs=None, capital_structure=None,
+              market_cap_rate=None, market_cap=None,
+              debt_terms=None, waterfall_terms=None, am_fee_pct=None,
+              mgmt_fee_target_pct=None):
+        seen["mgmt_fee_target_pct"] = mgmt_fee_target_pct
+        result.gate_results = []
+        result.gate_summary = {"passed": 0, "failed": 0, "tbd": 0, "total": 0,
+                               "recommendation": "PURSUE",
+                               "failed_gates": [], "tbd_gates": []}
+        return result
+
+    monkeypatch.setattr("webapp.services.run_analysis", _fake)
+    deal = _make_extracted_deal(deals_dir)
+    deal.assumption_overrides = {"mgmt_fee_target_pct": 0.0}
+    deal.save()
+    run = _start_run(deal)
+
+    assert seen["mgmt_fee_target_pct"] == 0.0
+    assert run.applied_overrides["assumptions"]["mgmt_fee_target_pct"] == 0.0
+
+
+@pytest.mark.django_db
+def test_a_run_on_the_default_still_stamps_the_target_it_used(monkeypatch,
+                                                              tmp_path,
+                                                              settings):
+    """Stamped RESOLVED, not as a delta — the discipline `hold_years`,
+    `transaction_costs` and the debt/waterfall blocks already follow.
+
+    This PR moved the default 5% -> 6%. Without a resolved stamp, a run
+    from before and a run from after — neither with a per-deal override —
+    carry byte-identical `applied_overrides` while underwriting a
+    management fee 100bp apart, which is 1.6% of adjusted NOI on a deal
+    whose CIM omits the fee. A past run has to say what it ran under.
+    """
+    from tests.test_web_runs import _make_extracted_deal, _start_run
+
+    deals_dir = tmp_path / "deals"
+    deals_dir.mkdir()
+    settings.CIM_DEALS_DIR = str(deals_dir)
+
+    def _fake(result, *a, **kw):
+        result.gate_results = []
+        result.gate_summary = {"passed": 0, "failed": 0, "tbd": 0, "total": 0,
+                               "recommendation": "PURSUE",
+                               "failed_gates": [], "tbd_gates": []}
+        return result
+
+    monkeypatch.setattr("webapp.services.run_analysis", _fake)
+    deal = _make_extracted_deal(deals_dir)
+    deal.assumption_overrides = {}          # nothing set — pure default
+    deal.save()
+    run = _start_run(deal)
+
+    assert (run.applied_overrides["assumptions"]["mgmt_fee_target_pct"]
+            == cfg.MGMT_FEE_TARGET_PCT)
+
+
+def test_the_target_is_the_top_of_the_benchmark_band():
+    """Replaces this file's earlier
+    `test_mgmt_fee_target_is_not_the_benchmark_midpoint`, which pinned the
+    old 5%.
+
+    6% is the band's HIGH end, and that is the whole underwriting
+    argument: a CIM omitting its management fee is the common case, and
+    the conservative read of an omission is the most expensive credible
+    number, not a comfortable middle one. Operator's call 2026-08-04.
+
+    The midpoint assertion survives for the same reason it was written:
+    a derived `(low + high) / 2` looks like a tidy-up and silently
+    re-underwrites every deal with an understated or missing fee.
+    """
     low, high = cfg.EXPENSE_BENCHMARKS["mgmt_fee_pct"]
 
-    assert low < cfg.MGMT_FEE_TARGET_PCT < high
+    assert cfg.MGMT_FEE_TARGET_PCT == high
     assert cfg.MGMT_FEE_TARGET_PCT != (low + high) / 2
 
 

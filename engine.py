@@ -159,7 +159,8 @@ def run_analysis(result: AnalysisResult, progress: Callable = None,
                   market_cap: dict = None,
                   debt_terms: dict = None,
                   waterfall_terms: dict = None,
-                  am_fee_pct: float = None) -> AnalysisResult:
+                  am_fee_pct: float = None,
+                  mgmt_fee_target_pct: float = None) -> AnalysisResult:
     """
     Run full analysis pipeline on an already-extracted CIMData.
 
@@ -182,6 +183,13 @@ def run_analysis(result: AnalysisResult, progress: Callable = None,
             CIM-extracted value for the same line; the benchmark
             adjustment still applies on top. None everywhere the CLI
             path runs, so run.py behavior is unchanged.
+        mgmt_fee_target_pct: pro-forma management fee as a DECIMAL share
+            of EGR; None keeps config.MGMT_FEE_TARGET_PCT. Handed to BOTH
+            `analyze_financials` (which adjusts an understated or missing
+            fee up to it) and `identify_value_add` (which sizes a
+            renegotiation saving down to it) — giving them different
+            targets double-counts the same dollar, so they share the one
+            `resolve_mgmt_fee_target`.
         hold_years: hold period in years; None keeps
             config.DEFAULT_HOLD_YEARS. Drives the static DCF, the
             sensitivity grid, both solvers and the value-add engine —
@@ -251,7 +259,8 @@ def run_analysis(result: AnalysisResult, progress: Callable = None,
     from analysis.financials import analyze_financials
     result.financial_analysis = analyze_financials(
         cim_data, comp_db=comp_db,
-        expense_line_overrides=expense_line_overrides)
+        expense_line_overrides=expense_line_overrides,
+        mgmt_fee_target_pct=mgmt_fee_target_pct)
     result.adjusted_noi = result.financial_analysis.get(
         "adjusted_ttm_noi", {}).get("analyst_adjusted_noi")
     result.expense_ratio = result.financial_analysis.get(
@@ -466,7 +475,8 @@ def run_analysis(result: AnalysisResult, progress: Callable = None,
         source_log=source_log)
     result.gate_summary = summarize_gates(result.gate_results)
     result.value_add = identify_value_add(
-        cim_data, result.financial_analysis, result.rent_analysis)
+        cim_data, result.financial_analysis, result.rent_analysis,
+        mgmt_fee_target_pct=mgmt_fee_target_pct)
     result.risk_analysis = identify_risks(
         cim_data, result.gate_results, result.financial_analysis,
         result.scenario_results, result.rent_analysis)
@@ -587,6 +597,9 @@ def run_analysis(result: AnalysisResult, progress: Callable = None,
             waterfall_terms=resolved_waterfall_terms,
             am_fee_pct=am_fee_pct,
             sources_uses=result.sources_uses,
+            # Or the workbook underwrites a different management fee than
+            # the memo and the .xlsx built from this same run.
+            mgmt_fee_target_pct=mgmt_fee_target_pct,
         )
     except Exception as e:
         result.errors.append(f"Template generation failed: {e}")

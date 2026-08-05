@@ -20,8 +20,28 @@ from config import (EXPENSE_BENCHMARKS, STATE_PROPERTY_TAX_MULTIPLIER,
 from registry import EXPENSE_CATEGORIES, EXPENSE_KEYWORD_MAP, EXPENSE_KEYS
 
 
+def resolve_mgmt_fee_target(mgmt_fee_target_pct=None) -> float:
+    """THE one resolver for the pro-forma management fee target.
+
+    `analysis/financials.py` adjusts an understated or missing fee UP to
+    it and `analysis/value_add.py` sizes a renegotiation saving DOWN to
+    it, so the two must never resolve it differently — a deal whose
+    adjusted NOI assumed 6% while its value-add credited a walk to 5%
+    double-counts the same dollar. One function, both callers.
+
+    `is None`, never truthiness: 0.0 is a legitimate target (a
+    self-managed property underwritten with no third-party fee) and a
+    falsy check would silently swap it for the config default — the
+    defect class already recorded against the solver's target IRR.
+    """
+    if mgmt_fee_target_pct is None:
+        return cfg.MGMT_FEE_TARGET_PCT
+    return float(mgmt_fee_target_pct)
+
+
 def analyze_financials(cim_data, comp_db=None,
-                       expense_line_overrides=None) -> dict:
+                       expense_line_overrides=None,
+                       mgmt_fee_target_pct=None) -> dict:
     """
     Produce financial analysis with benchmarked expenses and adjusted NOI.
 
@@ -30,6 +50,11 @@ def analyze_financials(cim_data, comp_db=None,
             entered expense line values (dense model view). These beat
             the CIM-extracted value for the same line; the benchmark
             adjustment below still applies on top of the analyst figure.
+        mgmt_fee_target_pct: per-deal pro-forma management fee as a
+            DECIMAL share of EGR; None uses `config.MGMT_FEE_TARGET_PCT`.
+            None and not falsy — 0.0 is a legitimate target (a
+            self-managed property underwritten with no fee) and must not
+            silently fall back to the config default.
 
     Returns:
         - income_summary: normalized revenue build-up
@@ -44,7 +69,8 @@ def analyze_financials(cim_data, comp_db=None,
     income = _build_income_summary(cim_data)
     expenses = _analyze_expenses(cim_data, nrsf, income.get("egr", 0), state,
                                  comp_db=comp_db, cc_pct=cc_pct,
-                                 expense_line_overrides=expense_line_overrides)
+                                 expense_line_overrides=expense_line_overrides,
+                                 mgmt_fee_target_pct=mgmt_fee_target_pct)
     adjustments = expenses["adjustments"]
     adjusted_noi = _compute_adjusted_noi(income, expenses, cim_data)
 
@@ -88,7 +114,8 @@ def _build_income_summary(cim_data) -> dict:
 
 def _analyze_expenses(cim_data, nrsf: float, egr: float, state: str = "",
                       comp_db=None, cc_pct: float = None,
-                      expense_line_overrides=None) -> dict:
+                      expense_line_overrides=None,
+                      mgmt_fee_target_pct=None) -> dict:
     """
     Analyze each expense line against benchmarks.
 
@@ -230,7 +257,7 @@ def _analyze_expenses(cim_data, nrsf: float, egr: float, state: str = "",
     mgmt_value = egr * mgmt_pct if (egr and mgmt_pct) else None
     mgmt_adjusted = mgmt_value
 
-    mgmt_target = cfg.MGMT_FEE_TARGET_PCT
+    mgmt_target = resolve_mgmt_fee_target(mgmt_fee_target_pct)
 
     if mgmt_pct is not None:
         if mgmt_pct < mgmt_low:

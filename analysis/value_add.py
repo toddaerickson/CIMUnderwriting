@@ -5,12 +5,14 @@ Identifies value-add opportunities based on the gap between
 current operations and benchmark performance.
 """
 
-import config as cfg
+from analysis.financials import resolve_mgmt_fee_target
 from config import EXPENSE_BENCHMARKS, GATES
 from registry import asset_age
 
 
-def identify_value_add(cim_data, financial_analysis: dict, rent_analysis: dict = None) -> dict:
+def identify_value_add(cim_data, financial_analysis: dict,
+                       rent_analysis: dict = None,
+                       mgmt_fee_target_pct=None) -> dict:
     """
     Identify operational improvement opportunities.
 
@@ -26,7 +28,8 @@ def identify_value_add(cim_data, financial_analysis: dict, rent_analysis: dict =
         - estimated_noi_uplift: rough $ estimate of total upside
     """
     revenue_ops = _revenue_opportunities(cim_data, financial_analysis)
-    expense_ops = _expense_opportunities(cim_data, financial_analysis)
+    expense_ops = _expense_opportunities(cim_data, financial_analysis,
+                                         mgmt_fee_target_pct)
     capex_items = _capex_opportunities(cim_data)
 
     total_uplift = sum(op.get("est_annual_impact", 0) for op in revenue_ops)
@@ -113,7 +116,7 @@ def _revenue_opportunities(cim_data, fin) -> list:
     return ops
 
 
-def _expense_opportunities(cim_data, fin) -> list:
+def _expense_opportunities(cim_data, fin, mgmt_fee_target_pct=None) -> list:
     ops = []
     expense_analysis = fin.get("expense_analysis", {})
     lines = expense_analysis.get("lines", [])
@@ -146,7 +149,7 @@ def _expense_opportunities(cim_data, fin) -> list:
 
     # Third-party management savings
     mgmt_pct = cim_data.mgmt_fee_pct
-    mgmt_target = cfg.MGMT_FEE_TARGET_PCT
+    mgmt_target = resolve_mgmt_fee_target(mgmt_fee_target_pct)
     if mgmt_pct and mgmt_pct > mgmt_target:
         egr = fin.get("income_summary", {}).get("egr", 0) or 0
         savings = egr * (mgmt_pct - mgmt_target)
