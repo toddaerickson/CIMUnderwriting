@@ -180,10 +180,17 @@ def json_safe(obj):
 # across deals. (The lock is per-process: two gunicorn workers can run
 # two analyses concurrently, each patching its own config module copy —
 # safe by construction.)
+# `RENOVATION_COST` is deliberately NOT here, though item T Category 2
+# gave it a config home alongside `VALUE_ADD_ASSUMPTIONS`: it is
+# presentation only — `identify_value_add` never sums a capex item into
+# `estimated_noi_uplift` — so it moves no number, and a nested dict of
+# mixed shapes (int ages, $/SF pairs, flat-dollar pairs) would need
+# registry and bounds machinery to buy nothing.
 _PATCHED_DICTS = ("GATES", "EXPENSE_BENCHMARKS", "REPLACEMENT_COST",
                   "SCENARIO_DEFAULTS", "VALUE_ADD_SCENARIOS",
-                  "VALUE_ADD_TRIGGERS", "TRANSACTION_COSTS",
-                  "MARKET_CAP_RATES", "POPULATION_TIERS")
+                  "VALUE_ADD_TRIGGERS", "VALUE_ADD_ASSUMPTIONS",
+                  "TRANSACTION_COSTS", "MARKET_CAP_RATES",
+                  "POPULATION_TIERS")
 _ORIG_CONFIG = {n: copy.deepcopy(getattr(cfg, n)) for n in _PATCHED_DICTS}
 _ANALYSIS_LOCK = threading.Lock()
 

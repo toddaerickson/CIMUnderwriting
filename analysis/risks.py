@@ -7,7 +7,7 @@ CIM data and analysis outputs.
 
 from typing import Optional
 
-from config import GATES, POPULATION_TIERS
+from config import GATES, POPULATION_TIERS, RISK_TRIGGERS
 from registry import ScenarioType, asset_age
 
 
@@ -287,7 +287,10 @@ def _operational_risks(cim_data) -> list:
     year_built = cim_data.year_built
     if year_built:
         age = asset_age(year_built)
-        if age > 25:
+        # One of three age ladders in this repo, and deliberately still
+        # its own — see config.ASSET_AGE_LADDERS for the register and
+        # why they were not reconciled.
+        if age > RISK_TRIGGERS["aging_plant_age"]:
             risks.append({
                 "category": "Operational",
                 "risk": "Aging physical plant",

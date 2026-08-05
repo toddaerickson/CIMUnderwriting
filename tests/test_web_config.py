@@ -1060,3 +1060,25 @@ def test_the_out_of_range_note_branches_on_all_four_statuses(client, operator):
     content = client.get("/settings/").content.decode()
     assert "It reaches runs today" in content
     assert "not yet" not in content
+
+
+def test_every_registry_kind_matches_the_shape_of_its_config_value():
+    """`kind` is what `parse_override_value` branches on, and getting it
+    wrong is silent in the worst way. A (low, high) pair registered as a
+    scalar accepts a single number and stores a float where the model
+    unpacks a pair — `analysis.value_add._pct_band` raises TypeError on
+    that, `engine` catches it, and the entire value-add section vanishes
+    from the memo with nothing on screen saying why.
+
+    Derived from the live config rather than a list of known range keys:
+    a survivor of exactly this mutation is what prompted the test, and a
+    hand-listed version would only have covered the two keys that already
+    existed."""
+    from webapp.forms import dotted_get, override_key_registry
+
+    for key, spec in override_key_registry().items():
+        value = dotted_get(cfg, key)
+        is_pair = isinstance(value, (list, tuple))
+        assert (spec["kind"] == "range") == is_pair, (
+            f"{key} is registered kind={spec['kind']!r} but its config "
+            f"value is {value!r}")

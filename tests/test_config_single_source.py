@@ -802,3 +802,403 @@ def test_max_offer_caption_falls_back_to_the_config_target(mock_cim_data,
     text = "\n".join(p.text for p in doc.paragraphs)
 
     assert "Maximum Offer Price (for 14% Base Case IRR)" in text
+
+
+# ── Item T Category 2: config.VALUE_ADD_ASSUMPTIONS ──────────────────
+#
+# The whole opportunity-sizing layer of `analysis/value_add.py` was
+# literals. The characterization net could not have caught a bad move
+# here — worse, it cannot even SEE part of it: the economic-occupancy
+# description reaches no snapshot at all (`grep "assumes" tests/snapshots`
+# returns nothing), so byte-for-byte green over there proves nothing
+# about this. Each key below is patched on the live dict, exactly as
+# `webapp.services._merge_patch` patches a real ConfigOverride row, and
+# both faces are asserted: the DOLLARS booked and the SENTENCE printed.
+
+def _va_cim(mock_cim_data, **overrides):
+    for k, v in overrides.items():
+        setattr(mock_cim_data, k, v)
+    return mock_cim_data
+
+
+def _fin(gpr=600_000.0, egr=550_000.0, revenue=560_000.0):
+    return {"income_summary": {"gpr": gpr, "egr": egr,
+                               "total_revenue": revenue}}
+
+
+def _op(result, category):
+    return next((o for o in result["revenue_opportunities"]
+                 if o["category"] == category), None)
+
+
+def test_the_occupancy_target_drives_the_trigger_the_dollars_and_the_prose(
+        mock_cim_data, monkeypatch):
+    cim = _va_cim(mock_cim_data, physical_occupancy=0.90,
+                  economic_occupancy=None, other_income=0.0)
+
+    base = _op(identify_value_add(cim, _fin()), "Occupancy Improvement")
+    assert base is not None and "to 93%" in base["description"]
+
+    monkeypatch.setitem(cfg.VALUE_ADD_ASSUMPTIONS, "occupancy_target", 0.98)
+    moved = _op(identify_value_add(cim, _fin()), "Occupancy Improvement")
+    assert "to 98%" in moved["description"]
+    assert moved["est_annual_impact"] > base["est_annual_impact"]
+
+    # and the target is a TRIGGER too: below it, no opportunity at all
+    monkeypatch.setitem(cfg.VALUE_ADD_ASSUMPTIONS, "occupancy_target", 0.85)
+    assert _op(identify_value_add(cim, _fin()), "Occupancy Improvement") is None
+
+
+def test_the_spread_recovery_share_drives_the_dollars_and_the_sentence(
+        mock_cim_data, monkeypatch):
+    """The path NO characterization snapshot renders. It was the literal
+    0.5 with the word "half" beside it in prose — two copies of one
+    number, in the same expression, which is the exact shape item T
+    exists to kill."""
+    cim = _va_cim(mock_cim_data, physical_occupancy=0.90,
+                  economic_occupancy=0.75, other_income=0.0)
+
+    base = _op(identify_value_add(cim, _fin()), "Economic Occupancy Recovery")
+    assert base is not None
+    # 600,000 * (0.90 - 0.75) * 0.50
+    assert base["est_annual_impact"] == pytest.approx(45_000.0)
+    assert "50% of the spread is recoverable" in base["description"]
+
+    monkeypatch.setitem(cfg.VALUE_ADD_ASSUMPTIONS,
+                        "spread_recovery_share", 0.80)
+    moved = _op(identify_value_add(cim, _fin()), "Economic Occupancy Recovery")
+    assert moved["est_annual_impact"] == pytest.approx(72_000.0)
+    assert "80% of the spread is recoverable" in moved["description"]
+    assert "50%" not in moved["description"]
+
+
+def test_the_ecri_keys_drive_the_trigger_the_uplift_and_the_band(
+        mock_cim_data, monkeypatch):
+    cim = _va_cim(mock_cim_data, physical_occupancy=0.90,
+                  economic_occupancy=None, other_income=0.0)
+
+    base = _op(identify_value_add(cim, _fin()), "Revenue Management / ECRI")
+    assert base is not None
+    assert base["est_annual_impact"] == pytest.approx(550_000.0 * 0.03)
+    assert "targeting 8-10% annual increases" in base["description"]
+    assert "tenants > 6 months" in base["description"]
+
+    # the floor is a real gate: raise it above the deal and the op goes
+    monkeypatch.setitem(cfg.VALUE_ADD_ASSUMPTIONS, "ecri_min_occupancy", 0.95)
+    assert _op(identify_value_add(cim, _fin()),
+               "Revenue Management / ECRI") is None
+
+    monkeypatch.setitem(cfg.VALUE_ADD_ASSUMPTIONS, "ecri_min_occupancy", 0.88)
+    monkeypatch.setitem(cfg.VALUE_ADD_ASSUMPTIONS, "ecri_egr_uplift", 0.05)
+    monkeypatch.setitem(cfg.VALUE_ADD_ASSUMPTIONS, "ecri_increase_range",
+                        (0.12, 0.15))
+    monkeypatch.setitem(cfg.VALUE_ADD_ASSUMPTIONS,
+                        "ecri_tenant_tenure_months", 9)
+    moved = _op(identify_value_add(cim, _fin()), "Revenue Management / ECRI")
+    assert moved["est_annual_impact"] == pytest.approx(550_000.0 * 0.05)
+    assert "targeting 12-15% annual increases" in moved["description"]
+    assert "tenants > 9 months" in moved["description"]
+
+
+def test_the_ancillary_keys_drive_the_trigger_the_uplift_and_the_band(
+        mock_cim_data, monkeypatch):
+    cim = _va_cim(mock_cim_data, physical_occupancy=0.90,
+                  economic_occupancy=None, other_income=10_000.0)
+
+    base = _op(identify_value_add(cim, _fin()), "Ancillary Revenue")
+    assert base is not None
+    assert base["est_annual_impact"] == pytest.approx(560_000.0 * 0.03)
+    assert "target 5-8% of revenue" in base["description"]
+
+    # other income is 10k/560k = 1.8%; drop the trigger below that and
+    # the line stops reading as under-exploited
+    monkeypatch.setitem(cfg.VALUE_ADD_ASSUMPTIONS, "ancillary_min_share", 0.01)
+    assert _op(identify_value_add(cim, _fin()), "Ancillary Revenue") is None
+
+    monkeypatch.setitem(cfg.VALUE_ADD_ASSUMPTIONS, "ancillary_min_share", 0.05)
+    monkeypatch.setitem(cfg.VALUE_ADD_ASSUMPTIONS,
+                        "ancillary_revenue_uplift", 0.06)
+    monkeypatch.setitem(cfg.VALUE_ADD_ASSUMPTIONS,
+                        "ancillary_target_share", (0.06, 0.11))
+    moved = _op(identify_value_add(cim, _fin()), "Ancillary Revenue")
+    assert moved["est_annual_impact"] == pytest.approx(560_000.0 * 0.06)
+    assert "target 6-11% of revenue" in moved["description"]
+
+
+def test_the_uplift_total_follows_every_assumption_it_sums(mock_cim_data,
+                                                           monkeypatch):
+    """`estimated_noi_uplift` is the number that reaches the memo and the
+    investor summary. A key moved into config but read back wrongly would
+    leave the individual op right and this total stale, or vice versa."""
+    cim = _va_cim(mock_cim_data, physical_occupancy=0.90,
+                  economic_occupancy=0.75, other_income=0.0)
+    before = identify_value_add(cim, _fin())["estimated_noi_uplift"]
+
+    monkeypatch.setitem(cfg.VALUE_ADD_ASSUMPTIONS,
+                        "spread_recovery_share", 0.80)
+    after = identify_value_add(cim, _fin())["estimated_noi_uplift"]
+    assert after == pytest.approx(before + 27_000.0)     # 600k * 0.15 * 0.30
+
+
+# ── Item T Category 2: config.RENOVATION_COST ────────────────────────
+
+def _capex(cim):
+    return {i["item"]: i for i in identify_value_add(cim, _fin())["capex_items"]}
+
+
+def test_the_renovation_age_triggers_come_from_config(mock_cim_data,
+                                                      monkeypatch):
+    from registry import asset_age
+
+    cim = _va_cim(mock_cim_data, physical_occupancy=0.90,
+                  economic_occupancy=None, other_income=0.0,
+                  year_built=2014, nrsf=50_000)
+    age = asset_age(2014)
+    assert age is not None and 10 < age <= 15, (
+        "fixture vintage must sit between the security and LED triggers "
+        f"for this test to discriminate; age is {age}")
+
+    items = _capex(cim)
+    assert "Security System Upgrade" in items          # min_age 10, age > 10
+    assert "LED Lighting Upgrade" not in items         # min_age 15, age <= 15
+
+    monkeypatch.setitem(cfg.RENOVATION_COST["led_lighting"], "min_age", 5)
+    assert "LED Lighting Upgrade" in _capex(cim)
+
+    monkeypatch.setitem(cfg.RENOVATION_COST["security"], "min_age", 99)
+    assert "Security System Upgrade" not in _capex(cim)
+
+
+def test_the_roof_high_priority_age_comes_from_config(mock_cim_data,
+                                                      monkeypatch):
+    cim = _va_cim(mock_cim_data, physical_occupancy=0.90,
+                  economic_occupancy=None, other_income=0.0,
+                  year_built=1999, nrsf=50_000)
+    assert _capex(cim)["Roof Replacement / Repair"]["priority"] == "Medium"
+
+    monkeypatch.setitem(cfg.RENOVATION_COST["roof"], "high_priority_age", 20)
+    assert _capex(cim)["Roof Replacement / Repair"]["priority"] == "High"
+
+
+def test_the_renovation_costs_come_from_config(mock_cim_data, monkeypatch):
+    cim = _va_cim(mock_cim_data, physical_occupancy=0.90,
+                  economic_occupancy=None, other_income=0.0,
+                  year_built=1990, nrsf=50_000)
+    items = _capex(cim)
+    # per_sf costs multiply NRSF; flat amounts do not
+    assert items["Roof Replacement / Repair"]["est_cost_range"] == \
+        "$75,000 - $150,000"
+    assert items["Security System Upgrade"]["est_cost_range"] == \
+        "$15,000 - $50,000"
+    assert items["Signage & Curb Appeal"]["est_cost_range"] == \
+        "$5,000 - $25,000"
+
+    monkeypatch.setitem(cfg.RENOVATION_COST["roof"], "per_sf", (2.0, 4.0))
+    monkeypatch.setitem(cfg.RENOVATION_COST["signage"], "amount",
+                        (7_000, 30_000))
+    items = _capex(cim)
+    assert items["Roof Replacement / Repair"]["est_cost_range"] == \
+        "$100,000 - $200,000"
+    assert items["Signage & Curb Appeal"]["est_cost_range"] == \
+        "$7,000 - $30,000"
+
+
+def test_the_capex_list_keeps_config_declaration_order(mock_cim_data):
+    """Render order is the config dict's order, and the age-gated items
+    still precede the always-on ones — the shape the five hand-written
+    branches produced."""
+    cim = _va_cim(mock_cim_data, physical_occupancy=0.90,
+                  economic_occupancy=None, other_income=0.0,
+                  year_built=1990, nrsf=50_000)
+    ordered = [i["item"] for i in identify_value_add(cim, _fin())["capex_items"]]
+    assert ordered == [cfg.RENOVATION_COST[k]["item"]
+                       for k in ("roof", "led_lighting", "security",
+                                 "signage", "website")]
+
+
+def test_a_deal_with_no_vintage_still_gets_the_ungated_items(mock_cim_data):
+    """`year_built=None` skips every `min_age` spec and keeps the rest —
+    the pre-existing behaviour, now a property of the data rather than of
+    where the `if year_built:` block happened to end."""
+    cim = _va_cim(mock_cim_data, physical_occupancy=0.90,
+                  economic_occupancy=None, other_income=0.0,
+                  year_built=None, nrsf=50_000)
+    assert [i["item"] for i in identify_value_add(cim, _fin())["capex_items"]] \
+        == ["Signage & Curb Appeal", "Website & Digital Presence"]
+
+
+def test_a_per_sf_item_without_nrsf_stays_tbd(mock_cim_data):
+    """It is a diligence prompt, not an underwriting input — so it says
+    TBD rather than inventing a square footage. (`nrsf or 1` elsewhere is
+    item T Category 4's target; this is not that.)"""
+    cim = _va_cim(mock_cim_data, physical_occupancy=0.90,
+                  economic_occupancy=None, other_income=0.0,
+                  year_built=1990, nrsf=None)
+    items = _capex(cim)
+    assert items["Roof Replacement / Repair"]["est_cost_range"] == "TBD"
+    assert items["Security System Upgrade"]["est_cost_range"] == \
+        "$15,000 - $50,000"          # flat amounts do not need NRSF
+
+
+def test_value_add_no_longer_imports_the_expense_benchmarks(mock_cim_data):
+    """It imported `EXPENSE_BENCHMARKS` and never used it. An unused
+    import of a settings-editable dict reads like this module benchmarks
+    against it — and a reader who believes that will look for a bug that
+    does not exist, or add one that does."""
+    import analysis.value_add as va_mod
+
+    assert not hasattr(va_mod, "EXPENSE_BENCHMARKS")
+
+
+@pytest.mark.django_db
+def test_a_stored_row_reaches_the_value_add_assumptions(mock_cim_data):
+    """The Category 2 twin of the market test above: a real row in the
+    database changing a real dollar figure and a real sentence. Every
+    link is unit-tested separately; only this one fails if they stop
+    composing — which is what "the UI claims the override works and the
+    model proves otherwise" looks like, the defect item T names in its
+    own rationale.
+
+    Also pins that `VALUE_ADD_ASSUMPTIONS` is a `_PATCHED_DICTS` entry AND
+    an `override_key_registry` key. Being one without the other is silent:
+    a registry key with no patch lane saves a row nothing reads; a patch
+    lane with no registry key is unreachable from the settings page and
+    `build_config_patch` reports it `skipped`."""
+    from django.utils import timezone
+
+    from webapp.models import ConfigOverride
+    from webapp.services import (_patched_config, build_config_patch,
+                                 resolve_config_overrides)
+
+    mock_cim_data.physical_occupancy = 0.90
+    mock_cim_data.economic_occupancy = 0.75
+    mock_cim_data.other_income = 0.0
+
+    before = _op(identify_value_add(mock_cim_data, _fin()),
+                 "Economic Occupancy Recovery")
+    assert before["est_annual_impact"] == pytest.approx(45_000.0)
+
+    ConfigOverride.objects.create(
+        key="VALUE_ADD_ASSUMPTIONS.spread_recovery_share", value=0.80,
+        effective_date=timezone.localdate())
+    deltas = resolve_config_overrides("", timezone.localdate())
+    patch, _solver, skipped = build_config_patch(deltas)
+    assert skipped == [], "the key is not reachable from the settings page"
+
+    with _patched_config(patch):
+        after = _op(identify_value_add(mock_cim_data, _fin()),
+                    "Economic Occupancy Recovery")
+    assert after["est_annual_impact"] == pytest.approx(72_000.0)
+    assert "80% of the spread is recoverable" in after["description"]
+
+    # reverted on exit — a leaked mutation reprices every later deal in
+    # the same worker process
+    assert cfg.VALUE_ADD_ASSUMPTIONS["spread_recovery_share"] == 0.50
+
+
+@pytest.mark.django_db
+def test_the_settings_page_offers_every_value_add_assumption(client,
+                                                             django_user_model):
+    """A config key with no registry entry is invisible: it exists, it
+    matters, and no operator can reach it. All nine are offered, and each
+    inherits a bound from its shape (PR #45) rather than needing one
+    written by hand."""
+    from webapp.forms import override_key_registry
+
+    user = django_user_model.objects.create_user(username="op2", password="x")
+    client.force_login(user)
+    reg = override_key_registry()
+
+    for key in cfg.VALUE_ADD_ASSUMPTIONS:
+        dotted = f"VALUE_ADD_ASSUMPTIONS.{key}"
+        assert dotted in reg, f"{dotted} is not editable from settings"
+        lo, hi = reg[dotted]["bounds"]
+        assert (lo, hi) != (None, None)
+
+    content = client.get("/settings/").content.decode()
+    assert "Value-Add Opportunity Assumptions" in content
+
+    # RENOVATION_COST is deliberately NOT offered — presentation only,
+    # see the note in webapp.services._PATCHED_DICTS
+    assert not any(k.startswith("RENOVATION_COST") for k in reg)
+
+
+# ── Item T Category 2: the asset-age register ────────────────────────
+
+def test_no_age_threshold_survives_as_a_bare_literal():
+    """The register in `config.ASSET_AGE_LADDERS` is only worth having if
+    it is complete. Three ladders that disagree is a decision the
+    operator made on 2026-08-05 with the deltas measured; a FOURTH ladder
+    appearing quietly in some module is not a decision at all, it is the
+    drift item T exists to stop.
+
+    So: walk `analysis/`, `model/` and `output/` and fail on any
+    comparison of an asset age against a numeric literal. `registry.py`
+    is excluded — it DEFINES `AGE_BANDS`, and `config.py` holds the
+    values, which is the whole point.
+    """
+    import ast
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parent.parent
+    offenders = []
+
+    def is_age(node):
+        return ((isinstance(node, ast.Name) and node.id == "age")
+                or (isinstance(node, ast.Call)
+                    and isinstance(node.func, ast.Name)
+                    and node.func.id == "asset_age"))
+
+    def is_num(node):
+        return (isinstance(node, ast.Constant)
+                and isinstance(node.value, (int, float))
+                and not isinstance(node.value, bool))
+
+    for pkg in ("analysis", "model", "output"):
+        for path in sorted((root / pkg).glob("*.py")):
+            tree = ast.parse(path.read_text(), filename=str(path))
+            for node in ast.walk(tree):
+                if not isinstance(node, ast.Compare):
+                    continue
+                left_age = is_age(node.left)
+                right_age = any(is_age(c) for c in node.comparators)
+                hit = ((left_age and any(is_num(c) for c in node.comparators))
+                       or (right_age and is_num(node.left)))
+                if hit:
+                    offenders.append(
+                        f"{path.relative_to(root)}:{node.lineno} — "
+                        f"{ast.unparse(node)}")
+
+    assert not offenders, (
+        "asset age compared to a bare literal; declare the threshold in "
+        "config.py and list it in ASSET_AGE_LADDERS:\n  "
+        + "\n  ".join(offenders))
+
+
+def test_the_age_register_names_every_ladder_that_exists():
+    """`ASSET_AGE_LADDERS` is prose unless something checks that each
+    name it lists actually resolves — a register pointing at a ladder
+    someone renamed is worse than no register."""
+    import registry
+
+    assert cfg.ASSET_AGE_LADDERS == (
+        "registry.AGE_BANDS", "RENOVATION_COST", "RISK_TRIGGERS")
+    assert registry.AGE_BANDS
+    assert any("min_age" in spec for spec in cfg.RENOVATION_COST.values())
+    assert cfg.RISK_TRIGGERS["aging_plant_age"]
+
+
+def test_the_aging_plant_risk_reads_its_trigger_from_config(mock_cim_data,
+                                                            monkeypatch):
+    """It was `if age > 25:`, a bare literal — the second of the three
+    ladders, and the one no other module could see."""
+    import datetime as dt
+
+    this_year = dt.date.today().year
+    mock_cim_data.year_built = this_year - 20        # 20 < 25, no risk today
+    assert _risk(_risks_for(mock_cim_data), "Aging physical plant") is None
+
+    monkeypatch.setitem(cfg.RISK_TRIGGERS, "aging_plant_age", 15)
+    risk = _risk(_risks_for(mock_cim_data), "Aging physical plant")
+    assert risk is not None
+    assert "20 years old" in risk["description"]
