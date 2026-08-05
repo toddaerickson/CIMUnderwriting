@@ -69,7 +69,7 @@ def test_registry_derives_from_config():
     # spot checks across every group
     assert reg["GATES.min_irr_5yr"] == {
         "group": "Gates", "kind": "scalar", "pct": True, "int": False,
-        "label": "Min Irr 5Yr"}
+        "label": "Min Irr 5Yr", "bounds": (0.0, 1.0)}
     assert reg["GATES.population_3mi"]["int"] is True
     assert reg["GATES.population_3mi"]["pct"] is False
     # SF/capita is a count-like threshold — must never display as a percent
@@ -777,3 +777,256 @@ def test_settings_effective_preview_by_asset_type(client, operator):
     # and only the BRV preview marks the key changed
     assert brv.count("font-semibold text-accent-700") == \
         default_view.count("font-semibold text-accent-700") + 1
+
+
+# ── Settings value bounds ────────────────────────────────────────────
+#
+# The value box was an unbounded CharField. "-5" under Solver Target IRR
+# parsed to -0.05, saved without complaint, and the bisection solver ran
+# on it. These pin the bound AND the two things a blanket "no negatives"
+# would have broken: a bear case with shrinking revenue, and the 0%
+# target #44 deliberately made survivable.
+
+def test_every_registry_key_carries_bounds():
+    from webapp.forms import override_key_registry
+
+    reg = override_key_registry()
+    assert reg, "registry is empty — the rest of this module proves nothing"
+    for key, spec in reg.items():
+        assert "bounds" in spec, f"{key} has no bounds"
+        lo, hi = spec["bounds"]
+        assert (lo, hi) != (None, None), f"{key} is bounded on neither side"
+
+
+def test_every_default_sits_inside_its_own_bounds():
+    """THE guard on the bounds table, and the reason it can be derived
+    rather than enumerated: config.py is read live, so a key added with a
+    default its shape would refuse fails here the moment it lands —
+    before anyone discovers it by being unable to override the value."""
+    from webapp.forms import bounds_display, dotted_get, override_key_registry
+
+    for key, spec in override_key_registry().items():
+        raw = dotted_get(cfg, key)
+        vals = list(raw) if isinstance(raw, (list, tuple)) else [raw]
+        lo, hi = spec["bounds"]
+        for v in vals:
+            assert (lo is None or v >= lo) and (hi is None or v <= hi), (
+                f"{key} default {v!r} is outside its own bounds "
+                f"({bounds_display(spec)})")
+
+
+def test_a_negative_solver_target_irr_is_refused():
+    """The reported defect, verbatim: '-5' used to become -0.05."""
+    from django import forms as djf
+    from webapp.forms import parse_override_value
+
+    with pytest.raises(djf.ValidationError) as e:
+        parse_override_value("SOLVER_TARGET_IRR", "-5")
+    assert "between 0% and 100%" in str(e.value)
+
+
+def test_a_zero_solver_target_irr_still_saves():
+    """#44 made a 0% target survive the truthiness guards; a bound of
+    (0, 1] would have quietly undone that. Asserting the parse alone
+    would pass with this whole feature deleted, so the bound itself is
+    asserted — that is the thing a future tightening would break."""
+    from webapp.forms import override_key_registry, parse_override_value
+
+    assert override_key_registry()["SOLVER_TARGET_IRR"]["bounds"] == (0.0, 1.0)
+    assert parse_override_value("SOLVER_TARGET_IRR", "0") == 0.0
+
+
+def test_a_share_above_one_hundred_percent_is_refused():
+    from django import forms as djf
+    from webapp.forms import parse_override_value
+
+    with pytest.raises(djf.ValidationError):
+        parse_override_value("GATES.min_physical_occupancy", "150")
+    with pytest.raises(djf.ValidationError):
+        parse_override_value("VALUE_ADD_SCENARIOS.base.target_occupancy", "120")
+
+
+def test_a_bear_case_may_still_run_negative_growth():
+    """The case a blanket sign check would have broken. Revenue shrinking
+    in the downside is a real underwrite, not a typo."""
+    from webapp.forms import parse_override_value
+
+    assert parse_override_value(
+        "SCENARIO_DEFAULTS.bear.rev_cagr_yr1_3", "-2") == -0.02
+    assert parse_override_value(
+        "SCENARIO_DEFAULTS.bear.yr1_noi_bump", "-5") == -0.05
+    assert parse_override_value(
+        "VALUE_ADD_SCENARIOS.bear.post_stabilize_rev_growth", "-1") == -0.01
+    # but an occupancy in the same dict is a share, and is not negotiable
+    from django import forms as djf
+    with pytest.raises(djf.ValidationError):
+        parse_override_value("SCENARIO_DEFAULTS.bear.stabilized_occ", "-5")
+
+
+def test_a_range_endpoint_outside_bounds_is_refused():
+    from django import forms as djf
+    from webapp.forms import parse_override_value
+
+    # low end negative — the high end alone would have passed
+    with pytest.raises(djf.ValidationError):
+        parse_override_value("EXPENSE_BENCHMARKS.property_tax", "-1, 2.5")
+    # a percentage range over 100%
+    with pytest.raises(djf.ValidationError):
+        parse_override_value("EXPENSE_BENCHMARKS.opex_revenue_ratio", "35, 150")
+    # and the ordinary case still parses
+    assert parse_override_value(
+        "EXPENSE_BENCHMARKS.property_tax", "1.4, 2.6") == [1.4, 2.6]
+
+
+def test_dollar_benchmarks_stay_open_above_but_not_below():
+    """Deliberate: bounding a $/NRSF benchmark at a round number would be
+    re-underwriting through the validator. Only the sign is nonsense —
+    so the open upper bound is asserted directly (the parse alone would
+    pass with the feature deleted) and the closed lower one is proved by
+    a refusal."""
+    from django import forms as djf
+    from webapp.forms import override_key_registry, parse_override_value
+
+    assert override_key_registry()[
+        "REPLACEMENT_COST.ss_driveup_per_sf"]["bounds"] == (0.0, None)
+    assert parse_override_value(
+        "REPLACEMENT_COST.ss_driveup_per_sf", "500, 900") == [500.0, 900.0]
+    with pytest.raises(djf.ValidationError):
+        parse_override_value("REPLACEMENT_COST.ss_driveup_per_sf", "-1, 900")
+
+
+def test_a_zero_market_cap_rate_is_refused():
+    """valuation.py:265 reads `exit_noi / exit_cap if exit_cap > 0 else 0`
+    — a 0% cap does not raise, it prints an exit value of zero. So the
+    cap-rate bound is the one that excludes zero."""
+    from django import forms as djf
+    from webapp.forms import parse_override_value
+
+    with pytest.raises(djf.ValidationError):
+        parse_override_value("MARKET_CAP_RATES.Self Storage.mid", "0")
+    assert parse_override_value("MARKET_CAP_RATES.Self Storage.mid", "6.1") \
+        == 0.061
+
+
+def test_months_to_stabilize_cannot_outlast_the_longest_hold():
+    from django import forms as djf
+    from webapp.forms import parse_override_value
+
+    ceiling = cfg.HOLD_YEARS_RANGE[1] * 12
+    assert parse_override_value(
+        "VALUE_ADD_SCENARIOS.base.months_to_stabilize", str(ceiling)) == ceiling
+    with pytest.raises(djf.ValidationError):
+        parse_override_value("VALUE_ADD_SCENARIOS.base.months_to_stabilize",
+                             str(ceiling + 1))
+
+
+def test_a_vintage_year_is_bounded_as_a_year():
+    from django import forms as djf
+    from webapp.forms import parse_override_value
+
+    assert parse_override_value("GATES.unproven_vintage_year", "2021") == 2021
+    with pytest.raises(djf.ValidationError):
+        parse_override_value("GATES.unproven_vintage_year", "21")
+
+
+def test_a_negative_population_gate_is_refused():
+    from django import forms as djf
+    from webapp.forms import parse_override_value
+
+    with pytest.raises(djf.ValidationError):
+        parse_override_value("GATES.population_3mi", "-50000")
+    assert parse_override_value("POPULATION_TIERS.preferred_density",
+                                "80000") == 80000
+
+
+@pytest.mark.django_db
+def test_settings_page_refuses_an_out_of_range_value(client, operator):
+    """The whole path, not just the parser: the POST is re-rendered with
+    the error and no row is written."""
+    from webapp.models import ConfigOverride
+
+    resp = client.post("/settings/", {
+        "key": "SOLVER_TARGET_IRR", "value": "-5",
+        "asset_type": "", "effective_date": "2026-07-01"})
+    assert resp.status_code == 200
+    assert b"must be between 0% and 100%" in resp.content
+    assert ConfigOverride.objects.count() == 0
+
+
+@pytest.mark.django_db
+def test_a_stored_out_of_range_row_is_badged(client, operator):
+    """Bounds at the form cannot reach a row saved before they existed.
+    Such a row still resolves into runs, so the page says so rather than
+    rendering it as an ordinary number."""
+    from django.utils import timezone
+
+    from webapp.models import ConfigOverride
+
+    ConfigOverride.objects.create(key="SOLVER_TARGET_IRR", value=-0.05,
+                                  effective_date=timezone.localdate())
+    content = client.get("/settings/").content.decode()
+    assert "out of range" in content
+
+    ConfigOverride.objects.all().delete()
+    ConfigOverride.objects.create(key="SOLVER_TARGET_IRR", value=0.12,
+                                  effective_date=timezone.localdate())
+    assert "out of range" not in client.get("/settings/").content.decode()
+
+
+@pytest.mark.django_db
+def test_the_effective_preview_shows_each_key_its_allowed_range(client,
+                                                                operator):
+    import re
+
+    from webapp.forms import override_key_registry
+
+    n = len(override_key_registry())
+    content = client.get("/settings/").content.decode()
+    # Assert the PAIRING, not either half. "Accepts …" alone appears on
+    # the key picker's options too, so a substring check passes with this
+    # hover deleted (measured: it did); "decoration-dotted" alone passes
+    # with the title deleted. The page carries the string twice per key —
+    # once per surface — and both counts are pinned.
+    paired = re.findall(r'title="Accepts [^"]+"\s+class="decoration-dotted',
+                        content)
+    assert len(paired) == n
+    assert content.count('title="Accepts ') == 2 * n
+    assert 'title="Accepts between 0% and 100%"' in content
+    assert 'title="Accepts at least 0"' in content       # $/SF, open above
+
+
+@pytest.mark.django_db
+def test_the_key_picker_carries_each_range_as_an_option_tooltip(client,
+                                                                operator):
+    """The bound has to be reachable BEFORE the value box is typed into;
+    otherwise the only channel is the rejection message."""
+    from webapp.forms import ConfigOverrideForm, override_key_registry
+
+    html = str(ConfigOverrideForm()["key"])
+    assert 'title="Accepts between 0% and 100%"' in html
+    assert 'title="Accepts at least 0"' in html          # $/SF, open above
+    assert html.count('title="Accepts ') == len(override_key_registry())
+    # and it renders on the real page, not just in isolation
+    assert 'title="Accepts ' in client.get("/settings/").content.decode()
+
+
+@pytest.mark.django_db
+def test_a_superseded_out_of_range_row_is_not_told_it_reaches_runs(client,
+                                                                   operator):
+    """A red 'still applies to runs' chip on a row the precedence rules
+    already retired is the page contradicting itself."""
+    import datetime as dt
+
+    from django.utils import timezone
+
+    from webapp.models import ConfigOverride
+
+    today = timezone.localdate()
+    ConfigOverride.objects.create(key="SOLVER_TARGET_IRR", value=-0.05,
+                                  effective_date=today - dt.timedelta(days=2))
+    ConfigOverride.objects.create(key="SOLVER_TARGET_IRR", value=0.12,
+                                  effective_date=today - dt.timedelta(days=1))
+    content = client.get("/settings/").content.decode()
+    assert content.count("out of range") == 1
+    assert "Superseded, so it does not reach a run" in content
+    assert "and it does reach runs" not in content

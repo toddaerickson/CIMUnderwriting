@@ -1105,6 +1105,117 @@ RC_LEGACY_ALIASES = {"non_cc_per_sf", "cc_per_sf", "site_work_per_sf"}
 # reach a run with a known state. Derived, not editable.
 EXPENSE_DERIVED_KEYS = {"total_opex"}
 
+# ── Sanity bounds for the settings value box ────────────────────────
+#
+# The value field was an unbounded CharField: "-5" under Solver Target
+# IRR parsed to -0.05, saved clean, and the bisection solver ran on it,
+# because nothing between the text input and the solver had an opinion
+# about what the number MEANT. Every key gets a (low, high) bound in
+# CANONICAL units below; None is open on that side.
+#
+# These are DEFINITIONAL limits, not underwriting opinions: a share of
+# something cannot exceed the whole, a vintage is a year, a count is not
+# negative. The judgment quantities — the $/NRSF and $/SF benchmarks —
+# stay OPEN above deliberately. Capping them at a round number would be
+# re-underwriting through the validator, and no arithmetic in the model
+# breaks on a large one; it is only the sign that is nonsense.
+#
+# What keeps this honest is NOT the table, which anyone can forget to
+# extend. `test_every_default_sits_inside_its_own_bounds` reads config.py
+# live and fails the moment a new key's own default falls outside the
+# bound its shape earns it.
+_SHARE = (0.0, 1.0)        # occupancies, ratios, non-negative rates
+_GROWTH = (-1.0, 1.0)      # rates a bear case may legitimately run negative
+_CAP_RATE = (0.0001, 1.0)  # zero is excluded, unlike every other rate here:
+                           #   valuation.py:265 reads `exit_noi / exit_cap if
+                           #   exit_cap > 0 else 0`, so a 0% cap does not raise
+                           #   — it prints an exit value of zero and an IRR
+                           #   computed from it.
+_NON_NEG = (0.0, None)     # $/NRSF and $/SF benchmarks — see the note above
+_COUNT = (0, None)         # population, SF per capita
+_YEAR = (1900, 2100)
+
+# Scenario parameters a bear case may legitimately run NEGATIVE — a
+# shrinking-revenue underwrite is a real one, and _SHARE would refuse it.
+# Everything else percentage-shaped is a share and cannot go below zero.
+GROWTH_PARAM_KEYS = {"yr1_noi_bump", "rev_cagr_yr1_3", "rev_cagr_yr4_5",
+                     "exp_growth", "post_stabilize_rev_growth",
+                     "expense_growth"}
+
+
+def _bounds_for(key: str, spec: dict) -> tuple:
+    """The (low, high) a key's SHAPE earns it. Derived rather than
+    enumerated, so a key added to config.py arrives bounded instead of
+    waiting for someone to remember to list it here.
+
+    The three special cases dispatch on the LEAF name, which is only safe
+    while those leaves are unique across the registry-covered dicts —
+    they are today (audited key by key). A future config key reusing one
+    of them would silently inherit the wrong bound, and
+    `test_every_default_sits_inside_its_own_bounds` only catches that if
+    the wrong bound happens to exclude the new default. Prefix on the
+    dotted key, not the leaf, if that risk ever becomes real."""
+    leaf = key.split(".")[-1]
+    if leaf == "unproven_vintage_year":
+        return _YEAR
+    if leaf in VA_NON_PCT:                       # months_to_stabilize
+        # Read at call time, not frozen into a module constant: a
+        # stabilization that finishes after the longest hold the app
+        # allows is not a stabilization, and that ceiling is config's
+        # to state.
+        return (0, cfg.HOLD_YEARS_RANGE[1] * 12)
+    if leaf in GROWTH_PARAM_KEYS:
+        return _GROWTH
+    if key.startswith("MARKET_CAP_RATES."):
+        return _CAP_RATE
+    if spec["int"]:
+        return _COUNT
+    return _SHARE if spec["pct"] else _NON_NEG
+
+
+def bounds_display(spec: dict) -> str:
+    """The bound in the units the box is typed in, for the error text."""
+    lo, hi = spec["bounds"]
+
+    def one(v):
+        if spec["pct"]:
+            return f"{round(float(v) * 100, 4):g}%"
+        if spec["int"]:
+            return f"{int(v)}"
+        return f"{round(float(v), 4):g}"
+
+    if lo is not None and hi is not None:
+        return f"between {one(lo)} and {one(hi)}"
+    if lo is not None:
+        return f"at least {one(lo)}"
+    return f"at most {one(hi)}"
+
+
+def _within(spec: dict, values) -> bool:
+    lo, hi = spec["bounds"]
+    return all((lo is None or v >= lo) and (hi is None or v <= hi)
+               for v in values)
+
+
+def value_in_bounds(key: str, value) -> bool:
+    """True if an ALREADY-STORED value still satisfies its bounds.
+
+    Validation added at the form cannot reach rows saved before it
+    existed, and such a row rendering as a plain number is the same
+    silence this whole block is about. The settings page badges the ones
+    that fail; it does not refuse to apply them, because retiring an
+    override the operator entered deliberately would move published
+    numbers without anyone asking for it."""
+    spec = override_key_registry().get(key)
+    if spec is None:
+        return True                    # already badged "unknown key"
+    vals = value if isinstance(value, (list, tuple)) else [value]
+    try:
+        vals = [float(v) for v in vals]
+    except (TypeError, ValueError):
+        return False
+    return _within(spec, vals)
+
 
 def _label(key: str) -> str:
     return key.split(".")[-1].replace("_", " ").title()
@@ -1182,6 +1293,13 @@ def override_key_registry() -> dict:
     # import in the model modules, so a _patched_config mutation could
     # never reach them (the same reason SOLVER_TARGET_IRR is special-cased
     # in build_config_patch). It is per-deal only, via the field above.
+    #
+    # Bounds are stamped over the finished registry rather than written
+    # into each branch above: a loop that has to remember to add them is
+    # a loop that eventually forgets, and an unbounded key is exactly the
+    # defect this closes.
+    for dotted, spec in reg.items():
+        spec["bounds"] = _bounds_for(dotted, spec)
     return reg
 
 
@@ -1197,7 +1315,9 @@ def parse_override_value(key: str, raw: str):
     """Display units in ('12' or '1.40, 2.60'), canonical units out
     (0.12 or [1.4, 2.6]). Comma is the range separator ONLY for range
     keys; scalars strip thousands separators so the displayed format is
-    always re-enterable (review finding)."""
+    always re-enterable (review finding). Bounds are checked on the
+    CANONICAL value, after unit conversion and after rounding, so what
+    is validated is exactly what gets stored."""
     spec = override_key_registry().get(key)
     if spec is None:
         raise forms.ValidationError("Unknown setting key.")
@@ -1211,13 +1331,24 @@ def parse_override_value(key: str, raw: str):
             low, high = low / 100.0, high / 100.0
         if low > high:
             raise forms.ValidationError("Low must be ≤ high.")
-        return [round(low, 6), round(high, 6)]
+        out = [round(low, 6), round(high, 6)]
+        _require_in_bounds(spec, out)
+        return out
     v = _parse_num(raw.replace(",", ""))
     if spec["int"]:
-        return int(v)
-    if spec["pct"]:
-        v = v / 100.0
-    return round(v, 6)
+        v = int(v)
+    else:
+        if spec["pct"]:
+            v = v / 100.0
+        v = round(v, 6)
+    _require_in_bounds(spec, [v])
+    return v
+
+
+def _require_in_bounds(spec: dict, values) -> None:
+    if not _within(spec, values):
+        raise forms.ValidationError(
+            f"{spec['label']} must be {bounds_display(spec)}.")
 
 
 def format_override_value(key: str, value) -> str:
@@ -1238,8 +1369,26 @@ def format_override_value(key: str, value) -> str:
     return one(value, pct)
 
 
+class KeyPickerSelect(forms.Select):
+    """The key picker, with each option carrying its own allowed range as
+    a native tooltip. The range has to be reachable BEFORE the value box
+    is typed into, or the only channel is the rejection message. Spelling
+    it into the option label instead would nearly double the width of a
+    picker already carrying label + dotted key, and the range is
+    reference material — read once per key, not on every visit."""
+
+    option_titles = {}
+
+    def create_option(self, name, value, *args, **kwargs):
+        option = super().create_option(name, value, *args, **kwargs)
+        title = self.option_titles.get(str(value))
+        if title:
+            option["attrs"]["title"] = title
+        return option
+
+
 class ConfigOverrideForm(forms.Form):
-    key = forms.ChoiceField()
+    key = forms.ChoiceField(widget=KeyPickerSelect)
     value = forms.CharField(max_length=60)
     asset_type = forms.ChoiceField(required=False)
     # timezone.localdate, NOT datetime.date.today: Render's system clock
@@ -1258,6 +1407,9 @@ class ConfigOverrideForm(forms.Form):
                 (key, f"{spec['label']} ({key})"))
         self.fields["key"].choices = [
             (g, opts) for g, opts in groups.items()]
+        self.fields["key"].widget.option_titles = {
+            key: f"Accepts {bounds_display(spec)}"
+            for key, spec in reg.items()}
         self.fields["asset_type"].choices = (
             [("", "All asset types")] + [(a, a) for a in ASSET_TYPES])
 

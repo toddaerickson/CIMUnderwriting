@@ -555,8 +555,9 @@ def comps(request):
 
 @login_required
 def settings_page(request):
-    from webapp.forms import (ConfigOverrideForm, format_override_value,
-                              override_key_registry)
+    from webapp.forms import (ConfigOverrideForm, bounds_display,
+                              format_override_value, override_key_registry,
+                              value_in_bounds)
     from webapp.services import ASSET_TYPES
     from webapp.models import ConfigOverride
 
@@ -597,8 +598,21 @@ def settings_page(request):
             status = "active"
         else:
             status = "superseded"
+        # Rows saved before the value box grew bounds, or written straight
+        # to the model, still resolve into runs. They are badged rather
+        # than dropped — see forms.value_in_bounds. The note is written
+        # here, where the status is known: telling the operator a
+        # superseded row "still applies to runs" would be false, and this
+        # page's whole job is that the two never disagree.
+        oob = not value_in_bounds(r.key, r.value)
         overrides.append({
-            "row": r, "status": status,
+            "row": r, "status": status, "out_of_bounds": oob,
+            "out_of_bounds_note": (
+                "Outside the allowed range for this setting. Superseded, "
+                "so it does not reach a run — delete it."
+                if status == "superseded" else
+                "Outside the allowed range for this setting, and it does "
+                "reach runs. Delete it and re-add the value in range."),
             "display_value": format_override_value(r.key, r.value),
             "label": registry.get(r.key, {}).get("label", r.key),
         })
@@ -621,6 +635,10 @@ def settings_page(request):
             "default": format_override_value(key, dotted_get(cfg, key)),
             "effective": format_override_value(key, dotted_get(eff, key)),
             "changed": key in deltas,
+            # Hover text, not a fourth column: the preview already runs
+            # three columns inside a multi-column layout, and the bound
+            # is reference material, not something read on every visit.
+            "allowed": bounds_display(spec),
         })
 
     return render(request, "webapp/settings.html", {
