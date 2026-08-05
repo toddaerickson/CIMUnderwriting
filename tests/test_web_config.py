@@ -1029,4 +1029,34 @@ def test_a_superseded_out_of_range_row_is_not_told_it_reaches_runs(client,
     content = client.get("/settings/").content.decode()
     assert content.count("out of range") == 1
     assert "Superseded, so it does not reach a run" in content
-    assert "and it does reach runs" not in content
+    assert "It reaches runs today" not in content
+
+
+@pytest.mark.django_db
+def test_the_out_of_range_note_branches_on_all_four_statuses(client, operator):
+    """A scheduled row has not taken effect either — resolve_config_overrides
+    filters `effective_date__lte` — so a note that only special-cased
+    'superseded' told a scheduled row 'it does reach runs', which is false.
+    Review finding on PR #45, caught by two agents independently."""
+    import datetime as dt
+
+    from django.utils import timezone
+
+    from webapp.models import ConfigOverride
+
+    today = timezone.localdate()
+    ConfigOverride.objects.create(key="SOLVER_TARGET_IRR", value=-0.05,
+                                  effective_date=today + dt.timedelta(days=30))
+    content = client.get("/settings/").content.decode()
+    assert "out of range" in content
+    assert "not yet" in content
+    assert "It reaches runs today" not in content
+    assert "does not reach a run" not in content
+
+    # and the active row, which genuinely does reach runs, says so
+    ConfigOverride.objects.all().delete()
+    ConfigOverride.objects.create(key="SOLVER_TARGET_IRR", value=-0.05,
+                                  effective_date=today)
+    content = client.get("/settings/").content.decode()
+    assert "It reaches runs today" in content
+    assert "not yet" not in content

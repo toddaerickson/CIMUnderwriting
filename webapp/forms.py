@@ -1159,10 +1159,13 @@ def _bounds_for(key: str, spec: dict) -> tuple:
     if leaf == "unproven_vintage_year":
         return _YEAR
     if leaf in VA_NON_PCT:                       # months_to_stabilize
-        # Read at call time, not frozen into a module constant: a
-        # stabilization that finishes after the longest hold the app
-        # allows is not a stabilization, and that ceiling is config's
-        # to state.
+        # A stabilization finishing after the longest hold the app allows
+        # is not a stabilization, so the ceiling is derived from config
+        # rather than written here as 120. NOT for the usual freeze-at-
+        # import reason — `HOLD_YEARS_RANGE` is in neither `_PATCHED_DICTS`
+        # nor the override registry, so it cannot change at runtime and a
+        # module constant would behave identically. The point is only that
+        # a second copy of 120 could drift from the first.
         return (0, cfg.HOLD_YEARS_RANGE[1] * 12)
     if leaf in GROWTH_PARAM_KEYS:
         return _GROWTH
