@@ -32,7 +32,8 @@
       </label>
       <button type="submit" class="bg-accent-700 text-white text-sm px-3 py-1.5 rounded">Add</button>
       <span class="text-xs text-slate-500 pb-1.5">Percents as whole numbers (12 = 12%).
-        Ranges as <code>low, high</code>.</span>
+        Ranges as <code>low, high</code>. Each setting has an allowed range —
+        hover its name here or in Effective values.</span>
     </form>
     {% if form.errors %}
     <div class="mt-2 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800">
@@ -65,11 +66,17 @@
             <td class="py-1.5 pr-3">{{ o.row.asset_type|default:"All" }}</td>
             <td class="py-1.5 pr-3 whitespace-nowrap">{{ o.row.effective_date|date:"Y-m-d" }}</td>
             <td class="py-1.5 pr-3">
-              <span class="text-xs rounded px-1.5 py-0.5
-                {% if o.status == 'active' %}bg-emerald-50 text-emerald-700
-                {% elif o.status == 'scheduled' %}bg-amber-50 text-amber-700
-                {% elif o.status == 'unknown key' %}bg-red-50 text-red-700
-                {% else %}bg-slate-100 text-slate-500{% endif %}">{{ o.status }}</span>
+              <span class="inline-flex flex-wrap items-center gap-1">
+                <span class="text-xs rounded px-1.5 py-0.5
+                  {% if o.status == 'active' %}bg-emerald-50 text-emerald-700
+                  {% elif o.status == 'scheduled' %}bg-amber-50 text-amber-700
+                  {% elif o.status == 'unknown key' %}bg-red-50 text-red-700
+                  {% else %}bg-slate-100 text-slate-500{% endif %}">{{ o.status }}</span>
+                {% if o.out_of_bounds %}<span class="text-xs rounded px-1.5 py-0.5
+                  {% if o.status == 'superseded' %}bg-slate-100 text-slate-400
+                  {% else %}bg-red-50 text-red-700{% endif %}"
+                  title="{{ o.out_of_bounds_note }}">out of range</span>{% endif %}
+              </span>
             </td>
             <td class="py-1.5 pr-3 text-slate-500">{{ o.row.note }}</td>
             <td class="py-1.5 pr-3 text-right">
@@ -116,7 +123,8 @@
           <tbody>
             {% for e in entries %}
             <tr class="border-b border-slate-50">
-              <td class="py-1 pr-3">{{ e.label }}</td>
+              <td class="py-1 pr-3"><span title="Accepts {{ e.allowed }}"
+                  class="decoration-dotted underline decoration-slate-200 underline-offset-2">{{ e.label }}</span></td>
               <td class="py-1 pr-3 text-right text-slate-500">{{ e.default }}</td>
               <td class="py-1 text-right {% if e.changed %}font-semibold text-accent-700{% endif %}">{{ e.effective }}</td>
             </tr>
