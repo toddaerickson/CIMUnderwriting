@@ -84,11 +84,32 @@ import config as cfg
 from analysis.valuation import (COERCED_SCENARIOS, project_cash_flows,
                                 resolve_exit_cap, resolve_market_cap,
                                 resolve_transaction_costs)
-from config import (SCENARIO_DEFAULTS, SOLVER_TARGET_IRR, SOLVER_TOLERANCE,
+from config import (SCENARIO_DEFAULTS, SOLVER_TOLERANCE,
                     SOLVER_MAX_ITERATIONS, VALUE_ADD_SCENARIOS)
 from registry import ScenarioType
 
 logger = logging.getLogger("cim_analyst")
+
+
+def resolve_target_irr(target_irr=None) -> float:
+    """THE resolver for the UNLEVERED solvers' target IRR.
+
+    Both solvers took `target_irr: float = SOLVER_TARGET_IRR` as a default
+    ARGUMENT, which Python evaluates once at import — so the value froze at
+    whatever config held when `model.solver` was first imported, and a
+    settings override could only ever reach it by being threaded in as a
+    parameter. That worked (the web app does thread it), but it left the
+    CLI and every direct caller reading a value config could no longer
+    change, and it is the pattern `solve_max_price_levered` already
+    documents as the one to avoid.
+
+    `is None`, never truthiness: a 0.0 target is a coherent question ("the
+    price at which this merely breaks even") and `or` would answer a
+    different one.
+    """
+    if target_irr is None or target_irr == "":
+        return cfg.SOLVER_TARGET_IRR
+    return float(target_irr)
 
 #: An IRR rise this small across a price step is float noise on a
 #: converged bracket, not the coerced-region inversion. The real pocket
@@ -99,7 +120,7 @@ MONOTONICITY_EPSILON = 1e-6
 
 def solve_max_price(adjusted_ttm_noi: float,
                     capex: float = 0,
-                    target_irr: float = SOLVER_TARGET_IRR,
+                    target_irr: float = None,
                     scenario: str = "base",
                     custom_params: dict = None,
                     expense_ratio: float = None,
@@ -145,6 +166,7 @@ def solve_max_price(adjusted_ttm_noi: float,
         - iterations: number of bisection iterations
         - converged: bool
     """
+    target_irr = resolve_target_irr(target_irr)
     params = custom_params or SCENARIO_DEFAULTS.get(scenario, SCENARIO_DEFAULTS[ScenarioType.BASE])
     costs = resolve_transaction_costs(transaction_costs)
     reserve = float(reserve or 0.0)
@@ -231,7 +253,7 @@ def solve_max_price(adjusted_ttm_noi: float,
 
 def solve_max_price_value_add(cim_data, financial_analysis: dict,
                                capex: float = 0,
-                               target_irr: float = SOLVER_TARGET_IRR,
+                               target_irr: float = None,
                                scenario: str = "base",
                                hold_years: int = None,
                                transaction_costs: dict = None,
@@ -249,6 +271,7 @@ def solve_max_price_value_add(cim_data, financial_analysis: dict,
     """
     from model.value_add_model import compute_va_irr_at_price
 
+    target_irr = resolve_target_irr(target_irr)
     params = VALUE_ADD_SCENARIOS.get(scenario, VALUE_ADD_SCENARIOS[ScenarioType.BASE])
     costs = resolve_transaction_costs(transaction_costs)
     reserve = float(reserve or 0.0)
@@ -417,8 +440,9 @@ def solve_max_price_levered(adjusted_ttm_noi: float,
 
     # Read at CALL time, never bound as a default argument: config is
     # rebindable by tests and by the settings path, and a module-level
-    # default would freeze the value at first import. (`SOLVER_TARGET_IRR`
-    # above predates that rule and is left alone.)
+    # default would freeze the value at first import. The unlevered
+    # solvers now follow the same rule via `resolve_target_irr`; this
+    # comment used to note that they did not.
     target_lp_irr = float(target_lp_irr if target_lp_irr not in (None, "")
                           else cfg.SOLVER_TARGET_LP_NET_IRR)
     params = custom_params or SCENARIO_DEFAULTS.get(

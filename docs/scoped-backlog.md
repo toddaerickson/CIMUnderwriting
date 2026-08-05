@@ -522,10 +522,15 @@ oracle" discipline applied to the whole pipeline.
    `DEFAULT_EXPENSE_RATIO` / `EXPENSE_RATIO_CLAMP` move to config and
    reconcile with `EXPENSE_BENCHMARKS["opex_revenue_ratio"]` — one statement
    of the default, the clamp bounds, and their relation to the benchmark
-   band; the frozen import-time `SOLVER_TARGET_IRR` binding in
-   `model/solver.py` resolves at call time (the pattern `GP_COINVEST_PCT`
-   already uses), and the `engine.py` truthiness guard becomes `is not None`
-   so a 0.0 target is passable.
+   band.
+   ~~the frozen import-time `SOLVER_TARGET_IRR` binding in
+   `model/solver.py` resolves at call time, and the `engine.py` truthiness
+   guard becomes `is not None` so a 0.0 target is passable~~ — **DONE**,
+   pulled forward out of order because the operator asked whether the
+   target-IRR setting was editable. Both unlevered solvers resolve through
+   `model.solver.resolve_target_irr`; three truthiness guards (`engine.py`
+   plus the resolution and the stamp-popping guard in `webapp/services.py`)
+   now key on `is None`. The rest of this category is untouched.
 4. **Loud fallbacks.** One `assumption_fill_log`: any fallback that fires
    (occupancy, market rent, mgmt fee, entry cap) records (field, value used,
    source key) and surfaces in the results UI and the memo appendix.

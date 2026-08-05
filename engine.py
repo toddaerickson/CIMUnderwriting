@@ -420,7 +420,10 @@ def run_analysis(result: AnalysisResult, progress: Callable = None,
                          "capex_pct_of_price": capex_pct_of_price,
                          "market_cap": market_cap}
         unlevered_kwargs = dict(solver_kwargs)
-        if solver_target_irr:
+        # `is not None`, not truthiness: a 0.0 target is a coherent
+        # question — the price at which the deal merely breaks even — and
+        # the falsy check silently answered the 10% one instead.
+        if solver_target_irr is not None:
             unlevered_kwargs["target_irr"] = solver_target_irr
         result.max_offer = solve_max_price(
             adjusted_ttm_noi=result.adjusted_noi,
