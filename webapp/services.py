@@ -777,7 +777,11 @@ def _analysis_worker(run_pk):
         rc = overrides.get("replacement_cost_overrides")
         if rc:
             patch.setdefault("REPLACEMENT_COST", {}).update(rc)
-        solver_irr = overrides.get("solver_target_irr") or cfg_solver_irr
+        # `is None`, not `or`: a per-deal 0% target is a real entry the
+        # form accepts (`min_value=0`), and `or` handed the global row's
+        # value to a deal that had explicitly asked for zero.
+        solver_irr = overrides.get("solver_target_irr")
+        solver_irr = cfg_solver_irr if solver_irr is None else solver_irr
         # Stamped BEFORE the run so even failed runs record what they
         # attempted — past analyses keep the thresholds they ran under.
         # Only deltas the engine will actually see go under "config";
@@ -787,7 +791,10 @@ def _analysis_worker(run_pk):
         # A per-deal solver target supersedes the global row entirely;
         # stamping the global value would record a threshold the engine
         # never used. The winner is already recorded under "assumptions".
-        if overrides.get("solver_target_irr"):
+        # `is not None` for the same reason as the resolution above — a
+        # per-deal 0% supersedes the global row just as any other value
+        # does, and the falsy check stamped the global one as applied.
+        if overrides.get("solver_target_irr") is not None:
             applied.pop("SOLVER_TARGET_IRR", None)
         # Timing and round-trip costs are stamped with their RESOLVED
         # values, not as deltas. Item B changed every published IRR, so a

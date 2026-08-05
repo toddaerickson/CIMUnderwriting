@@ -21,6 +21,8 @@ mechanism (a module binding one by value cannot see a patch at all), so
 `MGMT_FEE_TARGET_PCT` is asserted to be read through `cfg.` at call time.
 """
 
+from unittest import mock
+
 import pytest
 
 import config as cfg
@@ -560,6 +562,115 @@ def test_the_target_is_the_top_of_the_benchmark_band():
 
     assert cfg.MGMT_FEE_TARGET_PCT == high
     assert cfg.MGMT_FEE_TARGET_PCT != (low + high) / 2
+
+
+# ── SOLVER_TARGET_IRR — the setting, resolved at call time ──────────
+
+def test_the_solver_target_is_read_at_call_time_not_frozen_at_import():
+    """Both unlevered solvers took `target_irr: float = SOLVER_TARGET_IRR`
+    — a default ARGUMENT, which Python evaluates once at import. The value
+    froze at whatever config held on first import of `model.solver`, so
+    the only way a settings change reached the solver was by being
+    threaded in as a parameter (which the web app does, and the CLI does
+    not).
+
+    Patching `cfg` must now move the answer with no parameter passed at
+    all. That is what "read at call time" means, and a default-argument
+    binding cannot do it.
+    """
+    from model.solver import resolve_target_irr, solve_max_price
+
+    assert resolve_target_irr(None) == cfg.SOLVER_TARGET_IRR
+
+    base = solve_max_price(adjusted_ttm_noi=400_000.0, capex=0,
+                           expense_ratio=0.40)
+    assert base["target_irr"] == pytest.approx(0.10)
+
+    with mock.patch.object(cfg, "SOLVER_TARGET_IRR", 0.14):
+        raised = solve_max_price(adjusted_ttm_noi=400_000.0, capex=0,
+                                 expense_ratio=0.40)
+
+    assert raised["target_irr"] == pytest.approx(0.14)
+    # A higher bar buys less: the price has to FALL.
+    assert raised["max_price"] < base["max_price"]
+
+
+def test_a_zero_solver_target_is_a_question_not_a_blank():
+    """`engine.py` guarded with `if solver_target_irr:` and
+    `webapp/services.py` resolved with `or`, so a 0% target — the price at
+    which the deal merely breaks even — was silently answered at 10%
+    instead. The form accepts it (`min_value=0`), so it was reachable."""
+    from model.solver import resolve_target_irr, solve_max_price
+
+    assert resolve_target_irr(0.0) == 0.0
+
+    out = solve_max_price(adjusted_ttm_noi=400_000.0, capex=0,
+                          expense_ratio=0.40, target_irr=0.0)
+
+    assert out["target_irr"] == 0.0
+    assert out["max_price"] > solve_max_price(
+        adjusted_ttm_noi=400_000.0, capex=0,
+        expense_ratio=0.40)["max_price"]
+
+
+def test_a_zero_target_survives_the_engine_too(tmp_path, monkeypatch):
+    """The resolver alone is not enough — `engine.py` decides whether to
+    FORWARD the target at all, and its `if solver_target_irr:` dropped a
+    0.0 before the solver ever saw it. Found by mutation: reverting that
+    one guard left the suite green, because every other test in this file
+    exercises the solver directly or passes a non-zero target.
+    """
+    import data.comp_db as comp_db_module
+    monkeypatch.setattr(comp_db_module, "COMP_DB_PATH",
+                        str(tmp_path / "comps.db"))
+
+    result = AnalysisResult(pdf_path="z.pdf", cim_data=stabilized_deal())
+    run_analysis(result, output_dir=str(tmp_path), solver_target_irr=0.0)
+
+    assert result.max_offer["target_irr"] == 0.0
+
+
+@pytest.mark.django_db
+def test_a_settings_row_moves_a_real_max_offer(tmp_path, monkeypatch):
+    """The assertion the existing coverage stops short of: every current
+    test of this path either inspects a signature or watches a
+    MONKEYPATCHED `run_analysis` record the kwarg it was handed. None runs
+    the real pipeline and checks the number moved.
+
+    ConfigOverride row -> resolve -> build_config_patch -> the worker's
+    `solver_irr` -> `run_analysis` -> `solve_max_price`.
+    """
+    from django.utils import timezone
+
+    from engine import AnalysisResult, run_analysis
+    from tests.test_characterization import stabilized_deal
+    from webapp.models import ConfigOverride
+    from webapp.services import build_config_patch, resolve_config_overrides
+
+    import data.comp_db as comp_db_module
+    monkeypatch.setattr(comp_db_module, "COMP_DB_PATH",
+                        str(tmp_path / "comps.db"))
+
+    def _run(**kw):
+        out = tmp_path / f"o{len(list(tmp_path.iterdir()))}"
+        out.mkdir()
+        r = AnalysisResult(pdf_path="s.pdf", cim_data=stabilized_deal())
+        run_analysis(r, output_dir=str(out), **kw)
+        return r.max_offer
+
+    base = _run()
+
+    ConfigOverride.objects.create(key="SOLVER_TARGET_IRR", value=0.14,
+                                  effective_date=timezone.localdate())
+    deltas = resolve_config_overrides("", timezone.localdate())
+    _patch, solver_irr, skipped = build_config_patch(deltas)
+    assert skipped == [] and solver_irr == 0.14
+
+    overridden = _run(solver_target_irr=solver_irr)
+
+    assert base["target_irr"] == pytest.approx(0.10)
+    assert overridden["target_irr"] == pytest.approx(0.14)
+    assert overridden["max_price"] < base["max_price"]
 
 
 # ── The documents — the surfaces the result object cannot prove ──────
