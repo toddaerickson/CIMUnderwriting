@@ -131,8 +131,16 @@ def test_the_density_tier_can_no_longer_shadow_the_population_gate(
 def test_a_tier_set_below_the_gate_cannot_contradict_it(mock_cim_data,
                                                         monkeypatch):
     """The same guard from the other direction: an operator lowering the
-    preferred-density tier below the gate must not manufacture a deal
-    that is simultaneously a demand positive and inadequate."""
+    preferred-density tier below the gate must not manufacture a deal that
+    is simultaneously a demand positive and inadequate.
+
+    BOTH faces are asserted here, and the second one is why: the first
+    draft of this PR guarded `market.py` only, and `risks.py` — reading
+    the same key — silently stopped raising "Limited trade area
+    population" for a deal that fails the gate outright. Asserting the
+    market face alone read as full coverage of a "one threshold, two
+    faces" key while testing one of them.
+    """
     mock_cim_data.population_3mi = 45_000
     monkeypatch.setitem(cfg.POPULATION_TIERS, "preferred_density", 40_000)
     market = analyze_market(mock_cim_data)
@@ -142,6 +150,12 @@ def test_a_tier_set_below_the_gate_cannot_contradict_it(mock_cim_data,
                    for p in market["demand_drivers"]["positives"])
     assert any("Thin trade area" in n
                for n in market["demand_drivers"]["negatives"])
+
+    # The risk face: 45,000 sits ABOVE the lowered tier but BELOW the gate,
+    # so an unguarded `pop < preferred_density` never fires.
+    risk = _risk(_risks_for(mock_cim_data), "Limited trade area population")
+    assert risk is not None
+    assert risk["severity"] == "High"        # below the gate, not merely thin
 
 
 # ── POPULATION_TIERS — narrative grading, settings-editable ──────────
