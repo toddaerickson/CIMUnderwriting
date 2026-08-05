@@ -119,7 +119,16 @@ def _expense_opportunities(cim_data, fin) -> list:
     lines = expense_analysis.get("lines", [])
 
     for line in lines:
-        if line.get("flag") == "ABOVE RANGE" and line.get("cim_value"):
+        # `benchmark_range` is the $/NRSF band, and its ABSENCE is the
+        # discriminator, not an accident: the management-fee line is
+        # benchmarked as a share of EGR (`benchmark_range_pct`) and
+        # carries no `per_nrsf` either, so `bench_high * nrsf` below would
+        # be a percentage times a square footage. Reading the key blindly
+        # raised KeyError on any CIM quoting a fee above the band and took
+        # the whole value-add section down with it. The fee still gets its
+        # own opportunity, computed on the right basis, further down.
+        if (line.get("flag") == "ABOVE RANGE" and line.get("cim_value")
+                and line.get("benchmark_range")):
             bench_high = line["benchmark_range"][1]
             nrsf = cim_data.nrsf or 1
             savings = line["cim_value"] - (bench_high * nrsf)
