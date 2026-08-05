@@ -395,7 +395,8 @@ def isolated_comp_db(tmp_path, monkeypatch):
 
     `data.comp_db` binds `COMP_DB_PATH` at import, so patching
     `config.COMP_DB_PATH` does not reach it — the same frozen-import
-    defect item T already lists for `model.solver`'s target IRR.
+    defect `model.solver`'s target IRR carried until it was fixed, and
+    the reason this fixture patches the MODULE attribute instead.
     """
     import data.comp_db as comp_db_module
     monkeypatch.setattr(comp_db_module, "COMP_DB_PATH",

@@ -12,9 +12,9 @@ The program never trusts CIM expenses at face value.
 import config as cfg
 # Scalars are read through `cfg.` at call time, never bound by value at
 # import — a `from config import MGMT_FEE_TARGET_PCT` would freeze it and
-# make the module deaf to monkeypatching (the defect item T Category 3
-# still owes `model/solver.py`). Dicts below are patched in place, so a
-# direct binding is safe for those.
+# make the module deaf to monkeypatching. `model/solver.py` carried
+# exactly that defect for its target IRR and no longer does. Dicts below
+# are patched in place, so a direct binding is safe for those.
 from config import (EXPENSE_BENCHMARKS, STATE_PROPERTY_TAX_MULTIPLIER,
                     STATE_PROPERTY_TAX_FORMULAS, get_regional_benchmarks)
 from registry import EXPENSE_CATEGORIES, EXPENSE_KEYWORD_MAP, EXPENSE_KEYS

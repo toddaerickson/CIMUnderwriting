@@ -765,13 +765,13 @@ def test_max_offer_captions_quote_the_target_actually_solved_for(tmp_path):
     """The captions must name the target the SOLVER used, not a constant
     that happens to match it today.
 
-    Driven through the per-deal `solver_target_irr`, which is the one
-    route that genuinely moves the solver right now: `solve_max_price`
-    binds `SOLVER_TARGET_IRR` as a default ARGUMENT, frozen at import, so
-    patching config cannot reach it. That frozen binding is a known
-    defect and item T Category 3 owns it — this test is written against
-    the wiring as it is, and will keep passing once Category 3 unfreezes
-    it.
+    Driven through the per-deal `solver_target_irr` — the route an
+    analyst actually uses, and the one that was the ONLY route back when
+    `solve_max_price` bound `SOLVER_TARGET_IRR` as a default argument
+    frozen at import. That binding is gone (see
+    `test_the_solver_target_is_read_at_call_time_not_frozen_at_import`
+    above, which covers the config route), and this test kept passing
+    across the change unaltered, which is what it was written to do.
     """
     memo, workbook = _documents_for(tmp_path, solver_target_irr=0.14)
     text = "\n".join(memo["paragraphs"])

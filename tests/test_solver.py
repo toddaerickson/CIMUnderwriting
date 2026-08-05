@@ -132,8 +132,9 @@ def test_levered_solver_carries_its_assumption_stamp():
 
 def test_levered_solver_reads_its_target_at_call_time(monkeypatch):
     """Rebinding config must be seen — the solver must not freeze the
-    target as a default argument at import (`SOLVER_TARGET_IRR` predates
-    that rule; this one obeys it)."""
+    target as a default argument at import. The unlevered pair used to be
+    the exception to that rule and no longer is; its equivalent lives in
+    `tests/test_config_single_source.py`."""
     monkeypatch.setattr(cfg, "SOLVER_TARGET_LP_NET_IRR", 0.20)
     solved = solve_max_price_levered(adjusted_ttm_noi=300_000)
     assert solved["target_irr"] == 0.20
