@@ -1266,9 +1266,13 @@ def override_key_registry() -> dict:
     # labelled $/NRSF and these two are shares of revenue, so a number
     # typed under the wrong heading would be wrong by three orders of
     # magnitude.
+    # The heading is short because the two row labels — "Default" and
+    # "Clamp Tolerance" — already say which is which under it. The
+    # settings page lays groups out in up to three columns, so a heading
+    # long enough to wrap costs a line in every column beside it.
     for k in cfg.EXPENSE_RATIO:
         reg[f"EXPENSE_RATIO.{k}"] = {
-            "group": "OpEx / Revenue Ratio (assumed, and its clamp)",
+            "group": "OpEx / Revenue Ratio",
             "kind": "scalar", "pct": True, "int": False, "label": _label(k)}
     for k in cfg.REPLACEMENT_COST:
         if k in RC_LEGACY_ALIASES:
