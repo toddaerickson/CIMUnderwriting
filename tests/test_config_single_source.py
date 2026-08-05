@@ -500,9 +500,46 @@ def test_a_saved_mgmt_fee_target_actually_reaches_the_run(monkeypatch,
     deal = _make_extracted_deal(deals_dir)
     deal.assumption_overrides = {"mgmt_fee_target_pct": 0.0}
     deal.save()
-    _start_run(deal)
+    run = _start_run(deal)
 
     assert seen["mgmt_fee_target_pct"] == 0.0
+    assert run.applied_overrides["assumptions"]["mgmt_fee_target_pct"] == 0.0
+
+
+@pytest.mark.django_db
+def test_a_run_on_the_default_still_stamps_the_target_it_used(monkeypatch,
+                                                              tmp_path,
+                                                              settings):
+    """Stamped RESOLVED, not as a delta — the discipline `hold_years`,
+    `transaction_costs` and the debt/waterfall blocks already follow.
+
+    This PR moved the default 5% -> 6%. Without a resolved stamp, a run
+    from before and a run from after — neither with a per-deal override —
+    carry byte-identical `applied_overrides` while underwriting a
+    management fee 100bp apart, which is 1.6% of adjusted NOI on a deal
+    whose CIM omits the fee. A past run has to say what it ran under.
+    """
+    from tests.test_web_runs import _make_extracted_deal, _start_run
+
+    deals_dir = tmp_path / "deals"
+    deals_dir.mkdir()
+    settings.CIM_DEALS_DIR = str(deals_dir)
+
+    def _fake(result, *a, **kw):
+        result.gate_results = []
+        result.gate_summary = {"passed": 0, "failed": 0, "tbd": 0, "total": 0,
+                               "recommendation": "PURSUE",
+                               "failed_gates": [], "tbd_gates": []}
+        return result
+
+    monkeypatch.setattr("webapp.services.run_analysis", _fake)
+    deal = _make_extracted_deal(deals_dir)
+    deal.assumption_overrides = {}          # nothing set — pure default
+    deal.save()
+    run = _start_run(deal)
+
+    assert (run.applied_overrides["assumptions"]["mgmt_fee_target_pct"]
+            == cfg.MGMT_FEE_TARGET_PCT)
 
 
 def test_the_target_is_the_top_of_the_benchmark_band():

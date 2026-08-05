@@ -829,12 +829,21 @@ def _analysis_worker(run_pk):
         am_fee_pct = overrides.get("am_fee_pct")
         am_fee_pct = (float(am_fee_pct) if am_fee_pct not in (None, "")
                       else None)
+        # Stamped RESOLVED, not as a delta, for the reason spelled out
+        # above: this default moved 5% -> 6% on 2026-08-04, so two runs
+        # either side of that change with no per-deal override would
+        # otherwise carry byte-identical stamps while underwriting a
+        # management fee 100bp apart — 1.6% of adjusted NOI on a deal
+        # whose CIM omits the fee.
+        from analysis.financials import resolve_mgmt_fee_target
         stamped = {**overrides, "hold_years": hold_years,
                    "transaction_costs": txn_costs,
                    "capital_structure": capital,
                    "market_cap": market_cap,
                    "debt_terms": debt_terms,
                    "waterfall_terms": waterfall_terms,
+                   "mgmt_fee_target_pct": resolve_mgmt_fee_target(
+                       overrides.get("mgmt_fee_target_pct")),
                    "am_fee_pct": (cfg.AM_FEE_PCT if am_fee_pct is None
                                   else am_fee_pct),
                    "am_fee_base": cfg.AM_FEE_BASE,

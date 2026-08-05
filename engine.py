@@ -597,6 +597,9 @@ def run_analysis(result: AnalysisResult, progress: Callable = None,
             waterfall_terms=resolved_waterfall_terms,
             am_fee_pct=am_fee_pct,
             sources_uses=result.sources_uses,
+            # Or the workbook underwrites a different management fee than
+            # the memo and the .xlsx built from this same run.
+            mgmt_fee_target_pct=mgmt_fee_target_pct,
         )
     except Exception as e:
         result.errors.append(f"Template generation failed: {e}")
