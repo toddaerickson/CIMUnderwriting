@@ -1669,7 +1669,9 @@ def test_the_limits_are_not_reached_on_the_shipped_defaults():
 
 @pytest.mark.parametrize("band,tolerance", [((1.00, 1.00), 0.0),
                                             ((0.97, 0.99), 0.0),
-                                            ((0.99, 1.00), 0.05)])
+                                            # off-form: a NEGATIVE tolerance
+                                            # narrows instead of widening
+                                            ((0.35, 0.55), -0.5)])
 def test_the_bounded_clamp_can_never_come_back_inverted(band, tolerance):
     """The hole the FIRST version of the bound left, found by the second
     audit pass — and it is the same shape as the bug it was fixing.
@@ -1750,3 +1752,117 @@ def test_a_different_misconfiguration_still_speaks_up():
             expense_ratio_clamp()
 
     assert len(registry._WARNED) == 2
+
+
+# ── The stored override the FORM never saw ──────────────────────────
+#
+# `build_config_patch` applies a stored value after checking only that
+# the key exists — it never re-runs `value_in_bounds`. So the form is
+# not the last line of defence it looks like, and a row from an older
+# schema, a fixture or a hand-run UPDATE reaches the derivation raw.
+# Every case below was found by an audit attacking the guard, not by
+# reasoning about it.
+
+def test_a_negative_tolerance_cannot_invert_the_clamp_silently():
+    """The worst of the three, because it produced NO warning.
+
+    A tolerance is a widening; negative, it NARROWS, and (0.35, 0.55)
+    with −0.5 derives (0.85, 0.05). Both endpoints sit INSIDE the limits,
+    so the composed-value bound saw nothing to clamp and said nothing —
+    and `max(lo, min(hi, r))` on an inverted pair returns `lo` for every
+    input. `clamp_expense_ratio` handed back a constant 0.85 whatever the
+    deal's real expense ratio was: silent, and expensive in the direction
+    that overstates expenses.
+    """
+    import registry
+    from registry import clamp_expense_ratio, expense_ratio_clamp
+
+    registry._WARNED.clear()
+    with mock.patch.dict(cfg.EXPENSE_RATIO, {"clamp_tolerance": -0.5}):
+        low, high = expense_ratio_clamp()
+
+        # tolerance treated as 0 -> the clamp IS the band, never inverted
+        assert (low, high) == cfg.EXPENSE_BENCHMARKS["opex_revenue_ratio"]
+        assert low <= high
+        # and it reads its argument again instead of returning a constant
+        assert clamp_expense_ratio(0.40) == 0.40
+        assert clamp_expense_ratio(0.90) == high
+        assert registry._WARNED, "an off-form tolerance changed the model silently"
+
+
+@pytest.mark.parametrize("tolerance", [float("nan"), float("inf"), "abc", None])
+def test_a_non_finite_tolerance_falls_back_to_the_band(tolerance):
+    """NaN is the one that matters: it passes every comparison (`nan > 0`
+    and `nan < 0` are both False) and `min`/`max` hand it straight
+    through, so it reached the projection, came out of `json_safe` as a
+    null, and surfaced as an empty cell rather than as a problem."""
+    import registry
+    from registry import clamp_expense_ratio, expense_ratio_clamp
+
+    registry._WARNED.clear()
+    with mock.patch.dict(cfg.EXPENSE_RATIO, {"clamp_tolerance": tolerance}):
+        low, high = expense_ratio_clamp()
+
+        assert math.isfinite(low) and math.isfinite(high)
+        assert (low, high) == cfg.EXPENSE_BENCHMARKS["opex_revenue_ratio"]
+        assert math.isfinite(clamp_expense_ratio(None))
+        assert registry._WARNED
+
+
+def test_a_numeric_string_tolerance_is_coerced_not_refused():
+    """The boundary the case above must not overshoot. A stored override
+    can arrive as the string "0.1" — JSON round-trips, an older schema,
+    a fixture — and that is a perfectly readable tolerance. Every other
+    resolver in the repo coerces a stored value with `float()`; refusing
+    it here would warn about a setting that is fine and quietly widen
+    the clamp back to the band."""
+    import registry
+    from registry import expense_ratio_clamp
+
+    registry._WARNED.clear()
+    with mock.patch.dict(cfg.EXPENSE_RATIO, {"clamp_tolerance": "0.1"}):
+        assert expense_ratio_clamp() == (0.25, 0.65)
+    assert not registry._WARNED
+
+
+@pytest.mark.parametrize("band", [(float("nan"), 0.55), (0.55, 0.35),
+                                  (0.35,), "0.35,0.55", None])
+def test_an_unusable_band_stops_clipping_rather_than_inventing_one(band):
+    """A band that cannot be read is not a reason to substitute a
+    plausible-looking pair — that would be an assumption nobody made,
+    applied to every deal. Falling back to the LIMITS means the clamp
+    stops clipping, which is the honest reading of "no credible band",
+    and the projection still survives because the limits are exactly the
+    interval that keeps `1 - ratio` positive."""
+    import registry
+    from registry import EXPENSE_RATIO_LIMITS, clamp_expense_ratio, \
+        expense_ratio_clamp
+
+    registry._WARNED.clear()
+    with mock.patch.dict(cfg.EXPENSE_BENCHMARKS,
+                         {"opex_revenue_ratio": band}):
+        assert expense_ratio_clamp() == EXPENSE_RATIO_LIMITS
+        assert clamp_expense_ratio(2.0) == EXPENSE_RATIO_LIMITS[1] < 1.0
+        assert registry._WARNED
+
+
+def test_no_off_form_input_can_reach_a_division_by_zero():
+    """The property all of the above exist to protect, asserted directly
+    against the projection rather than against the resolver."""
+    from analysis.valuation import project_cash_flows
+
+    hostile = [((0.35, 0.55), -0.5), ((1.0, 1.0), 0.0),
+               ((0.35, 0.55), float("nan")), ((float("nan"), 0.55), 0.10),
+               ((0.55, 0.35), 0.10), (None, 0.10), ((0.35, 0.55), "x")]
+
+    for band, tolerance in hostile:
+        with mock.patch.dict(cfg.EXPENSE_BENCHMARKS,
+                             {"opex_revenue_ratio": band}), \
+                mock.patch.dict(cfg.EXPENSE_RATIO,
+                                {"clamp_tolerance": tolerance}):
+            out = project_cash_flows(
+                ttm_noi=300_000, price=4_000_000, capex=0,
+                params=cfg.SCENARIO_DEFAULTS[ScenarioType.BASE],
+                expense_ratio=None, exit_cap=0.0625)
+            assert math.isfinite(out["revenue"][0]) and out["revenue"][0] > 0, \
+                f"band={band!r} tolerance={tolerance!r}"

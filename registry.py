@@ -7,6 +7,7 @@ that were previously scattered across 8+ files.
 
 import datetime
 import logging
+import math
 from dataclasses import dataclass
 from enum import Enum
 
@@ -102,11 +103,15 @@ EXPENSE_RATIO_LIMITS = (0.0, 0.95)
 #: three scenarios. An unthrottled warning is ~200 identical lines for
 #: one deal, which buries the one line anybody needed to read.
 #:
-#: Keyed on the message, so a DIFFERENT misconfiguration still speaks up
-#: and a corrected-then-broken-again setting speaks up again. Process
-#: lifetime is the right scope: the condition describes config, not a
-#: deal, so repeating it per deal adds nothing. A race between threads
-#: costs a duplicate line, which is the harmless direction.
+#: Keyed on the MESSAGE, so a different misconfiguration still speaks
+#: up. It does NOT re-warn for a combination already reported in this
+#: process, even if the setting was corrected and broken again the same
+#: way — the entry never expires. That is deliberate (the condition
+#: describes config, not a deal, so repeating it says nothing new) and
+#: it is stated here because an earlier version of this comment claimed
+#: the opposite, which an audit caught by testing the claim.
+#:
+#: A race between threads costs a duplicate line, the harmless direction.
 _WARNED = set()
 
 
@@ -114,6 +119,28 @@ def _warn_once(message: str) -> None:
     if message not in _WARNED:
         _WARNED.add(message)
         logger.warning("%s", message)
+
+
+def _finite(value):
+    """-> float, or None if `value` is not a usable finite number.
+
+    The settings form rejects both cases, so this only fires on a row
+    that reached the database another way — an older schema, a hand-run
+    UPDATE, a fixture. `build_config_patch` applies a stored value
+    without re-checking its bounds, so the form is not the last line of
+    defence it looks like.
+
+    NaN is the one worth naming: it is not caught by any comparison
+    (`nan > 0` and `nan < 0` are both False, and `min`/`max` pass it
+    straight through), so it would flow into the projection, out through
+    `json_safe` as a null, and surface as an empty cell rather than as a
+    problem.
+    """
+    try:
+        v = float(value)
+    except (TypeError, ValueError):
+        return None
+    return v if math.isfinite(v) else None
 
 
 def expense_ratio_clamp() -> tuple[float, float]:
@@ -133,8 +160,50 @@ def expense_ratio_clamp() -> tuple[float, float]:
     """
     import config as cfg
 
-    low, high = cfg.EXPENSE_BENCHMARKS["opex_revenue_ratio"]
-    tolerance = cfg.EXPENSE_RATIO["clamp_tolerance"]
+    floor, ceiling = EXPENSE_RATIO_LIMITS
+
+    # The two inputs are VALIDATED, not trusted, and that is what makes
+    # the ordering argument below a fact rather than a hope. An audit
+    # broke the previous version with `clamp_tolerance = -0.5`: a
+    # negative tolerance NARROWS the band instead of widening it, so
+    # (0.35, 0.55) derived (0.85, 0.05) — inverted, and with both
+    # endpoints inside the limits, so the bound below saw nothing wrong
+    # and no warning fired. `clamp_expense_ratio` then returned a
+    # constant 0.85 for every input, having stopped reading its argument
+    # entirely. Silent, and wrong in the expensive direction.
+    #
+    # Only reachable off-form — `_bounds_for` refuses a negative
+    # tolerance and a NaN — but `build_config_patch` applies a STORED
+    # override without re-checking its bounds, so a row written by an
+    # older version, a fixture or a hand-run UPDATE arrives here
+    # unvalidated. The house rule for stored overrides is this one:
+    # log and carry on, never take a run down (`resolve_capital_structure`
+    # settles an unknown basis the same way).
+    band = cfg.EXPENSE_BENCHMARKS["opex_revenue_ratio"]
+    try:
+        low, high = (_finite(band[0]), _finite(band[1]))
+    except (TypeError, KeyError, IndexError, ValueError):
+        low = high = None
+    if low is None or high is None or low > high:
+        # No credible band to widen. Falling back to the LIMITS rather
+        # than to some invented pair: the limits are the widest interval
+        # that keeps `1 - ratio` positive, so the clamp stops clipping
+        # instead of clipping to a number nobody chose.
+        _warn_once(
+            f"EXPENSE_BENCHMARKS['opex_revenue_ratio'] is {band!r}, which "
+            f"is not a usable (low, high) pair — the OpEx/revenue clamp "
+            f"falls back to {EXPENSE_RATIO_LIMITS} and clips nothing.")
+        return (floor, ceiling)
+
+    tolerance = _finite(cfg.EXPENSE_RATIO["clamp_tolerance"])
+    if tolerance is None or tolerance < 0:
+        _warn_once(
+            f"EXPENSE_RATIO['clamp_tolerance'] is "
+            f"{cfg.EXPENSE_RATIO['clamp_tolerance']!r}; a tolerance widens "
+            f"the band and cannot be negative or non-numeric — using 0, so "
+            f"the clamp is the benchmark band itself.")
+        tolerance = 0.0
+
     # Rounded because the subtraction is not exact in binary: 0.35 − 0.10
     # is 0.24999999999999997, and a clamp floor a quintillionth below the
     # value it is supposed to be makes `clamp(0.10) == 0.25` false. Ten
@@ -159,10 +228,10 @@ def expense_ratio_clamp() -> tuple[float, float]:
     # clamp stopped reading its own argument and handed back 1.0 — the
     # exact ZeroDivisionError the limits exist to prevent, now reached
     # THROUGH the guard. Clamping both ends with one monotone function
-    # cannot invert them: `derived` is always ordered (the band enforces
-    # low <= high and the same tolerance widens each side), and a
-    # monotone map preserves that order.
-    floor, ceiling = EXPENSE_RATIO_LIMITS
+    # cannot invert them, and `derived` is now ordered BY CONSTRUCTION —
+    # the block above rejects a band with low > high and a negative
+    # tolerance, which were the only two ways the pair could arrive out
+    # of order. A monotone map preserves that order.
     bounded = tuple(min(max(v, floor), ceiling) for v in derived)
     if bounded != derived:
         _warn_once(
