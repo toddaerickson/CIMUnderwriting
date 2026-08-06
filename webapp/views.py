@@ -599,32 +599,36 @@ def settings_page(request):
         else:
             status = "superseded"
         # Rows saved before the value box grew bounds, or written straight
-        # to the model, still resolve into runs. They are badged rather
-        # than dropped — see forms.value_in_bounds. The note is written
-        # here, where the status is known, and it branches on ALL FOUR
-        # statuses rather than "superseded vs everything else": a
-        # scheduled row has not taken effect either
-        # (`resolve_config_overrides` filters `effective_date__lte`), so
-        # the binary version told it "it does reach runs", which is
-        # false. The status vocabulary exists precisely so this page and
-        # a run can never disagree; a note that collapses it gives that
-        # up. `unknown key` cannot appear here — value_in_bounds returns
-        # True for a key config no longer defines — but it is spelled out
-        # rather than left to the default, so adding a fifth status
-        # cannot silently inherit the wrong sentence.
+        # to the model, are badged rather than deleted — the row is never
+        # retired from the database. What CHANGED is that they no longer
+        # reach a run: `build_config_patch` re-checks bounds and skips
+        # them, so the model uses the config default and the run record
+        # lists the key under `config_skipped`.
+        #
+        # That is why the note no longer reads `reach[status]` for an
+        # out-of-range row. The four-way branch exists so this page and a
+        # run can never disagree, and after the skip they agree on one
+        # sentence: an out-of-range row does not reach a run, whatever
+        # its status. Saying "It reaches runs today." here would be the
+        # same lie the four-way branch was written to fix, just pointing
+        # the other way. The status is still reported beside it when it
+        # adds a SECOND reason (scheduled, superseded, unknown key), so
+        # nothing that vocabulary carried is lost.
         oob = not value_in_bounds(r.key, r.value)
-        reach = {
-            "active": "It reaches runs today.",
-            "scheduled": (f"It reaches runs from "
-                          f"{r.effective_date:%Y-%m-%d}, not yet."),
-            "superseded": "Superseded, so it does not reach a run.",
-            "unknown key": "config.py no longer defines this key.",
+        also = {
+            "active": "",
+            "scheduled": (f" It would not have applied until "
+                          f"{r.effective_date:%Y-%m-%d} in any case."),
+            "superseded": " It is superseded as well.",
+            "unknown key": " config.py no longer defines this key either.",
         }
         overrides.append({
             "row": r, "status": status, "out_of_bounds": oob,
             "out_of_bounds_note": (
-                "Outside the allowed range for this setting. "
-                f"{reach[status]} Delete it and re-add the value in range."),
+                "Outside the allowed range for this setting, so it is "
+                "SKIPPED: runs use the config default instead and record "
+                f"the key under config_skipped.{also[status]} "
+                "Delete it and re-add the value in range."),
             "display_value": format_override_value(r.key, r.value),
             "label": registry.get(r.key, {}).get("label", r.key),
         })

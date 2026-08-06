@@ -283,13 +283,37 @@ def build_config_patch(deltas: dict):
     the run record never claims a threshold the engine didn't see (an
     old override row must never crash a run, and never lie either)."""
     from registry import ScenarioType
-    from webapp.forms import override_key_registry
+    from webapp.forms import override_key_registry, value_in_bounds
 
     registry = override_key_registry()
     patch, solver_irr, skipped = {}, None, []
     for key, value in deltas.items():
         if key not in registry:
             logger.warning("config override for unknown key %r skipped", key)
+            skipped.append(key)
+            continue
+        # Bounds are re-checked HERE, not only at the form. PR #45 added
+        # per-key bounds to the settings box, but this function applied a
+        # stored value after checking only that the key still exists — so
+        # the bounds were a form-layer guard, and a row written before
+        # they existed, by a fixture, or by a hand-run UPDATE reached the
+        # model unvalidated. #45's own motivating case is the one that
+        # matters: `-5` under Solver Target IRR stores `-0.05`, and the
+        # solver ran on it.
+        #
+        # It goes BEFORE the SOLVER_TARGET_IRR branch below on purpose —
+        # that branch returns early, so a check placed after it would
+        # miss the exact key the defect was found on.
+        #
+        # This also catches a non-numeric or NaN stored value, which
+        # `float(value)` further down would otherwise raise on, taking
+        # the whole run out over one bad row.
+        if not value_in_bounds(key, value, registry[key]):
+            logger.warning(
+                "config override %r=%r is outside the allowed range for "
+                "that setting — skipped, so the run uses the config "
+                "default. Delete the row and re-add the value in range.",
+                key, value)
             skipped.append(key)
             continue
         if key == "SOLVER_TARGET_IRR":

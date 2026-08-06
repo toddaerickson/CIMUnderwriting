@@ -1205,16 +1205,36 @@ def _within(spec: dict, values) -> bool:
                for v in values)
 
 
-def value_in_bounds(key: str, value) -> bool:
+def value_in_bounds(key: str, value, spec: dict = None) -> bool:
     """True if an ALREADY-STORED value still satisfies its bounds.
 
     Validation added at the form cannot reach rows saved before it
     existed, and such a row rendering as a plain number is the same
-    silence this whole block is about. The settings page badges the ones
-    that fail; it does not refuse to apply them, because retiring an
+    silence this whole block is about.
+
+    **PR #45 badged a failing row and still applied it; that is now
+    reversed and the reversal is written here rather than deleted, so it
+    stays visible.** The original reasoning was that "retiring an
     override the operator entered deliberately would move published
-    numbers without anyone asking for it."""
-    spec = override_key_registry().get(key)
+    numbers without anyone asking for it" — true, but it weighed a
+    silent change against a silent change. An out-of-bounds value is one
+    this registry defines as nonsense (#45's own motivating case was
+    `-5` typed under Solver Target IRR, stored as `-0.05`, with the
+    solver running on it), and continuing to compute on it does not
+    preserve anyone's intent — it publishes a number the operator can no
+    longer even re-enter through the UI.
+
+    What resolves the tension is that skipping is NOT silent, and the
+    channel already existed: `build_config_patch` returns the key in
+    `skipped`, the worker stamps it as `config_skipped` on the run
+    record, and the settings page badges the row. The row itself is
+    still never retired from the database — that part of #45 stands.
+
+    `spec` is accepted so a caller holding a built registry does not pay
+    for a rebuild per key; `build_config_patch` checks every delta.
+    """
+    if spec is None:
+        spec = override_key_registry().get(key)
     if spec is None:
         return True                    # already badged "unknown key"
     vals = value if isinstance(value, (list, tuple)) else [value]
@@ -1222,6 +1242,9 @@ def value_in_bounds(key: str, value) -> bool:
         vals = [float(v) for v in vals]
     except (TypeError, ValueError):
         return False
+    # NaN fails every comparison in `_within`, so it lands out of bounds
+    # rather than sailing through — which is the correct answer for a
+    # value that would otherwise propagate as a null to every surface.
     return _within(spec, vals)
 
 
