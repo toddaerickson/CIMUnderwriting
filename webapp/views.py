@@ -649,10 +649,19 @@ def settings_page(request):
         # scheduled row told "it does reach runs"), reintroduced in new
         # wording and caught in review.
         #
-        # So only the ACTIVE row — the one that actually reaches
-        # `build_config_patch` — may claim the skip and the
-        # `config_skipped` stamp. The others say why they do not reach a
-        # run at all, which is true regardless of their value.
+        # So among the rows this NOTE can appear on, only the ACTIVE one
+        # may claim the skip and the `config_skipped` stamp. The others
+        # say why they do not reach a run at all, which is true whatever
+        # their value.
+        #
+        # "among the rows this note can appear on" is doing real work:
+        # `config_skipped` is not active-only in general — an unknown-key
+        # row lands there too. It just never carries THIS note, because
+        # `value_in_bounds` returns True for a key config no longer
+        # defines, so `oob` is always False for that status and the note
+        # never renders. The `unknown key` branch below is therefore
+        # unreachable today, and is spelled out anyway so a fifth status
+        # cannot silently inherit someone else's sentence.
         oob = not value_in_bounds(r.key, r.value)
         refusal = {
             "active": ("so it is SKIPPED: runs use the config default "

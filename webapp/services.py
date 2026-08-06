@@ -305,9 +305,16 @@ def build_config_patch(deltas: dict):
         # that branch returns early, so a check placed after it would
         # miss the exact key the defect was found on.
         #
-        # This also catches a non-numeric or NaN stored value, which
-        # `float(value)` further down would otherwise raise on, taking
-        # the whole run out over one bad row.
+        # It also catches a stored value that is not a usable number, and
+        # the two halves of that fail DIFFERENTLY — worth stating because
+        # an earlier version of this comment ran them together. A
+        # non-numeric string raises `ValueError` from the `float(value)`
+        # calls further down, taking the whole run out over one bad row.
+        # NaN raises nothing at all: `float('nan')` succeeds, the
+        # three-level branches never call `float()` in the first place,
+        # and the value propagates as a silent `nan` through every
+        # surface that reads it. The check stops both; only the first
+        # would ever have announced itself.
         if not value_in_bounds(key, value, registry[key]):
             logger.warning(
                 "config override %r=%r is outside the allowed range for "
@@ -838,6 +845,20 @@ def _analysis_worker(run_pk):
         # does, and the falsy check stamped the global one as applied.
         if overrides.get("solver_target_irr") is not None:
             applied.pop("SOLVER_TARGET_IRR", None)
+            # And out of `skipped` for the SAME reason, which the pop
+            # above missed because nothing read `skipped` until this PR
+            # put it on screen. If the global row was out of range it is
+            # in `skipped`, and the run page would tell the analyst "this
+            # run used the built-in default instead" — false: a per-deal
+            # target superseded that row and the engine used the deal's
+            # own value. A superseded row's refusal is not this run's
+            # story, the same way its value is not.
+            #
+            # Only this key needs it. The other per-deal sections
+            # (transaction costs, market cap) strip their keys out of
+            # `config_deltas` BEFORE `build_config_patch`, so they can
+            # never reach the bounds check or the skipped list at all.
+            skipped = [k for k in skipped if k != "SOLVER_TARGET_IRR"]
         # Timing and round-trip costs are stamped with their RESOLVED
         # values, not as deltas. Item B changed every published IRR, so a
         # run recording nothing because it sat on the defaults would be

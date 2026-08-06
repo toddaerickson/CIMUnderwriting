@@ -1465,3 +1465,82 @@ def test_only_the_row_that_reaches_a_run_may_claim_the_skip(client, operator):
     assert skipped == []
     assert ("config_skipped" in content) is False
     assert "will be skipped when that date arrives" in content
+
+
+@pytest.mark.django_db
+def test_a_per_deal_target_clears_the_global_rows_skip(monkeypatch, tmp_path,
+                                                       settings):
+    """A per-deal solver target supersedes the global row ENTIRELY, so
+    the global row's refusal is not this run's story either.
+
+    `applied.pop("SOLVER_TARGET_IRR")` has always handled the value side
+    (PR #23's finding: stamping a threshold the engine never used). The
+    skip side was invisible until this PR put `config_skipped` on screen,
+    and then the run page would tell an analyst "this run used the
+    built-in default instead" while the engine ran on the deal's own 10%.
+    """
+    from django.utils import timezone
+
+    from tests.test_web_runs import _make_extracted_deal, _start_run
+    from webapp.models import ConfigOverride
+
+    deals_dir = tmp_path / "deals"
+    deals_dir.mkdir()
+    settings.CIM_DEALS_DIR = str(deals_dir)
+    seen = {}
+
+    def _fake(result, *a, solver_target_irr=None, **kw):
+        seen["solver_target_irr"] = solver_target_irr
+        result.gate_results = []
+        result.gate_summary = {"passed": 0, "failed": 0, "tbd": 0, "total": 0,
+                               "recommendation": "PURSUE",
+                               "failed_gates": [], "tbd_gates": []}
+        return result
+
+    monkeypatch.setattr("webapp.services.run_analysis", _fake)
+
+    # a global row that is out of range, so build_config_patch skips it
+    ConfigOverride.objects.create(key="SOLVER_TARGET_IRR", value=-0.05,
+                                  effective_date=timezone.localdate())
+    deal = _make_extracted_deal(deals_dir)
+    deal.assumption_overrides = {"solver_target_irr": 0.10}
+    deal.save()
+    run = _start_run(deal)
+
+    # the engine ran on the DEAL's target, not the default
+    assert seen["solver_target_irr"] == 0.10
+    # so the run must not claim the key was skipped and defaulted
+    assert "SOLVER_TARGET_IRR" not in run.applied_overrides["config_skipped"]
+    assert "SOLVER_TARGET_IRR" not in run.applied_overrides["config"]
+
+
+@pytest.mark.django_db
+def test_the_global_row_is_still_reported_when_nothing_supersedes_it(
+        monkeypatch, tmp_path, settings):
+    """The other half — clearing the skip must not swallow a real one."""
+    from django.utils import timezone
+
+    from tests.test_web_runs import _make_extracted_deal, _start_run
+    from webapp.models import ConfigOverride
+
+    deals_dir = tmp_path / "deals"
+    deals_dir.mkdir()
+    settings.CIM_DEALS_DIR = str(deals_dir)
+
+    def _fake(result, *a, **kw):
+        result.gate_results = []
+        result.gate_summary = {"passed": 0, "failed": 0, "tbd": 0, "total": 0,
+                               "recommendation": "PURSUE",
+                               "failed_gates": [], "tbd_gates": []}
+        return result
+
+    monkeypatch.setattr("webapp.services.run_analysis", _fake)
+
+    ConfigOverride.objects.create(key="SOLVER_TARGET_IRR", value=-0.05,
+                                  effective_date=timezone.localdate())
+    deal = _make_extracted_deal(deals_dir)
+    deal.assumption_overrides = {}          # nothing supersedes it
+    deal.save()
+    run = _start_run(deal)
+
+    assert run.applied_overrides["config_skipped"] == ["SOLVER_TARGET_IRR"]
