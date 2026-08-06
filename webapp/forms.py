@@ -1238,6 +1238,13 @@ def value_in_bounds(key: str, value, spec: dict = None) -> bool:
     if spec is None:
         return True                    # already badged "unknown key"
     vals = value if isinstance(value, (list, tuple)) else [value]
+    # `bool` before `float`: True is 1.0 and False is 0.0 in Python, so a
+    # JSON `true` stored against, say, GATES.min_irr_5yr would read as a
+    # 100% IRR gate — in bounds, accepted, and completely wrong. The form
+    # cannot produce a bool, but the whole point of this function is the
+    # row that never went through the form.
+    if any(isinstance(v, bool) for v in vals):
+        return False
     try:
         vals = [float(v) for v in vals]
     except (TypeError, ValueError):

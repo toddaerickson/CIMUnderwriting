@@ -1272,3 +1272,106 @@ def test_the_settings_page_and_a_run_agree_about_an_out_of_range_row(
     run_skipped_it = "SOLVER_TARGET_IRR" in skipped and solver_irr is None
 
     assert page_says_skipped is run_skipped_it is True
+
+
+@pytest.mark.parametrize("value", [True, False, [True, 0.55]])
+def test_a_boolean_stored_value_is_refused(value):
+    """`float(True)` is 1.0, so a JSON `true` stored against an IRR gate
+    would read as a 100% gate — in bounds, accepted, and nonsense. The
+    form cannot produce a bool; the row that never went through the form
+    is exactly what this function exists for."""
+    key = ("EXPENSE_BENCHMARKS.opex_revenue_ratio"
+           if isinstance(value, list) else "GATES.min_irr_5yr")
+    patch, _solver, skipped = _patch_for(key, value)
+
+    assert skipped == [key]
+    assert patch == {}
+
+
+@pytest.mark.django_db
+def test_a_skipped_override_is_visible_on_the_run_page(client, operator,
+                                                       tmp_path, settings):
+    """The stamp was written to `applied_overrides["config_skipped"]` and
+    rendered NOWHERE — a database field no user could see.
+
+    That gap is load-bearing, not cosmetic: refusing an out-of-range row
+    is only defensible because it is reported, and an unrendered stamp
+    makes the refusal silent — the position PR #45 was right to reject.
+    So the warning has to reach a page.
+    """
+    from webapp.models import AnalysisRun, Deal
+
+    deals_dir = tmp_path / "deals"
+    deals_dir.mkdir()
+    settings.CIM_DEALS_DIR = str(deals_dir)
+
+    deal = Deal.objects.create(deal_id="skip-vis", property_name="Skip Vis")
+    AnalysisRun.objects.create(
+        deal=deal, status="done",
+        result_json={"gate_summary": {"recommendation": "PURSUE",
+                                      "passed": 1, "total": 1},
+                     "gate_results": []},
+        applied_overrides={"config": {},
+                           "config_skipped": ["SOLVER_TARGET_IRR"]})
+
+    content = client.get(f"/deals/{deal.pk}/").content.decode()
+
+    assert "Settings override not applied to this run" in content
+    assert "SOLVER_TARGET_IRR" in content
+    assert "used the built-in default instead" in content
+
+
+@pytest.mark.django_db
+def test_a_run_with_nothing_skipped_shows_no_such_warning(client, operator,
+                                                          tmp_path, settings):
+    """The other half — a banner that fires on every run is furniture,
+    not a warning."""
+    from webapp.models import AnalysisRun, Deal
+
+    deals_dir = tmp_path / "deals"
+    deals_dir.mkdir()
+    settings.CIM_DEALS_DIR = str(deals_dir)
+
+    deal = Deal.objects.create(deal_id="skip-none", property_name="Skip None")
+    AnalysisRun.objects.create(
+        deal=deal, status="done",
+        result_json={"gate_summary": {"recommendation": "PURSUE",
+                                      "passed": 1, "total": 1},
+                     "gate_results": []},
+        applied_overrides={"config": {}, "config_skipped": []})
+
+    content = client.get(f"/deals/{deal.pk}/").content.decode()
+
+    # Prove the page actually RENDERED first. A 404 contains no warning
+    # either, so the negative assertion alone would pass against a broken
+    # URL — which is exactly how the positive test above was failing
+    # until the route was corrected.
+    assert "PURSUE" in content
+    assert "Settings override not applied to this run" not in content
+
+
+@pytest.mark.django_db
+def test_the_skipped_warning_does_not_edit_the_stored_run_record(
+        client, operator, tmp_path, settings):
+    """`r["errors"]` IS the run's stored payload. Appending to it in place
+    would rewrite the engine's own record of what it reported — a warning
+    that falsifies the evidence it is warning about."""
+    from webapp.models import AnalysisRun, Deal
+
+    deals_dir = tmp_path / "deals"
+    deals_dir.mkdir()
+    settings.CIM_DEALS_DIR = str(deals_dir)
+
+    deal = Deal.objects.create(deal_id="skip-imm", property_name="Skip Imm")
+    run = AnalysisRun.objects.create(
+        deal=deal, status="done",
+        result_json={"gate_summary": {"recommendation": "PURSUE",
+                                      "passed": 1, "total": 1},
+                     "gate_results": [], "errors": ["engine said this"]},
+        applied_overrides={"config_skipped": ["GATES.min_irr_5yr"]})
+
+    client.get(f"/deals/{deal.pk}/")
+    client.get(f"/deals/{deal.pk}/")          # twice — an append would grow
+
+    run.refresh_from_db()
+    assert run.result_json["errors"] == ["engine said this"]

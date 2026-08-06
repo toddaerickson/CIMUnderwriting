@@ -449,6 +449,36 @@ def deal_detail(request, pk):
         r = done_run.result_json or {}
         ctx["header"] = results_ctx.header_metrics(deal, r)
         ctx["run_warnings"] = r.get("errors") or []
+
+        # A settings override this run REFUSED, surfaced where the numbers
+        # it changed are read. `build_config_patch` skips a stored row
+        # whose value is outside its key's bounds, and the worker has
+        # always stamped that on `applied_overrides["config_skipped"]` —
+        # but nothing rendered the stamp, so it was a database field no
+        # user could see.
+        #
+        # That gap mattered more than it looks. Refusing an out-of-range
+        # row is only defensible BECAUSE it is reported; the argument for
+        # reversing PR #45's "badge it and apply it anyway" was precisely
+        # that skipping is not silent. A stamp nobody can read makes it
+        # silent, which is the position #45 was right to reject.
+        #
+        # It joins `run_warnings` rather than getting a banner of its own:
+        # that banner already renders on EVERY tab, and an override the
+        # run declined moved numbers on all of them, not just the summary.
+        skipped_cfg = (done_run.applied_overrides or {}).get(
+            "config_skipped") or []
+        if skipped_cfg:
+            # Concatenate, never append — `r["errors"]` is the stored
+            # result payload, and mutating it here would edit the run's
+            # own record of what the engine reported.
+            ctx["run_warnings"] = ctx["run_warnings"] + [
+                "Settings override not applied to this run: "
+                f"{', '.join(sorted(skipped_cfg))}. The value stored for "
+                "it is outside the allowed range for that setting (or the "
+                "key no longer exists), so this run used the built-in "
+                "default instead. Fix or delete the row on the Settings "
+                "page and re-run."]
         if tab == "summary":
             ctx.update(results_ctx.summary_context(r))
             ctx.update(results_ctx.checks_context(r))
