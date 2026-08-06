@@ -58,6 +58,13 @@ class AnalysisContext:
     gate_results: list = field(default_factory=list)
     gate_summary: dict = field(default_factory=dict)
 
+    # Assumption fill log (item T Category 4) — every value this run
+    # invented because the CIM did not supply it. The CLI is a separate
+    # orchestration from engine.run_analysis, so it carries its own copy
+    # for the same reason `market_cap` above does: a disclosure that
+    # exists on only one of the two entry points is not a disclosure.
+    assumption_fill_log: list = field(default_factory=list)
+
     # ── Outputs ───────────────────────────────────────────────────
     memo_path: str = ""
     excel_path: str = ""

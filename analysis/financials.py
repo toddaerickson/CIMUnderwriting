@@ -20,7 +20,7 @@ from config import (EXPENSE_BENCHMARKS, STATE_PROPERTY_TAX_MULTIPLIER,
 from registry import EXPENSE_CATEGORIES, EXPENSE_KEYWORD_MAP, EXPENSE_KEYS
 from analysis.fills import (BENCHMARK_LOW, Fill, MGMT_FEE_TARGET, STATE_ABSENT,
                             STATE_TAX_FORMULA, UNIT_DOLLARS, UNIT_PCT,
-                            UNIT_TEXT)
+                            UNIT_TEXT, to_dicts)
 
 
 def resolve_mgmt_fee_target(mgmt_fee_target_pct=None) -> float:
@@ -96,6 +96,7 @@ def analyze_financials(cim_data, comp_db=None,
         # this key off each stage rather than re-deciding what each
         # fallback would have done.
         "fills": expenses.get("fills", []),
+        # (DICTS, not `Fill` objects — see `_analyze_expenses`.)
     }
 
 
@@ -385,7 +386,13 @@ def _analyze_expenses(cim_data, nrsf: float, egr: float, state: str = "",
         "total_cim_expenses": total_cim_expenses,
         "total_adjusted_expenses": total_adjusted_expenses,
         "adjustments": adjustments,
-        "fills": fills,
+        # DICTS, not `Fill` objects: this dict is persisted through
+        # `webapp.services.json_safe`, whose last line is `str(obj)` for
+        # anything it does not recognize, so a dataclass would land in the
+        # run record as "Fill(field='insurance', ...)" — valid JSON, never
+        # raises, and not data. `fills.collect` reads it back through
+        # `from_dicts`.
+        "fills": to_dicts(fills),
         "benchmark_source": benchmark_source,
     }
 

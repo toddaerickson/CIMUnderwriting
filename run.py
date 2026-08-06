@@ -272,6 +272,19 @@ def stage_gates_and_risks(ctx: AnalysisContext):
         ctx.risk_analysis = ctx._analyze_risks()
         del ctx._analyze_risks
 
+    # Assembled ONCE, here, exactly as engine.run_analysis does it, and
+    # then handed to all three writers below — the CLI's memo, workbook
+    # and LP summary must disclose the same assumptions the web app's do
+    # (item T Category 4).
+    from analysis import fills as model_fills
+    ctx.assumption_fill_log = model_fills.to_dicts(model_fills.collect(
+        cim_data=ctx.cim_data,
+        financial_analysis=ctx.financial_analysis,
+        physical_analysis=ctx.physical_analysis,
+        market_cap=ctx.market_cap,
+        va_results=ctx.va_results,
+        expense_ratio=ctx.expense_ratio))
+
 
 def stage_output(ctx: AnalysisContext, comp_db):
     """[6/7] Generate output files and save to comp database."""
@@ -294,6 +307,7 @@ def stage_output(ctx: AnalysisContext, comp_db):
         va_results=ctx.va_results,
         va_max_offer=ctx.va_max_offer,
         sources_uses=ctx.sources_uses,
+        assumption_fill_log=ctx.assumption_fill_log,
         output_dir=ctx.output_dir,
     )
     logger.info("  Memo: %s", ctx.memo_path)
@@ -317,6 +331,7 @@ def stage_output(ctx: AnalysisContext, comp_db):
             gate_results=ctx.gate_results,
             gate_summary=ctx.gate_summary,
             sources_uses=ctx.sources_uses,
+            assumption_fill_log=ctx.assumption_fill_log,
             output_dir=ctx.output_dir,
         )
         logger.info("  Investor summary: %s", ctx.investor_summary_path)
@@ -333,6 +348,7 @@ def stage_output(ctx: AnalysisContext, comp_db):
         va_results=ctx.va_results,
         va_max_offer=ctx.va_max_offer,
         sources_uses=ctx.sources_uses,
+        assumption_fill_log=ctx.assumption_fill_log,
         output_dir=ctx.output_dir,
     )
     logger.info("  Model: %s", ctx.excel_path)
@@ -556,6 +572,17 @@ def _print_summary(ctx: AnalysisContext):
         if cim_data.asking_price:
             discount = (cim_data.asking_price - va_mp) / cim_data.asking_price
             print(f"  Discount to Asking: {discount:.1%}")
+
+    # Assumptions this run had to invent (item T Category 4). The terminal
+    # summary is the CLI's third documented output, and a recommendation
+    # printed without saying how much of it rests on defaults is the
+    # silent-fallback problem in its shortest form.
+    if ctx.assumption_fill_log:
+        n = len(ctx.assumption_fill_log)
+        print()
+        print(f"  ASSUMPTIONS FILLED FROM DEFAULTS: {n}")
+        for row in ctx.assumption_fill_log:
+            print(f"  - {row['field']}: {row['label']}")
 
     # Recommendation
     print()

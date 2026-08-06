@@ -2425,3 +2425,44 @@ def test_the_value_add_fills_survive_the_json_boundary(tmp_path):
     assert all("field" in row and "source_key" in row for row in rows)
     assert not any(isinstance(v, str) and v.startswith("Fill(")
                    for row in rows for v in row.values())
+
+
+def test_the_cli_discloses_the_same_assumptions_the_web_app_does(tmp_path,
+                                                                 monkeypatch):
+    """The CLI is a SEPARATE orchestration from `engine.run_analysis`, so
+    every wire has to be run twice or one entry point ships a document
+    that hides what the other discloses. An audit agent caught the memo,
+    the workbook and the LP summary all reaching `run.stage_output` with
+    no fill log at all.
+
+    MUTATION: drop `assumption_fill_log=ctx.assumption_fill_log` from any
+    of the three writer calls in `run.stage_output`.
+    """
+    import run as cli
+    from context import AnalysisContext
+
+    ctx = AnalysisContext(pdf_path=str(tmp_path / "deal.pdf"))
+    ctx.cim_data = stabilized_deal()
+
+    class _NoComps:
+        def query_expense_benchmarks(self, **kw):
+            return None
+
+        def query_rent_comps(self, **kw):
+            return None
+
+        def save_analysis(self, **kw):
+            return None
+
+    comp_db = _NoComps()
+    cli.stage_analyze(ctx, comp_db)
+    cli.stage_valuate(ctx)
+    cli.stage_gates_and_risks(ctx)
+
+    assert ctx.assumption_fill_log, "the CLI never assembled a fill log"
+    cli.stage_output(ctx, comp_db)
+
+    text = _memo_text(ctx.memo_path)
+    assert "Appendix A. Assumptions Filled From Defaults" in text
+    for row in ctx.assumption_fill_log:
+        assert row["field"] in text

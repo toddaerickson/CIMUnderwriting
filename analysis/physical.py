@@ -7,7 +7,7 @@ replacement cost for comparison against asking price.
 
 from config import REPLACEMENT_COST, FACILITY_TYPES
 from registry import age_band, asset_age
-from analysis.fills import CC_PCT_ABSENT, Fill, UNIT_PCT
+from analysis.fills import CC_PCT_ABSENT, Fill, UNIT_PCT, to_dicts
 
 
 def analyze_physical(cim_data) -> dict:
@@ -199,7 +199,10 @@ def _compute_replacement_cost(cim_data) -> dict:
         "total_replacement": total_replacement,
         "replacement_per_sf": total_replacement / nrsf if nrsf else None,
         "facility_type_details": type_details,
-        "fills": fills,
+        # DICTS, for the same reason `analysis/financials.py` gives: this
+        # dict is persisted through `json_safe`, which stringifies a
+        # dataclass rather than refusing it.
+        "fills": to_dicts(fills),
     }
 
 

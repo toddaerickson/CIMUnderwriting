@@ -266,8 +266,13 @@ def collect(*, cim_data=None, financial_analysis=None, physical_analysis=None,
 
 
 def _rows_of(section) -> list:
-    """Fills a completed analysis stage attached to its own output."""
-    return list((section or {}).get("fills") or [])
+    """Fills a completed analysis stage attached to its own output.
+
+    Every stage publishes DICTS, because every one of these sections is
+    persisted into `AnalysisRun.result_json`, so `from_dicts` is the one
+    way back in — the same rule the value-add scenarios follow below.
+    """
+    return from_dicts((section or {}).get("fills"))
 
 
 def _value_add_rows(va_results) -> list:
