@@ -1028,8 +1028,23 @@ def test_a_superseded_out_of_range_row_is_not_told_it_reaches_runs(client,
                                   effective_date=today - dt.timedelta(days=1))
     content = client.get("/settings/").content.decode()
     assert content.count("out of range") == 1
-    assert "Superseded, so it does not reach a run" in content
+    assert "it is superseded, so it does not reach a run either way" in content
     assert "It reaches runs today" not in content
+
+    # AND the note must not claim the skip. This is the assertion the
+    # first draft of this PR lacked: `resolve_config_overrides` returns
+    # only the WINNER, so this superseded row never reaches
+    # `build_config_patch`, the winning 0.12 is applied normally, and
+    # nothing lands in `config_skipped`. Saying "runs use the config
+    # default" here was false — the same class of bug the four-way branch
+    # exists to prevent, in new wording.
+    from webapp.services import build_config_patch, resolve_config_overrides
+    _patch, solver_irr, skipped = build_config_patch(
+        resolve_config_overrides("", today))
+
+    assert solver_irr == 0.12 and skipped == []
+    assert "config_skipped" not in content
+    assert "runs use the config default" not in content
 
 
 @pytest.mark.django_db
@@ -1049,17 +1064,26 @@ def test_the_out_of_range_note_branches_on_all_four_statuses(client, operator):
                                   effective_date=today + dt.timedelta(days=30))
     content = client.get("/settings/").content.decode()
     assert "out of range" in content
-    assert "not yet" in content
+    assert "does not reach a run yet in any case" in content
+    assert "will be skipped when that date arrives" in content
     assert "It reaches runs today" not in content
-    assert "does not reach a run" not in content
+    # A scheduled row is not offered to build_config_patch at all, so it
+    # must not claim the stamp either.
+    assert "config_skipped" not in content
 
-    # and the active row, which genuinely does reach runs, says so
+    # The ACTIVE row is the one whose sentence this PR reversed. It used
+    # to read "It reaches runs today", which was true then and is false
+    # now: build_config_patch skips an out-of-range value, so the run
+    # takes the config default. Claiming otherwise would be the same lie
+    # the four-way branch was written to fix, pointing the other way.
     ConfigOverride.objects.all().delete()
     ConfigOverride.objects.create(key="SOLVER_TARGET_IRR", value=-0.05,
                                   effective_date=today)
     content = client.get("/settings/").content.decode()
-    assert "It reaches runs today" in content
-    assert "not yet" not in content
+    assert "it is SKIPPED" in content
+    assert "config_skipped" in content
+    assert "It reaches runs today" not in content
+    assert "would not have applied until" not in content
 
 
 def test_every_registry_kind_matches_the_shape_of_its_config_value():
@@ -1082,3 +1106,441 @@ def test_every_registry_kind_matches_the_shape_of_its_config_value():
         assert (spec["kind"] == "range") == is_pair, (
             f"{key} is registered kind={spec['kind']!r} but its config "
             f"value is {value!r}")
+
+
+# ── Stored-row bounds: the form is not the last line of defence ──────
+#
+# PR #45 gave every settings key a bound derived from its shape, but
+# `build_config_patch` applied a STORED value after checking only that
+# the key still exists. So the bounds guarded the box an operator types
+# into and nothing else: a row saved before they existed, written by a
+# fixture, or inserted by a hand-run UPDATE reached the model raw. #45's
+# own motivating case is the one that matters — `-5` under Solver Target
+# IRR stores `-0.05`, and the solver ran on it.
+
+def _patch_for(key, value):
+    from webapp.services import build_config_patch
+    return build_config_patch({key: value})
+
+
+@pytest.mark.django_db
+def test_an_out_of_range_row_no_longer_reaches_a_run():
+    """The end-to-end proof, and the one assertion the old code fails.
+
+    Every other test here checks a helper. This one runs the real
+    resolver chain a worker runs — ConfigOverride -> resolve ->
+    build_config_patch — and asserts the bad value is not in the patch
+    and IS in `skipped`, which is what the run record stamps.
+    """
+    from django.utils import timezone
+
+    from webapp.models import ConfigOverride
+    from webapp.services import build_config_patch, resolve_config_overrides
+
+    ConfigOverride.objects.create(key="SOLVER_TARGET_IRR", value=-0.05,
+                                  effective_date=timezone.localdate())
+    deltas = resolve_config_overrides("", timezone.localdate())
+    patch, solver_irr, skipped = build_config_patch(deltas)
+
+    assert skipped == ["SOLVER_TARGET_IRR"]
+    assert solver_irr is None, "a negative target still reached the solver"
+    assert patch == {}
+
+
+@pytest.mark.django_db
+def test_the_run_record_says_the_row_was_skipped_not_applied():
+    """`applied_overrides["config"]` is the run's own claim about what it
+    underwrote on. A skipped key must not appear there — a stamp that
+    lists a value the engine never saw is the "UI claims the override
+    works" failure in its most durable form, because it outlives the
+    run."""
+    from django.utils import timezone
+
+    from webapp.models import ConfigOverride
+    from webapp.services import build_config_patch, resolve_config_overrides
+
+    ConfigOverride.objects.create(key="GATES.min_irr_5yr", value=4.0,
+                                  effective_date=timezone.localdate())
+    ConfigOverride.objects.create(key="GATES.min_yield_on_cost", value=0.09,
+                                  effective_date=timezone.localdate())
+    deltas = resolve_config_overrides("", timezone.localdate())
+    patch, _solver, skipped = build_config_patch(deltas)
+
+    # the worker's own expression, mirrored
+    applied = {k: v for k, v in deltas.items() if k not in skipped}
+
+    assert skipped == ["GATES.min_irr_5yr"]
+    assert "GATES.min_irr_5yr" not in applied
+    assert applied == {"GATES.min_yield_on_cost": 0.09}
+    # and the good row still lands, so the guard does not over-fire
+    assert patch == {"GATES": {"min_yield_on_cost": 0.09}}
+
+
+@pytest.mark.django_db
+def test_effective_config_shows_the_default_for_an_out_of_range_row():
+    """The settings page's "Effective" column reads `effective_config`,
+    which builds its patch through the same function. If it disagreed
+    with the run, the page would show a number no deal was priced on."""
+    from django.utils import timezone
+
+    import config as cfg
+    from webapp.models import ConfigOverride
+    from webapp.services import effective_config
+
+    ConfigOverride.objects.create(key="GATES.min_irr_5yr", value=4.0,
+                                  effective_date=timezone.localdate())
+
+    assert effective_config("")["GATES"]["min_irr_5yr"] == \
+        cfg.GATES["min_irr_5yr"]
+
+
+@pytest.mark.parametrize("key,value", [
+    ("GATES.min_irr_5yr", "not a number"),
+    ("GATES.min_irr_5yr", float("nan")),
+    ("GATES.min_irr_5yr", None),
+    ("EXPENSE_BENCHMARKS.opex_revenue_ratio", [0.35, 40.0]),
+    ("EXPENSE_BENCHMARKS.opex_revenue_ratio", ["a", "b"]),
+    ("MARKET_CAP_RATES.Self Storage.new", 12.0),
+    ("SCENARIO_DEFAULTS.base.rev_cagr_yr1_3", 50.0),
+])
+def test_a_junk_stored_value_is_skipped_not_raised(key, value):
+    """`float(value)` further down the function would raise on most of
+    these, and a ValueError out of `build_config_patch` takes the WHOLE
+    run down over one bad row — every other setting on the deal included.
+    NaN is the quiet one: it raises nothing and propagates as a null to
+    every surface.
+
+    A range key is covered too, because `value_in_bounds` unpacks a pair
+    while the scalar path does not; a check that only handled scalars
+    would let `[0.35, 40.0]` through as a 4000% expense ratio.
+    """
+    patch, solver_irr, skipped = _patch_for(key, value)
+
+    assert skipped == [key]
+    assert patch == {} and solver_irr is None
+
+
+@pytest.mark.parametrize("key,value", [
+    ("SOLVER_TARGET_IRR", 0.0),
+    ("SOLVER_TARGET_IRR", 0.14),
+    ("GATES.min_irr_5yr", 0.15),
+    ("GATES.population_3mi", 65_000),
+    ("EXPENSE_BENCHMARKS.opex_revenue_ratio", [0.30, 0.60]),
+    ("MARKET_CAP_RATES.Self Storage.new", 0.055),
+    ("SCENARIO_DEFAULTS.bear.rev_cagr_yr1_3", -0.02),
+    ("EXPENSE_RATIO.default", 0.45),
+])
+def test_an_in_range_row_still_applies(key, value):
+    """The other half, and the one that fails if the guard over-fires.
+
+    Three of these are deliberate edge cases the bounds were designed to
+    admit: a 0% solver target (PR #44 made zero a coherent question, and
+    a `(0, 1]` bound would undo it), a NEGATIVE scenario growth rate (a
+    shrinking-revenue bear case is a real underwrite), and a range key,
+    which travels as a two-element list.
+    """
+    patch, solver_irr, skipped = _patch_for(key, value)
+
+    assert skipped == []
+    if key == "SOLVER_TARGET_IRR":
+        assert solver_irr == value
+    else:
+        assert patch, f"{key} produced no patch"
+
+
+@pytest.mark.django_db
+def test_a_skipped_row_is_still_never_retired_from_the_database():
+    """The half of PR #45 that STANDS. The row is refused at the patch,
+    not deleted: an operator who set it deliberately can still see it,
+    read why it was skipped, and correct it. Dropping the row would
+    destroy the only record of what they intended."""
+    from django.utils import timezone
+
+    from webapp.models import ConfigOverride
+    from webapp.services import build_config_patch, resolve_config_overrides
+
+    ConfigOverride.objects.create(key="SOLVER_TARGET_IRR", value=-0.05,
+                                  effective_date=timezone.localdate())
+    deltas = resolve_config_overrides("", timezone.localdate())
+    build_config_patch(deltas)
+
+    assert ConfigOverride.objects.filter(key="SOLVER_TARGET_IRR").count() == 1
+    assert ConfigOverride.objects.get(key="SOLVER_TARGET_IRR").value == -0.05
+
+
+@pytest.mark.django_db
+def test_the_settings_page_and_a_run_agree_about_an_out_of_range_row(
+        client, operator):
+    """The invariant the four-way status branch exists to protect, now
+    asserted across BOTH surfaces at once rather than on the page alone.
+    Whatever the page says, the patch must match it."""
+    from django.utils import timezone
+
+    from webapp.models import ConfigOverride
+    from webapp.services import build_config_patch, resolve_config_overrides
+
+    ConfigOverride.objects.create(key="SOLVER_TARGET_IRR", value=-0.05,
+                                  effective_date=timezone.localdate())
+
+    content = client.get("/settings/").content.decode()
+    _patch, solver_irr, skipped = build_config_patch(
+        resolve_config_overrides("", timezone.localdate()))
+
+    page_says_skipped = "it is SKIPPED" in content
+    run_skipped_it = "SOLVER_TARGET_IRR" in skipped and solver_irr is None
+
+    assert page_says_skipped is run_skipped_it is True
+
+
+@pytest.mark.parametrize("value", [True, False, [True, 0.55]])
+def test_a_boolean_stored_value_is_refused(value):
+    """`float(True)` is 1.0, so a JSON `true` stored against an IRR gate
+    would read as a 100% gate — in bounds, accepted, and nonsense. The
+    form cannot produce a bool; the row that never went through the form
+    is exactly what this function exists for."""
+    key = ("EXPENSE_BENCHMARKS.opex_revenue_ratio"
+           if isinstance(value, list) else "GATES.min_irr_5yr")
+    patch, _solver, skipped = _patch_for(key, value)
+
+    assert skipped == [key]
+    assert patch == {}
+
+
+@pytest.mark.django_db
+def test_a_skipped_override_is_visible_on_the_run_page(client, operator,
+                                                       tmp_path, settings):
+    """The stamp was written to `applied_overrides["config_skipped"]` and
+    rendered NOWHERE — a database field no user could see.
+
+    That gap is load-bearing, not cosmetic: refusing an out-of-range row
+    is only defensible because it is reported, and an unrendered stamp
+    makes the refusal silent — the position PR #45 was right to reject.
+    So the warning has to reach a page.
+    """
+    from webapp.models import AnalysisRun, Deal
+
+    deals_dir = tmp_path / "deals"
+    deals_dir.mkdir()
+    settings.CIM_DEALS_DIR = str(deals_dir)
+
+    deal = Deal.objects.create(deal_id="skip-vis", property_name="Skip Vis")
+    AnalysisRun.objects.create(
+        deal=deal, status="done",
+        result_json={"gate_summary": {"recommendation": "PURSUE",
+                                      "passed": 1, "total": 1},
+                     "gate_results": []},
+        applied_overrides={"config": {},
+                           "config_skipped": ["SOLVER_TARGET_IRR"]})
+
+    content = client.get(f"/deals/{deal.pk}/").content.decode()
+
+    assert "Settings override not applied to this run" in content
+    assert "SOLVER_TARGET_IRR" in content
+    assert "used the built-in default instead" in content
+
+
+@pytest.mark.django_db
+def test_a_run_with_nothing_skipped_shows_no_such_warning(client, operator,
+                                                          tmp_path, settings):
+    """The other half — a banner that fires on every run is furniture,
+    not a warning."""
+    from webapp.models import AnalysisRun, Deal
+
+    deals_dir = tmp_path / "deals"
+    deals_dir.mkdir()
+    settings.CIM_DEALS_DIR = str(deals_dir)
+
+    deal = Deal.objects.create(deal_id="skip-none", property_name="Skip None")
+    AnalysisRun.objects.create(
+        deal=deal, status="done",
+        result_json={"gate_summary": {"recommendation": "PURSUE",
+                                      "passed": 1, "total": 1},
+                     "gate_results": []},
+        applied_overrides={"config": {}, "config_skipped": []})
+
+    content = client.get(f"/deals/{deal.pk}/").content.decode()
+
+    # Prove the page actually RENDERED first. A 404 contains no warning
+    # either, so the negative assertion alone would pass against a broken
+    # URL — which is exactly how the positive test above was failing
+    # until the route was corrected.
+    assert "PURSUE" in content
+    assert "Settings override not applied to this run" not in content
+
+
+@pytest.mark.django_db
+def test_the_skipped_warning_does_not_edit_the_stored_run_record(
+        client, operator, tmp_path, settings):
+    """`r["errors"]` IS the run's stored payload, so the view concatenates
+    rather than appending.
+
+    **This test does NOT discriminate that choice, and saying so is the
+    point.** A mutation round swapped the concatenation for
+    `ctx["run_warnings"].extend(...)` and the whole suite stayed green,
+    because `deal_detail` never saves the run: the mutation dirties an
+    in-memory list on a model instance that is discarded at the end of
+    the request. Nothing observable changes.
+
+    So the concatenation is DEFENSIVE — correct the day any code on this
+    path calls `save()`, and unprovable until then. What this test does
+    pin is the weaker, real property: rendering the page does not persist
+    a changed record. Left in place because that property is worth
+    holding, and labelled because a test that looks like it guards the
+    immutability would be the more dangerous thing to leave behind.
+    """
+    from webapp.models import AnalysisRun, Deal
+
+    deals_dir = tmp_path / "deals"
+    deals_dir.mkdir()
+    settings.CIM_DEALS_DIR = str(deals_dir)
+
+    deal = Deal.objects.create(deal_id="skip-imm", property_name="Skip Imm")
+    run = AnalysisRun.objects.create(
+        deal=deal, status="done",
+        result_json={"gate_summary": {"recommendation": "PURSUE",
+                                      "passed": 1, "total": 1},
+                     "gate_results": [], "errors": ["engine said this"]},
+        applied_overrides={"config_skipped": ["GATES.min_irr_5yr"]})
+
+    client.get(f"/deals/{deal.pk}/")
+    client.get(f"/deals/{deal.pk}/")          # twice — an append would grow
+
+    run.refresh_from_db()
+    assert run.result_json["errors"] == ["engine said this"]
+
+
+@pytest.mark.django_db
+def test_only_the_row_that_reaches_a_run_may_claim_the_skip(client, operator):
+    """The generalised form of the bug review caught in this PR.
+
+    `resolve_config_overrides` returns ONE row per lane — the winner — so
+    "this row is out of range" and "this run skipped this key" are
+    different claims. The first draft conflated them and told a
+    superseded row that runs were using the config default, while the
+    winning row's value was being applied normally.
+
+    The invariant, asserted directly: the page may say `config_skipped`
+    only when `build_config_patch` actually put the key there.
+    """
+    import datetime as dt
+
+    from django.utils import timezone
+
+    from webapp.models import ConfigOverride
+    from webapp.services import build_config_patch, resolve_config_overrides
+
+    today = timezone.localdate()
+
+    def page_and_run():
+        content = client.get("/settings/").content.decode()
+        _patch, _irr, skipped = build_config_patch(
+            resolve_config_overrides("", today))
+        return content, skipped
+
+    # 1. out-of-range row BEATEN by a newer in-range row: the run applies
+    #    the winner, so nothing is skipped and the page must not say so.
+    ConfigOverride.objects.create(key="SOLVER_TARGET_IRR", value=-0.05,
+                                  effective_date=today - dt.timedelta(days=2))
+    ConfigOverride.objects.create(key="SOLVER_TARGET_IRR", value=0.12,
+                                  effective_date=today - dt.timedelta(days=1))
+    content, skipped = page_and_run()
+    assert skipped == []
+    assert ("config_skipped" in content) is False
+
+    # 2. out-of-range row that IS the winner: now the key really is
+    #    skipped, and the page is entitled to say it.
+    ConfigOverride.objects.all().delete()
+    ConfigOverride.objects.create(key="SOLVER_TARGET_IRR", value=-0.05,
+                                  effective_date=today)
+    content, skipped = page_and_run()
+    assert skipped == ["SOLVER_TARGET_IRR"]
+    assert ("config_skipped" in content) is True
+
+    # 3. a scheduled out-of-range row: not resolved yet, so not skipped
+    #    yet, and the page says when it will be.
+    ConfigOverride.objects.all().delete()
+    ConfigOverride.objects.create(key="SOLVER_TARGET_IRR", value=-0.05,
+                                  effective_date=today + dt.timedelta(days=30))
+    content, skipped = page_and_run()
+    assert skipped == []
+    assert ("config_skipped" in content) is False
+    assert "will be skipped when that date arrives" in content
+
+
+@pytest.mark.django_db
+def test_a_per_deal_target_clears_the_global_rows_skip(monkeypatch, tmp_path,
+                                                       settings):
+    """A per-deal solver target supersedes the global row ENTIRELY, so
+    the global row's refusal is not this run's story either.
+
+    `applied.pop("SOLVER_TARGET_IRR")` has always handled the value side
+    (PR #23's finding: stamping a threshold the engine never used). The
+    skip side was invisible until this PR put `config_skipped` on screen,
+    and then the run page would tell an analyst "this run used the
+    built-in default instead" while the engine ran on the deal's own 10%.
+    """
+    from django.utils import timezone
+
+    from tests.test_web_runs import _make_extracted_deal, _start_run
+    from webapp.models import ConfigOverride
+
+    deals_dir = tmp_path / "deals"
+    deals_dir.mkdir()
+    settings.CIM_DEALS_DIR = str(deals_dir)
+    seen = {}
+
+    def _fake(result, *a, solver_target_irr=None, **kw):
+        seen["solver_target_irr"] = solver_target_irr
+        result.gate_results = []
+        result.gate_summary = {"passed": 0, "failed": 0, "tbd": 0, "total": 0,
+                               "recommendation": "PURSUE",
+                               "failed_gates": [], "tbd_gates": []}
+        return result
+
+    monkeypatch.setattr("webapp.services.run_analysis", _fake)
+
+    # a global row that is out of range, so build_config_patch skips it
+    ConfigOverride.objects.create(key="SOLVER_TARGET_IRR", value=-0.05,
+                                  effective_date=timezone.localdate())
+    deal = _make_extracted_deal(deals_dir)
+    deal.assumption_overrides = {"solver_target_irr": 0.10}
+    deal.save()
+    run = _start_run(deal)
+
+    # the engine ran on the DEAL's target, not the default
+    assert seen["solver_target_irr"] == 0.10
+    # so the run must not claim the key was skipped and defaulted
+    assert "SOLVER_TARGET_IRR" not in run.applied_overrides["config_skipped"]
+    assert "SOLVER_TARGET_IRR" not in run.applied_overrides["config"]
+
+
+@pytest.mark.django_db
+def test_the_global_row_is_still_reported_when_nothing_supersedes_it(
+        monkeypatch, tmp_path, settings):
+    """The other half — clearing the skip must not swallow a real one."""
+    from django.utils import timezone
+
+    from tests.test_web_runs import _make_extracted_deal, _start_run
+    from webapp.models import ConfigOverride
+
+    deals_dir = tmp_path / "deals"
+    deals_dir.mkdir()
+    settings.CIM_DEALS_DIR = str(deals_dir)
+
+    def _fake(result, *a, **kw):
+        result.gate_results = []
+        result.gate_summary = {"passed": 0, "failed": 0, "tbd": 0, "total": 0,
+                               "recommendation": "PURSUE",
+                               "failed_gates": [], "tbd_gates": []}
+        return result
+
+    monkeypatch.setattr("webapp.services.run_analysis", _fake)
+
+    ConfigOverride.objects.create(key="SOLVER_TARGET_IRR", value=-0.05,
+                                  effective_date=timezone.localdate())
+    deal = _make_extracted_deal(deals_dir)
+    deal.assumption_overrides = {}          # nothing supersedes it
+    deal.save()
+    run = _start_run(deal)
+
+    assert run.applied_overrides["config_skipped"] == ["SOLVER_TARGET_IRR"]

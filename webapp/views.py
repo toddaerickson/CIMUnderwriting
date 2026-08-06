@@ -449,6 +449,36 @@ def deal_detail(request, pk):
         r = done_run.result_json or {}
         ctx["header"] = results_ctx.header_metrics(deal, r)
         ctx["run_warnings"] = r.get("errors") or []
+
+        # A settings override this run REFUSED, surfaced where the numbers
+        # it changed are read. `build_config_patch` skips a stored row
+        # whose value is outside its key's bounds, and the worker has
+        # always stamped that on `applied_overrides["config_skipped"]` —
+        # but nothing rendered the stamp, so it was a database field no
+        # user could see.
+        #
+        # That gap mattered more than it looks. Refusing an out-of-range
+        # row is only defensible BECAUSE it is reported; the argument for
+        # reversing PR #45's "badge it and apply it anyway" was precisely
+        # that skipping is not silent. A stamp nobody can read makes it
+        # silent, which is the position #45 was right to reject.
+        #
+        # It joins `run_warnings` rather than getting a banner of its own:
+        # that banner already renders on EVERY tab, and an override the
+        # run declined moved numbers on all of them, not just the summary.
+        skipped_cfg = (done_run.applied_overrides or {}).get(
+            "config_skipped") or []
+        if skipped_cfg:
+            # Concatenate, never append — `r["errors"]` is the stored
+            # result payload, and mutating it here would edit the run's
+            # own record of what the engine reported.
+            ctx["run_warnings"] = ctx["run_warnings"] + [
+                "Settings override not applied to this run: "
+                f"{', '.join(sorted(skipped_cfg))}. The value stored for "
+                "it is outside the allowed range for that setting (or the "
+                "key no longer exists), so this run used the built-in "
+                "default instead. Fix or delete the row on the Settings "
+                "page and re-run."]
         if tab == "summary":
             ctx.update(results_ctx.summary_context(r))
             ctx.update(results_ctx.checks_context(r))
@@ -599,32 +629,58 @@ def settings_page(request):
         else:
             status = "superseded"
         # Rows saved before the value box grew bounds, or written straight
-        # to the model, still resolve into runs. They are badged rather
-        # than dropped — see forms.value_in_bounds. The note is written
-        # here, where the status is known, and it branches on ALL FOUR
-        # statuses rather than "superseded vs everything else": a
-        # scheduled row has not taken effect either
-        # (`resolve_config_overrides` filters `effective_date__lte`), so
-        # the binary version told it "it does reach runs", which is
-        # false. The status vocabulary exists precisely so this page and
-        # a run can never disagree; a note that collapses it gives that
-        # up. `unknown key` cannot appear here — value_in_bounds returns
-        # True for a key config no longer defines — but it is spelled out
-        # rather than left to the default, so adding a fifth status
-        # cannot silently inherit the wrong sentence.
+        # to the model, are badged rather than deleted — the row is never
+        # retired from the database. What CHANGED is that they no longer
+        # reach a run: `build_config_patch` re-checks bounds and skips
+        # them, so the model uses the config default and the run record
+        # lists the key under `config_skipped`.
+        #
+        # The note STILL branches on all four statuses, and the branch is
+        # now load-bearing in a way the first draft of this change missed.
+        #
+        # `resolve_config_overrides` returns ONE row per lane — the
+        # winner. So "out of range" and "skipped" are not the same claim:
+        # a superseded out-of-range row is never offered to
+        # `build_config_patch` at all, the winning row supplies the value,
+        # and the key never appears in `config_skipped`. A note that said
+        # "it is SKIPPED, runs use the config default" for that row was
+        # simply false — the run used the winner's value. That is the
+        # same class of bug the four-way branch was written to fix (a
+        # scheduled row told "it does reach runs"), reintroduced in new
+        # wording and caught in review.
+        #
+        # So among the rows this NOTE can appear on, only the ACTIVE one
+        # may claim the skip and the `config_skipped` stamp. The others
+        # say why they do not reach a run at all, which is true whatever
+        # their value.
+        #
+        # "among the rows this note can appear on" is doing real work:
+        # `config_skipped` is not active-only in general — an unknown-key
+        # row lands there too. It just never carries THIS note, because
+        # `value_in_bounds` returns True for a key config no longer
+        # defines, so `oob` is always False for that status and the note
+        # never renders. The `unknown key` branch below is therefore
+        # unreachable today, and is spelled out anyway so a fifth status
+        # cannot silently inherit someone else's sentence.
         oob = not value_in_bounds(r.key, r.value)
-        reach = {
-            "active": "It reaches runs today.",
-            "scheduled": (f"It reaches runs from "
-                          f"{r.effective_date:%Y-%m-%d}, not yet."),
-            "superseded": "Superseded, so it does not reach a run.",
-            "unknown key": "config.py no longer defines this key.",
+        refusal = {
+            "active": ("so it is SKIPPED: runs use the config default "
+                       "instead and record the key under config_skipped."),
+            "scheduled": (f"and it does not reach a run yet in any case — "
+                          f"it is dated {r.effective_date:%Y-%m-%d}. It "
+                          f"will be skipped when that date arrives."),
+            "superseded": ("though it is superseded, so it does not reach "
+                           "a run either way — a later row supplies this "
+                           "setting."),
+            "unknown key": ("though config.py no longer defines this key, "
+                            "so it does not reach a run either way."),
         }
         overrides.append({
             "row": r, "status": status, "out_of_bounds": oob,
             "out_of_bounds_note": (
-                "Outside the allowed range for this setting. "
-                f"{reach[status]} Delete it and re-add the value in range."),
+                "Outside the allowed range for this setting, "
+                f"{refusal[status]} Delete it and re-add the value in "
+                "range."),
             "display_value": format_override_value(r.key, r.value),
             "label": registry.get(r.key, {}).get("label", r.key),
         })
