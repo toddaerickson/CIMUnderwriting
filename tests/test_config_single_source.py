@@ -2318,24 +2318,63 @@ def test_a_value_add_deal_with_market_rent_carries_no_such_flag(tmp_path):
                    for f in result.assumption_fill_log)
 
 
-def test_a_zero_occupancy_asset_is_not_quietly_re_let_to_eighty_percent():
-    """`or 0.80` treated an honestly-reported pre-lease-up asset as 80%
-    occupied and underwrote the ramp from there. `is None` is the fix,
-    and this is the case that separates the two — the defect class the
-    repo has already recorded against the solver's target IRR and the
-    management-fee target."""
+def test_a_zero_occupancy_asset_resolves_but_an_absent_one_is_refused():
+    """`or 0.80` used to treat an honestly-reported pre-lease-up asset as
+    80% occupied and underwrite the ramp from there; `is None` was the
+    first fix, distinguishing 0.0 (data) from `None` (absence) while
+    still assuming 80% on absence. Category 5 goes further and deletes
+    the assumption outright: absence is no longer a fallback, it is a
+    refusal — the same `is None`/falsy split, carried one step further.
+    """
+    from analysis.fills import MissingUnderwritingInput
     from model.value_add_model import _resolve_va_inputs
 
     cim = _thin_va_deal()
     cim.physical_occupancy = 0.0
     resolved = _resolve_va_inputs(cim, {})
     assert resolved.current_occ == 0.0
-    assert not any(f.source_key == "occupancy_absent" for f in resolved.fills)
+    assert not any(f.field == "physical_occupancy" for f in resolved.fills)
 
     cim.physical_occupancy = None
-    resolved = _resolve_va_inputs(cim, {})
-    assert resolved.current_occ == 0.80
-    assert any(f.source_key == "occupancy_absent" for f in resolved.fills)
+    with pytest.raises(MissingUnderwritingInput):
+        _resolve_va_inputs(cim, {})
+
+
+def test_absent_occupancy_is_refused_but_a_stated_zero_reaches_the_gate():
+    """Decision 3 of the Category 5 spec, and the reason
+    `require_underwritable` needed a per-field predicate.
+
+    `extract.parser._parse_number` returns 0.0 when it cannot read a
+    figure, which is why NRSF and TTM NOI are checked with a FALSY test.
+    Occupancy is different: a stated 0% is an honestly-reported
+    pre-lease-up asset, and `analysis/filters.py` already fails it
+    correctly as "unproven demand — below the 75% floor". Refusing it as
+    a MISSING input would give a true refusal the wrong reason.
+
+    Absence is the ununderwritable case: `filters.py` renders `None` as
+    a TBD gate, so before this change a deal with no occupancy sailed
+    through the whole model on a fabricated one.
+    """
+    import pytest
+    from analysis.fills import MissingUnderwritingInput, require_underwritable
+    from analysis.filters import evaluate_gates
+
+    cim = _thin_va_deal()
+
+    cim.physical_occupancy = None
+    with pytest.raises(MissingUnderwritingInput) as exc:
+        require_underwritable(cim)
+    assert "Physical Occupancy" in str(exc.value)
+
+    # A stated 0% is data, not absence: the input check passes it and the
+    # demand gate is what refuses it, naming the real reason. Gate 2 is
+    # the unproven-demand gate; the dicts key on an INT `gate` and a
+    # singular `note` (analysis/filters.py:126-131).
+    cim.physical_occupancy = 0.0
+    require_underwritable(cim)          # must NOT raise
+    gate_2 = next(g for g in evaluate_gates(cim) if g["gate"] == 2)
+    assert gate_2["result"] == "FAIL"
+    assert "75%" in gate_2["note"]
 
 
 def test_the_solver_objective_does_not_multiply_the_log(tmp_path):
@@ -2459,18 +2498,17 @@ def test_the_two_replacement_cost_copies_still_agree(tmp_path):
     assert gate_view == pytest.approx(memo_view)
 
 
-def test_the_two_value_add_occupancy_defaults_are_still_declared_apart():
-    """They disagree — 0.80 for the lease-up start, 0.85 for backing
-    in-place rent out of EGR, for the SAME field. Category 4 named them
-    so the disagreement is visible; backlog item T clause 5 owns
-    resolving it. This test fails if someone collapses them as a tidy-up,
-    which would re-underwrite every thin deal without deciding anything.
+def test_neither_value_add_occupancy_default_survives():
+    """Category 5 (2026-08-06) answered "which number?" with "none of
+    them". Two constants answered ONE question — where the lease-up ramp
+    starts, and what occupancy backs in-place rent out of EGR — at 0.80
+    and 0.85, and both fired in the same run. Re-introducing either is
+    re-introducing a number nobody chose for the deal being priced.
     """
     from model import value_add_model as vam
 
-    assert vam.VA_DEFAULT_OCCUPANCY == 0.80
-    assert vam.VA_EGR_ASSUMED_OCCUPANCY == 0.85
-    assert vam.VA_DEFAULT_OCCUPANCY != vam.VA_EGR_ASSUMED_OCCUPANCY
+    assert not hasattr(vam, "VA_DEFAULT_OCCUPANCY")
+    assert not hasattr(vam, "VA_EGR_ASSUMED_OCCUPANCY")
 
 
 def test_the_value_add_fills_survive_the_json_boundary(tmp_path):
@@ -2621,33 +2659,31 @@ def test_the_exit_cap_provenance_fills_follow_the_published_flags(tmp_path):
     assert fills.ASSET_CLASS_DEFAULT not in keys
 
 
-def test_the_egr_occupancy_assumption_is_logged_beside_the_other_one(tmp_path):
+def test_an_egr_backed_rent_with_no_occupancy_is_refused_not_assumed(tmp_path):
     """A deal with no unit mix and no GPR backs in-place rent out of EGR,
-    which needs an occupancy the CIM did not state. The SAME field is
-    then assumed twice in one run at two different numbers — 0.85 here,
-    0.80 for the lease-up start — and both rows appear, because that
-    contradiction on one page is the evidence Category 5 needs.
+    which needs an occupancy. That USED to be the case where the SAME
+    field got assumed twice in one run at two different numbers — 0.85
+    here, 0.80 for the lease-up start. Category 5 deleted both: now an
+    absent occupancy is refused before either fallback fires, and a
+    stated one resolves cleanly with no occupancy fill at all.
 
-    MUTATION: drop the fill from `_compute_in_place_rent_psf`."""
-    from analysis import fills
+    MUTATION: reintroduce either assumed-occupancy fallback."""
+    from analysis.fills import MissingUnderwritingInput
     from model.value_add_model import _resolve_va_inputs
 
     cim = _thin_va_deal()
     cim.unit_mix = []
     cim.ttm_gpr = None
     cim.ttm_egr = 430_000
-    cim.physical_occupancy = None
 
-    resolved = _resolve_va_inputs(cim, {})
-    logged = {(f.source_key, f.value_used) for f in resolved.fills}
-    assert (fills.EGR_OCCUPANCY_ASSUMED, 0.85) in logged
-    assert (fills.OCCUPANCY_ABSENT, 0.80) in logged
-    assert resolved.in_place_rent_psf == pytest.approx(
-        430_000 / (45_000 * 12 * 0.85))
+    cim.physical_occupancy = None
+    with pytest.raises(MissingUnderwritingInput):
+        _resolve_va_inputs(cim, {})
 
     # stated occupancy: the rent is backed out of the real number and
-    # only the value-add engine's own default is missing
+    # neither occupancy fill exists to be logged any more
     cim.physical_occupancy = 0.70
-    logged = {f.source_key for f in _resolve_va_inputs(cim, {}).fills}
-    assert fills.EGR_OCCUPANCY_ASSUMED not in logged
-    assert fills.OCCUPANCY_ABSENT not in logged
+    resolved = _resolve_va_inputs(cim, {})
+    assert resolved.in_place_rent_psf == pytest.approx(
+        430_000 / (45_000 * 12 * 0.70))
+    assert all(f.field != "physical_occupancy" for f in resolved.fills)
