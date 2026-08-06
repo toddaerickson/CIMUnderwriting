@@ -120,6 +120,12 @@ def stage_analyze(ctx: AnalysisContext, comp_db):
     from analysis.rent_analysis import analyze_rents
     from analysis.value_add import identify_value_add
     from analysis.risks import identify_risks
+    from analysis.fills import require_underwritable
+
+    # Same gate `engine.run_analysis` opens with, and it must be the same
+    # gate: a deal the web app refuses to underwrite cannot be one the
+    # CLI prices anyway (item T Category 4).
+    require_underwritable(ctx.cim_data)
 
     ctx.financial_analysis = analyze_financials(ctx.cim_data, comp_db=comp_db)
     if ctx.adjusted_noi:
@@ -162,10 +168,11 @@ def stage_valuate(ctx: AnalysisContext):
     # discipline engine.run_analysis follows. Miss one and the memo, the
     # .xlsx, the .xlsm and the solvers disagree about the same deal.
     from analysis.valuation import resolve_market_cap
-    from registry import detect_asset_type
+    from registry import classify_asset_type
+    asset_class, asset_class_known = classify_asset_type(ctx.cim_data)
     ctx.market_cap = resolve_market_cap(
-        detect_asset_type(ctx.cim_data),
-        getattr(ctx.cim_data, "year_built", None))
+        asset_class, getattr(ctx.cim_data, "year_built", None),
+        asset_class_known=asset_class_known)
     logger.info("  Market cap: %.3f%% (%s, %s band, %s)",
                 ctx.market_cap["market_cap"] * 100,
                 ctx.market_cap["asset_class"], ctx.market_cap["age_band"],
@@ -265,6 +272,19 @@ def stage_gates_and_risks(ctx: AnalysisContext):
         ctx.risk_analysis = ctx._analyze_risks()
         del ctx._analyze_risks
 
+    # Assembled ONCE, here, exactly as engine.run_analysis does it, and
+    # then handed to all three writers below — the CLI's memo, workbook
+    # and LP summary must disclose the same assumptions the web app's do
+    # (item T Category 4).
+    from analysis import fills as model_fills
+    ctx.assumption_fill_log = model_fills.to_dicts(model_fills.collect(
+        cim_data=ctx.cim_data,
+        financial_analysis=ctx.financial_analysis,
+        physical_analysis=ctx.physical_analysis,
+        market_cap=ctx.market_cap,
+        va_results=ctx.va_results,
+        expense_ratio=ctx.expense_ratio))
+
 
 def stage_output(ctx: AnalysisContext, comp_db):
     """[6/7] Generate output files and save to comp database."""
@@ -287,6 +307,7 @@ def stage_output(ctx: AnalysisContext, comp_db):
         va_results=ctx.va_results,
         va_max_offer=ctx.va_max_offer,
         sources_uses=ctx.sources_uses,
+        assumption_fill_log=ctx.assumption_fill_log,
         output_dir=ctx.output_dir,
     )
     logger.info("  Memo: %s", ctx.memo_path)
@@ -310,6 +331,7 @@ def stage_output(ctx: AnalysisContext, comp_db):
             gate_results=ctx.gate_results,
             gate_summary=ctx.gate_summary,
             sources_uses=ctx.sources_uses,
+            assumption_fill_log=ctx.assumption_fill_log,
             output_dir=ctx.output_dir,
         )
         logger.info("  Investor summary: %s", ctx.investor_summary_path)
@@ -326,6 +348,7 @@ def stage_output(ctx: AnalysisContext, comp_db):
         va_results=ctx.va_results,
         va_max_offer=ctx.va_max_offer,
         sources_uses=ctx.sources_uses,
+        assumption_fill_log=ctx.assumption_fill_log,
         output_dir=ctx.output_dir,
     )
     logger.info("  Model: %s", ctx.excel_path)
@@ -390,7 +413,17 @@ def main():
     stage_extract(ctx)
     stage_parse(ctx)
     stage_enrich(ctx, comp_db)
-    stage_analyze(ctx, comp_db)
+    # A deal with no NRSF or no TTM NOI stops here rather than producing
+    # a memo and a workbook full of numbers derived from a fiction (item
+    # T Category 4). Exit 2 distinguishes "this CIM cannot be
+    # underwritten" from exit 1's "no PDF was selected".
+    from analysis.fills import MissingUnderwritingInput
+    try:
+        stage_analyze(ctx, comp_db)
+    except MissingUnderwritingInput as e:
+        logger.error("\nCannot underwrite this deal: %s", e)
+        logger.error("No memo or model was written.")
+        sys.exit(2)
     stage_valuate(ctx)
     stage_gates_and_risks(ctx)
     stage_output(ctx, comp_db)
@@ -539,6 +572,17 @@ def _print_summary(ctx: AnalysisContext):
         if cim_data.asking_price:
             discount = (cim_data.asking_price - va_mp) / cim_data.asking_price
             print(f"  Discount to Asking: {discount:.1%}")
+
+    # Assumptions this run had to invent (item T Category 4). The terminal
+    # summary is the CLI's third documented output, and a recommendation
+    # printed without saying how much of it rests on defaults is the
+    # silent-fallback problem in its shortest form.
+    if ctx.assumption_fill_log:
+        n = len(ctx.assumption_fill_log)
+        print()
+        print(f"  ASSUMPTIONS FILLED FROM DEFAULTS: {n}")
+        for row in ctx.assumption_fill_log:
+            print(f"  - {row['field']}: {row['label']}")
 
     # Recommendation
     print()

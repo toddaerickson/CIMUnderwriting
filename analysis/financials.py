@@ -18,6 +18,9 @@ import config as cfg
 from config import (EXPENSE_BENCHMARKS, STATE_PROPERTY_TAX_MULTIPLIER,
                     STATE_PROPERTY_TAX_FORMULAS, get_regional_benchmarks)
 from registry import EXPENSE_CATEGORIES, EXPENSE_KEYWORD_MAP, EXPENSE_KEYS
+from analysis.fills import (BENCHMARK_LOW, Fill, MGMT_FEE_TARGET, STATE_ABSENT,
+                            STATE_TAX_FORMULA, UNIT_DOLLARS, UNIT_PCT,
+                            UNIT_TEXT, to_dicts)
 
 
 def resolve_mgmt_fee_target(mgmt_fee_target_pct=None) -> float:
@@ -63,7 +66,14 @@ def analyze_financials(cim_data, comp_db=None,
         - adjusted_ttm_noi: conservative reunderwritten NOI
         - expense_ratio_check: OpEx/Revenue ratio analysis
     """
-    nrsf = cim_data.nrsf or 1  # prevent division by zero
+    # NOT `or 1` (item T Category 4). A one-square-foot property divides
+    # every benchmark in this module by one and prints "$170,000/SF" as
+    # though the CIM said so. `engine.run_analysis` refuses a deal with no
+    # NRSF outright; this module cannot raise, because it also serves the
+    # assumptions page's live preview on a deal the analyst is still
+    # typing — so it stays None-safe and reports nothing rather than
+    # inventing a size.
+    nrsf = cim_data.nrsf
     state = (cim_data.state or "").upper().strip()
     cc_pct = cim_data.cc_pct
     income = _build_income_summary(cim_data)
@@ -81,6 +91,12 @@ def analyze_financials(cim_data, comp_db=None,
         "adjusted_ttm_noi": adjusted_noi,
         "expense_ratio_check": _expense_ratio_check(expenses, income, nrsf, state),
         "benchmark_source": expenses.get("benchmark_source", "static"),
+        # Every expense figure this stage invented, recorded where it was
+        # invented (item T Category 4). `analysis.fills.collect` gathers
+        # this key off each stage rather than re-deciding what each
+        # fallback would have done.
+        "fills": expenses.get("fills", []),
+        # (DICTS, not `Fill` objects — see `_analyze_expenses`.)
     }
 
 
@@ -131,6 +147,7 @@ def _analyze_expenses(cim_data, nrsf: float, egr: float, state: str = "",
     """
     lines = []
     adjustments = []
+    fills = []
     total_cim_expenses = 0
     total_adjusted_expenses = 0
 
@@ -140,6 +157,21 @@ def _analyze_expenses(cim_data, nrsf: float, egr: float, state: str = "",
     # State property tax: prefer income-based formula, fall back to $/SF benchmark
     ptax_mult = STATE_PROPERTY_TAX_MULTIPLIER.get(state, 1.0)
     ptax_formula = STATE_PROPERTY_TAX_FORMULAS.get(state)
+
+    # No state is two substitutions at once, and they are recorded as one
+    # row because they have one cause: the benchmarks drop from regional
+    # to national AND the property-tax multiplier falls back to 1.0. The
+    # first is already named in `benchmark_source`; the second is named
+    # nowhere, and Texas vs. New York is not a rounding difference.
+    if not state:
+        fills.append(Fill(
+            field="state", value_used="national",
+            source_key=STATE_ABSENT, unit=UNIT_TEXT,
+            label=("Expense lines are benchmarked against national ranges "
+                   "and the property-tax multiplier is 1.0x, not this "
+                   "market's."),
+            detail={"benchmark_source": benchmark_source,
+                    "property_tax_multiplier": 1.0}))
 
     # Map CIM expense lines to benchmark categories
     expense_map = _map_expense_lines(cim_data)
@@ -156,7 +188,7 @@ def _analyze_expenses(cim_data, nrsf: float, egr: float, state: str = "",
         category = cat.display_name
         benchmark_key = cat.key
         cim_value = expense_map.get(benchmark_key)
-        per_nrsf = cim_value / nrsf if cim_value else None
+        per_nrsf = cim_value / nrsf if (cim_value and nrsf) else None
 
         # ── Property Tax: use income-based formula when available ──
         if benchmark_key == "property_tax" and ptax_formula and cim_data.ttm_noi:
@@ -174,8 +206,10 @@ def _analyze_expenses(cim_data, nrsf: float, egr: float, state: str = "",
                 else:
                     flag = "BELOW FORMULA"
                     adjusted = formula_tax
+                    stated_psf = (f" (${per_nrsf:.2f}/SF)"
+                                  if per_nrsf is not None else "")
                     adjustments.append(
-                        f"{category}: CIM ${cim_value:,.0f} (${per_nrsf:.2f}/SF) below "
+                        f"{category}: CIM ${cim_value:,.0f}{stated_psf} below "
                         f"income-based estimate ${formula_tax:,.0f} (${formula_per_sf:.2f}/SF). "
                         f"Formula: (NOI/${ptax_formula['cap_rate']:.0%} cap) × "
                         f"{ptax_formula['assessment_ratio']:.0%} assess × "
@@ -184,6 +218,25 @@ def _analyze_expenses(cim_data, nrsf: float, egr: float, state: str = "",
             else:
                 adjusted = formula_tax
                 flag = "FORMULA"
+                # The one expense line with no CIM figure that is NOT
+                # priced off a $/SF band: it is derived from this deal's
+                # own NOI through the state's assessment formula. That
+                # makes it a better estimate than a benchmark floor and
+                # an assumption all the same — and unlike BELOW FORMULA
+                # above, it appends no analyst adjustment, so before this
+                # log it reached the memo with only a "FORMULA" tag on a
+                # table cell to say the CIM never stated it.
+                fills.append(Fill(
+                    field=benchmark_key, value_used=formula_tax,
+                    source_key=STATE_TAX_FORMULA, unit=UNIT_DOLLARS,
+                    label=(f"Estimated from this deal's own NOI: "
+                           f"NOI / {ptax_formula['cap_rate']:.0%} cap x "
+                           f"{ptax_formula['assessment_ratio']:.0%} assessed x "
+                           f"{ptax_formula['tax_rate']:.1%} {state} rate. Not "
+                           f"the assessor's number, and not a reassessment at "
+                           f"your basis."),
+                    detail={"state": state, "ttm_noi": cim_data.ttm_noi,
+                            **ptax_formula}))
 
             if cim_value:
                 total_cim_expenses += cim_value
@@ -232,9 +285,29 @@ def _analyze_expenses(cim_data, nrsf: float, egr: float, state: str = "",
             else:
                 flag = "IN RANGE"
 
+        # An unstated line is booked at the benchmark FLOOR x NRSF. That
+        # estimate stays (deleting it would re-underwrite the deal, which
+        # item T's scope excludes) but it is not a CIM figure, and today
+        # an absent line and a stated-but-tiny one produce the identical
+        # number with nothing downstream able to tell them apart. Only
+        # the absent case is a fill: a stated line adjusted UP to the
+        # floor is already narrated in `adjustments` and already caught
+        # by the check register's expense-floor finding.
+        floor_estimate = bench_low * nrsf if nrsf else None
+        booked = adjusted or floor_estimate
+        if cim_value is None and floor_estimate is not None:
+            fills.append(Fill(
+                field=benchmark_key, value_used=floor_estimate,
+                source_key=BENCHMARK_LOW, unit=UNIT_DOLLARS,
+                label=(f"Booked at ${bench_low:.2f}/SF — the LOW end of the "
+                       f"${bench_low:.2f}-${bench_high:.2f}/SF benchmark "
+                       f"range, so the true expense is likelier higher."),
+                detail={"benchmark_low": bench_low, "benchmark_high": bench_high,
+                        "nrsf": nrsf, "benchmark_source": benchmark_source}))
+
         if cim_value:
             total_cim_expenses += cim_value
-        total_adjusted_expenses += (adjusted or bench_low * nrsf)
+        total_adjusted_expenses += (booked or 0)
 
         lines.append({
             "category": category,
@@ -243,7 +316,7 @@ def _analyze_expenses(cim_data, nrsf: float, egr: float, state: str = "",
             "per_nrsf": per_nrsf,
             "benchmark_range": (bench_low, bench_high),
             "benchmark_mid": bench_mid,
-            "adjusted_value": adjusted or bench_low * nrsf,
+            "adjusted_value": booked,
             "flag": flag,
             "source": ("analyst" if benchmark_key in analyst_keys
                        else ("cim" if cim_value is not None else None)),
@@ -272,6 +345,19 @@ def _analyze_expenses(cim_data, nrsf: float, egr: float, state: str = "",
         mgmt_adjusted = egr * mgmt_target
         adjustments.append(f"Management Fee: Not found in CIM. "
                            f"Assumed {mgmt_target:.0%} of EGR.")
+        # A CIM omitting its management fee is the common case, which is
+        # why `MGMT_FEE_TARGET_PCT` is the TOP of the benchmark band —
+        # the conservative read of an omission is the most expensive
+        # credible number. The adjustment sentence above already says so
+        # in prose; the log says it as data, next to every other number
+        # this deal did not come with.
+        fills.append(Fill(
+            field="mgmt_fee_pct", value_used=mgmt_target,
+            source_key=MGMT_FEE_TARGET, unit=UNIT_PCT,
+            label=(f"Underwritten at ${mgmt_adjusted:,.0f}/yr — the top of "
+                   f"the {mgmt_low:.0%}-{mgmt_high:.0%} band, the "
+                   f"conservative read of an omission."),
+            detail={"egr": egr, "benchmark_range_pct": (mgmt_low, mgmt_high)}))
 
     if mgmt_value:
         total_cim_expenses += mgmt_value
@@ -297,6 +383,13 @@ def _analyze_expenses(cim_data, nrsf: float, egr: float, state: str = "",
         "total_cim_expenses": total_cim_expenses,
         "total_adjusted_expenses": total_adjusted_expenses,
         "adjustments": adjustments,
+        # DICTS, not `Fill` objects: this dict is persisted through
+        # `webapp.services.json_safe`, whose last line is `str(obj)` for
+        # anything it does not recognize, so a dataclass would land in the
+        # run record as "Fill(field='insurance', ...)" — valid JSON, never
+        # raises, and not data. `fills.collect` reads it back through
+        # `from_dicts`.
+        "fills": to_dicts(fills),
         "benchmark_source": benchmark_source,
     }
 
@@ -407,13 +500,14 @@ def _compute_adjusted_noi(income: dict, expenses: dict, cim_data) -> dict:
     if adjusted_noi is None:
         adjusted_noi = cim_noi
 
-    nrsf = cim_data.nrsf or 1
+    nrsf = cim_data.nrsf
 
     return {
         "cim_ttm_noi": cim_noi,
         "analyst_adjusted_noi": adjusted_noi,
         "adjustment_delta": (adjusted_expenses - cim_expenses) if cim_expenses else None,
-        "adjusted_noi_per_sf": adjusted_noi / nrsf if adjusted_noi else None,
+        "adjusted_noi_per_sf": (adjusted_noi / nrsf
+                                if (adjusted_noi and nrsf) else None),
         "narrative": _noi_narrative(cim_noi, adjusted_noi),
     }
 

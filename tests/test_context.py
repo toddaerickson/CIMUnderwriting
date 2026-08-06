@@ -5,12 +5,18 @@ from context import AnalysisContext
 
 
 def test_context_default_values():
-    """Fresh context should have safe defaults."""
+    """Fresh context should have safe defaults.
+
+    `nrsf` is None, not 1 (item T Category 4). A dollar amount defaults to
+    zero because zero dollars is what "no amount" means; a SIZE has no
+    such reading — one square foot is a different property, and it used to
+    be the one every $/SF figure was silently computed against.
+    """
     ctx = AnalysisContext()
     assert ctx.adjusted_noi is None
     assert ctx.expense_ratio is None
     assert ctx.asking_price == 0
-    assert ctx.nrsf == 1
+    assert ctx.nrsf is None
     assert ctx.property_name == "Unknown_Property"
 
 

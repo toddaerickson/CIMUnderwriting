@@ -58,6 +58,13 @@ class AnalysisContext:
     gate_results: list = field(default_factory=list)
     gate_summary: dict = field(default_factory=dict)
 
+    # Assumption fill log (item T Category 4) — every value this run
+    # invented because the CIM did not supply it. The CLI is a separate
+    # orchestration from engine.run_analysis, so it carries its own copy
+    # for the same reason `market_cap` above does: a disclosure that
+    # exists on only one of the two entry points is not a disclosure.
+    assumption_fill_log: list = field(default_factory=list)
+
     # ── Outputs ───────────────────────────────────────────────────
     memo_path: str = ""
     excel_path: str = ""
@@ -87,8 +94,18 @@ class AnalysisContext:
         return (self.cim_data.capex_estimate or 0) if self.cim_data else 0
 
     @property
-    def nrsf(self) -> float:
-        return (self.cim_data.nrsf or 1) if self.cim_data else 1
+    def nrsf(self) -> Optional[float]:
+        """The property's rentable square footage, or None.
+
+        Deliberately NOT `or 1` (item T Category 4). A one-square-foot
+        property is not a safe default, it is a second size for the asset
+        that silently rescales every $/SF figure derived from it, and
+        `run.stage_analyze` refuses a deal without NRSF before this is
+        read on the analysis path. `asking_price` and `capex` above keep
+        their `or 0` because zero dollars IS the semantic of an absent
+        amount; one square foot is not the semantic of an absent size.
+        """
+        return self.cim_data.nrsf if self.cim_data else None
 
     @property
     def property_name(self) -> str:

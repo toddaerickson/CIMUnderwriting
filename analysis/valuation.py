@@ -71,7 +71,8 @@ def resolve_hold_years(hold_years: int = None) -> int:
 
 def resolve_market_cap(asset_type: str = None, year_built=None, *,
                        market_cap: float = None, as_of=None,
-                       base: dict = None) -> dict:
+                       base: dict = None,
+                       asset_class_known: bool = None) -> dict:
     """The market cap for this asset's class and age band.
 
     An explicit `market_cap` (the analyst's, off the assumptions form)
@@ -84,6 +85,16 @@ def resolve_market_cap(asset_type: str = None, year_built=None, *,
     resolve_transaction_costs takes one: the table is in
     webapp.services._PATCHED_DICTS and the live dict carries another
     deal's values for as long as that deal holds the analysis lock.
+
+    `asset_class_known` is the CALLER's answer to "did the CIM evidence
+    this class, or is it the default reached by absence?" — the caller's,
+    because the fallback happens up in `registry.classify_asset_type`,
+    before the class arrives here as a bare string. It is reported
+    alongside `age_band_known`, whose question this resolver CAN answer
+    itself, so both halves of the table lookup that prices the exit carry
+    provenance. `None` means the caller did not say; absence of an answer
+    is not an answer, so nothing downstream may read it as "evidenced"
+    (item T Category 4).
     """
     table = MARKET_CAP_RATES if base is None else base
     band = age_band(year_built, as_of)
@@ -95,6 +106,7 @@ def resolve_market_cap(asset_type: str = None, year_built=None, *,
         return {"market_cap": float(market_cap), "source": "analyst",
                 "asset_class": asset_class, "age_band": resolved_band,
                 "age_band_known": band is not None,
+                "asset_class_known": asset_class_known,
                 "table_market_cap": table_rate, "as_of": MARKET_CAP_AS_OF}
     if table_rate is None:
         # Neither an analyst figure nor a table cell. Refuse rather than
@@ -105,6 +117,7 @@ def resolve_market_cap(asset_type: str = None, year_built=None, *,
     return {"market_cap": float(table_rate), "source": "table",
             "asset_class": asset_class, "age_band": resolved_band,
             "age_band_known": band is not None,
+            "asset_class_known": asset_class_known,
             "table_market_cap": table_rate, "as_of": MARKET_CAP_AS_OF}
 
 

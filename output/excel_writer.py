@@ -51,6 +51,7 @@ def generate_excel(property_name: str, cim_data, financial_analysis: dict,
                    va_max_offer: dict = None, checks: list = None,
                    sources_uses: dict = None, levered: dict = None,
                    debt: dict = None, levered_max_offer: dict = None,
+                   assumption_fill_log: list = None,
                    output_dir: str = ".") -> str:
     """
     Generate the SS Returns Model .xlsx.
@@ -62,7 +63,7 @@ def generate_excel(property_name: str, cim_data, financial_analysis: dict,
 
     # Tab 1: Inputs
     _build_inputs_tab(wb.active, cim_data, financial_analysis,
-                      scenario_results)
+                      scenario_results, assumption_fill_log)
     wb.active.title = "Inputs"
 
     # Tabs 2-4: Scenario cases (static)
@@ -157,7 +158,8 @@ def _exit_cap_rows(scen: dict) -> list:
     return rows
 
 
-def _build_inputs_tab(ws, cim_data, fin, scenario_results=None):
+def _build_inputs_tab(ws, cim_data, fin, scenario_results=None,
+                      assumption_fill_log=None):
     """Build the Inputs tab with editable assumption cells."""
     ws.column_dimensions["A"].width = 30
     ws.column_dimensions["B"].width = 20
@@ -220,6 +222,43 @@ def _build_inputs_tab(ws, cim_data, fin, scenario_results=None):
         row += 1
 
     row = _write_exit_cap_derivation(ws, row, scenario_results)
+    row = _write_assumption_fills(ws, row, assumption_fill_log)
+
+
+def _write_assumption_fills(ws, row, assumption_fill_log):
+    """The inputs this run invented, on the tab that claims to be the
+    record of what it used (item T Category 4).
+
+    Without this block that claim is false for exactly the values a
+    reader most needs flagged: a benchmark-floor expense and a CIM-stated
+    one print as the same number in the same font. Not editable-yellow —
+    editing the fill log changes nothing; the input above it is where the
+    fix goes.
+    """
+    if not assumption_fill_log:
+        return row
+
+    from analysis.fills import format_detail, format_value, from_dicts
+
+    row += 1
+    row = _write_section_header(ws, row, "Assumptions Filled From Defaults",
+                                cols=4)
+    for col, head in enumerate(("Input", "Value Used", "Source",
+                                "Derived From"), start=1):
+        ws.cell(row=row, column=col, value=head).font = LABEL_FONT
+    row += 1
+    for fill in from_dicts(assumption_fill_log):
+        ws.cell(row=row, column=1, value=fill.field).font = LABEL_FONT
+        ws.cell(row=row, column=2, value=format_value(fill)).font = VALUE_FONT
+        ws.cell(row=row, column=3, value=fill.source_label).font = VALUE_FONT
+        # The raw inputs the substitution was computed from. This is the
+        # workbook's job specifically: it is the analyst's audit artifact,
+        # not an LP document, so it is the one surface with room for the
+        # numbers behind the sentence — and a `detail` no surface renders
+        # would be precisely the unread stamp this item exists to kill.
+        ws.cell(row=row, column=4, value=format_detail(fill)).font = VALUE_FONT
+        row += 1
+    return row
 
 
 def _write_exit_cap_derivation(ws, row, scenario_results):
@@ -655,6 +694,13 @@ def _build_value_add_tab(ws, va_results: dict, va_max_offer: dict, cim_data):
     ]
     for label, val, fmt in overview:
         row = _write_input_row(ws, row, label, val, fmt)
+    # Directly beneath the market rent it qualifies, because that cell is
+    # the in-place rent copied and a reader comparing the two rows above
+    # would otherwise conclude the asset is already at market (item T
+    # Category 4).
+    if base.get("rent_ramp_excluded"):
+        row = _write_input_row(ws, row, "Rent Ramp",
+                               "EXCLUDED - no market-rent data", None)
     row += 1
 
     # Scenario comparison header

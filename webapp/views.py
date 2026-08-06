@@ -482,6 +482,11 @@ def deal_detail(request, pk):
         if tab == "summary":
             ctx.update(results_ctx.summary_context(r))
             ctx.update(results_ctx.checks_context(r))
+            # Provenance sits with integrity, above the numbers: the
+            # register says whether the inputs are self-consistent, the
+            # fill log says which of them the CIM never supplied (item T
+            # Category 4).
+            ctx.update(results_ctx.fill_log_context(r))
             ctx.update(results_ctx.capital_context(r))
         elif tab == "returns":
             ctx.update(results_ctx.returns_context(r))

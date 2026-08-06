@@ -65,7 +65,8 @@ def read_deal_meta(deal_folder: str) -> dict | None:
 # here because this was their import site for the settings dropdown, the
 # deal meta and the extract worker.
 from analysis.valuation import resolve_market_cap  # noqa: E402
-from registry import ASSET_TYPES, detect_asset_type  # noqa: F401,E402
+from registry import (ASSET_TYPES, classify_asset_type,  # noqa: F401,E402
+                      detect_asset_type)
 
 
 def build_deal_meta(cim_data, result, deal_folder: str, input_files: list[str] = None) -> dict:
@@ -379,10 +380,16 @@ def resolve_run_market_cap(patch: dict, overrides: dict, cim_data) -> dict:
     table = copy.deepcopy(_ORIG_CONFIG["MARKET_CAP_RATES"])
     _merge_patch({"MARKET_CAP_RATES": table},
                  {"MARKET_CAP_RATES": (patch or {}).get("MARKET_CAP_RATES", {})})
+    # This is the WEB path's only market-cap resolution — the engine takes
+    # the dict from here as-is rather than re-resolving — so the asset
+    # class's provenance must be threaded here too, or the fill log's
+    # asset-class row is dead on the primary surface while working in the
+    # CLI (item T Category 4).
+    asset_class, asset_class_known = classify_asset_type(cim_data)
     return resolve_market_cap(
-        detect_asset_type(cim_data), getattr(cim_data, "year_built", None),
+        asset_class, getattr(cim_data, "year_built", None),
         market_cap=(overrides or {}).get("market_cap_rate"),
-        base=table)
+        base=table, asset_class_known=asset_class_known)
 
 
 #: Per-scenario keys a stored deal may still carry from before the exit cap
@@ -1002,6 +1009,12 @@ def _analysis_worker(run_pk):
             # recomputed later against whatever the deal looks like then.
             "checks": result.checks,
             "check_summary": result.check_summary,
+            # Assumption fill log (item T Category 4) — stored with the
+            # run for the same reason the register above is: an
+            # assumption belongs to the numbers it produced. Re-deriving
+            # it later would answer for whatever config says then, and
+            # the returns on screen were computed on what it said now.
+            "assumption_fill_log": result.assumption_fill_log,
             # The levered lens (item E3a). Persisted HERE, with the run,
             # rather than recomputed later: the LP net IRR belongs to the
             # assumption set stamped above, and a figure re-derived next

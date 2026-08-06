@@ -67,6 +67,28 @@ def checks_context(r) -> dict:
             "check_summary": r.get("check_summary") or {}}
 
 
+def fill_log_context(r) -> dict:
+    """Assumption fill log → template rows (item T Category 4).
+
+    Sibling of `checks_context` and deliberately its own panel, not a
+    line in the amber `run_warnings` banner: that banner is a flat list
+    of strings for things the run REFUSED, and flattening a three-column
+    provenance table into bullets on all four tabs would lose the two
+    columns that make it auditable.
+
+    Ordering comes from `fills.collect`, which sorted by source key when
+    the run was recorded. Re-sorting here would give a stored run and a
+    live one two different orders for the same log.
+    """
+    from analysis import fills
+
+    rows = fills.from_dicts(r.get("assumption_fill_log") or [])
+    return {"fill_rows": [{"field": f.field,
+                           "value": fills.format_value(f),
+                           "source": f.source_label,
+                           "label": f.label} for f in rows]}
+
+
 def _metric_rows(block, metrics):
     rows = []
     for label, key, fmt in metrics:

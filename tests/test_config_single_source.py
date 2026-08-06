@@ -1918,3 +1918,736 @@ def test_the_measurement_that_chose_the_two_percent_bracket():
     # and the size of the error the narrow bracket would have shipped
     assert wide["max_price"] - narrow["max_price"] == pytest.approx(799_773,
                                                                     abs=1.0)
+
+
+# ── Item T Category 4: the assumption fill log ───────────────────────
+#
+# Category 1's lesson was that byte-for-byte green is what a dead wire
+# looks like. This category's version is sharper, because the whole
+# feature IS a report: a log that records perfectly and renders nowhere
+# reproduces every number in the pipeline and delivers none of the item.
+# The repo has already shipped one stamp nobody could read
+# (`config_skipped`, PR #48). So every test below asserts a SURFACE, and
+# each names the deliberate break that must turn it red.
+
+
+def _thin_va_deal():
+    """A value-add deal with NO market rent — the item (c) path, which no
+    characterization fixture exercises: `thin` never triggers the VA
+    engine (88% occupancy) and `value_add` supplies `market_rent_psf`."""
+    from extract.parser import CIMData, UnitType
+    return CIMData(
+        property_name="Category Four Thin VA",
+        address="4 Fallback Ln", city="Tyler", state="TX",
+        year_built=2001, nrsf=45_000, total_units=350,
+        physical_occupancy=0.72,
+        asking_price=3_900_000,
+        unit_mix=[UnitType(size_label="10x10", count=200, sf=100, rate=71.0,
+                           climate_controlled=False),
+                  UnitType(size_label="10x20", count=150, sf=200, rate=126.0,
+                           climate_controlled=False)],
+        ttm_total_revenue=452_000, ttm_total_expenses=205_000,
+        ttm_noi=247_000,
+    )
+
+
+def _run(cim, tmp_path, **kw):
+    result = AnalysisResult(pdf_path=str(tmp_path / "deal.pdf"))
+    result.cim_data = cim
+    return run_analysis(result, output_dir=str(tmp_path), **kw)
+
+
+def _memo_text(path) -> str:
+    from docx import Document
+    doc = Document(path)
+    parts = [p.text for p in doc.paragraphs]
+    for table in doc.tables:
+        for row in table.rows:
+            parts += [c.text for c in row.cells]
+    return "\n".join(parts)
+
+
+# ── the log reaches the memo, and the memo prints the config value ───
+
+def test_the_fill_log_reaches_the_memo_appendix(tmp_path):
+    """MUTATION: pass `assumption_fill_log=None` into `generate_memo`
+    (or drop the argument at engine.py's call site) and the appendix
+    vanishes while every number in the document stays identical. A test
+    asserting only `len(result.assumption_fill_log) > 0` passes against a
+    log that renders nowhere, which is the defect this item exists to
+    close."""
+    result = _run(stabilized_deal(), tmp_path)
+
+    assert result.assumption_fill_log, "the stabilized deal fills cap_reserve"
+    text = _memo_text(result.memo_path)
+    assert "Appendix A. Assumptions Filled From Defaults" in text
+    for fill in result.assumption_fill_log:
+        assert fill["field"] in text, f"{fill['field']} logged but not rendered"
+    # and section 1 tells the reader the appendix is there at all
+    assert "listed with its source in Appendix A" in text
+
+
+def test_the_logged_value_follows_the_config_it_came_from(tmp_path,
+                                                          monkeypatch):
+    """The Category 1/2/3 signature test, applied to the log: move the
+    benchmark and BOTH the recorded value and the rendered sentence must
+    move with it.
+
+    This is what catches a fill log that re-derives its own floor instead
+    of recording the one the expense analysis actually booked — two
+    computations of the same number, which is how they drift.
+    """
+    monkeypatch.setitem(cfg.EXPENSE_BENCHMARKS, "cap_reserve", (0.99, 1.20))
+    result = _run(stabilized_deal(), tmp_path)
+
+    fill = next(f for f in result.assumption_fill_log
+                if f["field"] == "cap_reserve")
+    assert fill["value_used"] == pytest.approx(0.99 * 60_000)
+    assert fill["source_key"] == "benchmark_low"
+    # the booked expense and the logged value are the SAME number
+    line = next(l for l in result.financial_analysis["expense_analysis"]["lines"]
+                if l["benchmark_key"] == "cap_reserve")
+    assert line["adjusted_value"] == pytest.approx(fill["value_used"])
+    assert "$59,400" in _memo_text(result.memo_path)
+
+
+@pytest.mark.django_db
+def test_the_fill_log_reaches_the_results_page(tmp_path, client,
+                                               django_user_model):
+    """MUTATION: remove `ctx.update(results_ctx.fill_log_context(r))` from
+    `webapp/views.py` and this goes red while every other tab assertion
+    in the suite still passes."""
+    from webapp.models import AnalysisRun, Deal
+
+    django_user_model.objects.create_user(username="u", password="p")
+    client.login(username="u", password="p")
+
+    result = _run(stabilized_deal(), tmp_path)
+    deal = Deal.objects.create(deal_id="fill-log", property_name="Fill Log")
+    AnalysisRun.objects.create(
+        deal=deal, status="done",
+        result_json={"assumption_fill_log": result.assumption_fill_log,
+                     "checks": [], "check_summary": {}})
+
+    body = client.get(f"/deals/{deal.pk}/?tab=summary").content.decode()
+    assert "Assumptions Filled" in body
+    for fill in result.assumption_fill_log:
+        assert fill["field"] in body
+        assert fill["source_key"] in ("benchmark_low",)  # vocabulary, below
+    assert "benchmark floor x NRSF" in body
+
+
+# ── item (b): the two inputs with no honest default ──────────────────
+
+@pytest.mark.parametrize("field,label", [("nrsf", "NRSF"),
+                                         ("ttm_noi", "TTM NOI")])
+@pytest.mark.parametrize("empty", [None, 0.0])
+def test_a_deal_without_nrsf_or_noi_is_refused(tmp_path, field, label, empty):
+    """MUTATION: restore `nrsf = cim_data.nrsf or 1` in
+    `analysis/financials.py` and drop the gate — the run completes and
+    prices a one-square-foot property.
+
+    The 0.0 case is not redundant with None: `extract.parser._parse_number`
+    returns 0.0 when it cannot read a figure, so a gate written `is None`
+    passes the first parametrization and fails this one.
+    """
+    from analysis.fills import MissingUnderwritingInput
+
+    cim = stabilized_deal()
+    setattr(cim, field, empty)
+    with pytest.raises(MissingUnderwritingInput) as exc:
+        _run(cim, tmp_path)
+    assert label in str(exc.value)
+    # the message is the on-screen copy, so it must say what to do
+    assert "Assumptions page" in str(exc.value)
+
+
+def test_the_refusal_names_both_fields_when_both_are_missing(tmp_path):
+    from analysis.fills import MissingUnderwritingInput
+
+    cim = stabilized_deal()
+    cim.nrsf = None
+    cim.ttm_noi = None
+    with pytest.raises(MissingUnderwritingInput) as exc:
+        _run(cim, tmp_path)
+    assert "NRSF and TTM NOI missing" in str(exc.value)
+
+
+@pytest.mark.django_db
+def test_a_refused_deal_becomes_a_failed_run_with_readable_copy(tmp_path,
+                                                               monkeypatch):
+    """The web path. MUTATION: catch `MissingUnderwritingInput` inside
+    `run_analysis` and append to `result.errors` instead of raising —
+    status stays "done" and the deal is priced on a fiction with an
+    amber bullet nobody has to read."""
+    from webapp.models import AnalysisRun, Deal
+    from webapp.services import _analysis_worker
+
+    deal = Deal.objects.create(
+        deal_id="no-nrsf", property_name="No NRSF", deal_dir=str(tmp_path),
+        cim_json={"property_name": "No NRSF", "ttm_noi": 500_000,
+                  "asking_price": 5_000_000})
+    run = AnalysisRun.objects.create(deal=deal, status="running")
+    _analysis_worker(run.pk)
+
+    run.refresh_from_db()
+    assert run.status == "failed"
+    assert "NRSF" in run.error
+    assert "cannot be underwritten" in run.error
+
+
+def _big_va_deal(ttm_noi):
+    """A value-add deal whose true max offer sits ABOVE the window a
+    fabricated $100k NOI would have searched. The size matters: on a
+    smaller deal the root falls inside both brackets and the two
+    implementations agree to the dollar, which is coincidence, not
+    coverage."""
+    from extract.parser import UnitType
+    from tests.test_characterization import value_add_deal
+
+    cim = value_add_deal()
+    cim.ttm_noi = ttm_noi
+    cim.nrsf = 120_000
+    cim.unit_mix = [
+        UnitType(size_label="10x10", count=600, sf=100, rate=140.0,
+                 climate_controlled=False),
+        UnitType(size_label="10x20", count=300, sf=200, rate=250.0,
+                 climate_controlled=False)]
+    return cim
+
+
+def test_the_value_add_solver_no_longer_invents_a_hundred_thousand_noi():
+    """`ttm_noi or 100_000` did not widen the search, it RELOCATED it —
+    to the window a $100k-NOI property is priced in, $500k to $5M,
+    whatever the asset was actually worth.
+
+    MEASURED, because the size of the error is the argument. Restoring
+    the literal (equivalently: handing the solver a real $100k NOI, which
+    produces the identical bracket) returns the search CEILING to the
+    dollar, flags itself unconverged, and reports a 2.00% implied entry
+    cap that is simply `SOLVER_BOUNDS["dear_entry_cap"]` reflected back —
+    an answer shaped exactly like an answer.
+    """
+    from model.solver import solve_max_price_value_add
+
+    fabricated = solve_max_price_value_add(_big_va_deal(100_000),
+                                           financial_analysis={}, capex=0)
+    real = solve_max_price_value_add(_big_va_deal(None),
+                                     financial_analysis={}, capex=0)
+
+    assert fabricated["converged"] is False
+    assert fabricated["max_price"] == pytest.approx(5_000_000, abs=1.0)
+    assert fabricated["achieved_irr"] == pytest.approx(0.2692, abs=1e-4)
+
+    assert real["converged"] is True
+    assert real["achieved_irr"] == pytest.approx(real["target_irr"],
+                                                 abs=cfg.SOLVER_TOLERANCE)
+    assert real["max_price"] == pytest.approx(15_401_367, abs=1.0)
+    # the size of the error the literal would have shipped
+    assert real["max_price"] - fabricated["max_price"] == pytest.approx(
+        10_401_367, abs=1.0)
+
+    # and no implied cap is printed off an NOI the deal does not have
+    assert real["implied_entry_cap"] is None
+
+
+def test_no_solver_carries_a_fabricated_noi_literal():
+    """AST companion to the behavioural test above. Behavioural proves it
+    matters; this keeps it gone — a later edit could reintroduce the
+    literal in a branch no fixture reaches."""
+    import ast
+    from pathlib import Path
+
+    source = Path(__file__).resolve().parent.parent / "model" / "solver.py"
+    tree = ast.parse(source.read_text(), filename=str(source))
+    offenders = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.FunctionDef):
+            continue
+        if not node.name.startswith("solve_max_price"):
+            continue
+        for sub in ast.walk(node):
+            if (isinstance(sub, ast.Constant)
+                    and isinstance(sub.value, (int, float))
+                    and not isinstance(sub.value, bool)
+                    and sub.value == 100_000):
+                offenders.append(f"{node.name}:{sub.lineno}")
+    assert offenders == [], (
+        f"a solver fabricates an NOI again at {offenders}; the zero-NOI "
+        f"window belongs in config.SOLVER_BOUNDS")
+
+
+def test_no_module_still_sizes_a_property_at_one_square_foot():
+    """`nrsf or 1` reintroduced anywhere in the pricing path is the whole
+    defect back. An AST walk, not a grep, so `nrsf or 1.0` and
+    `cim_data.nrsf or 1` are caught by shape rather than by spelling.
+
+    It RESOLVES module-level names too. The first version of this test
+    matched only inline `ast.Constant` nodes, and reported zero offenders
+    while `output/template_writer.py` carried
+    `cim_data.nrsf or _NRSF_FALLBACK` with `_NRSF_FALLBACK = 1` declared
+    twenty lines up — in a file this test's own path list names. A guard
+    that overclaims its coverage is worse than no guard, because it is
+    read as proof. The name-following idiom is borrowed from
+    `tests/test_template_writer.py::_reachable_literals`, which was
+    written for exactly this evasion.
+    """
+    import ast
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parent.parent
+    paths = ([root / "engine.py", root / "context.py"]
+             + sorted((root / "analysis").glob("*.py"))
+             + sorted((root / "model").glob("*.py"))
+             + sorted((root / "output").glob("*.py")))
+    offenders = []
+    for path in paths:
+        tree = ast.parse(path.read_text(), filename=str(path))
+        # module-level `NAME = <number>` bindings, so a literal parked in
+        # a constant one line earlier is still caught
+        consts = {}
+        for node in tree.body:
+            if not isinstance(node, ast.Assign) or len(node.targets) != 1:
+                continue
+            target = node.targets[0]
+            if (isinstance(target, ast.Name)
+                    and isinstance(node.value, ast.Constant)
+                    and isinstance(node.value.value, (int, float))
+                    and not isinstance(node.value.value, bool)):
+                consts[target.id] = node.value.value
+
+        def _number(node):
+            """The number this expression evaluates to, or None."""
+            if (isinstance(node, ast.Constant)
+                    and isinstance(node.value, (int, float))
+                    and not isinstance(node.value, bool)):
+                return node.value
+            if isinstance(node, ast.Name):
+                return consts.get(node.id)
+            return None
+
+        for node in ast.walk(tree):
+            if not (isinstance(node, ast.BoolOp)
+                    and isinstance(node.op, ast.Or)):
+                continue
+            names = {n.attr for n in ast.walk(node)
+                     if isinstance(n, ast.Attribute)}
+            names |= {n.id for n in ast.walk(node) if isinstance(n, ast.Name)}
+            if "nrsf" not in names:
+                continue
+            for value in node.values[1:]:
+                number = _number(value)
+                if number is not None and number > 0:
+                    offenders.append(f"{path.name}:{value.lineno}")
+    assert offenders == [], (
+        f"NRSF defaulted to a non-zero literal at {offenders} — a property "
+        f"sized by fallback rescales every $/SF figure derived from it")
+
+
+def test_the_logged_expense_ratio_is_the_one_the_projection_charges(
+        monkeypatch):
+    """`registry.clamp_expense_ratio` clamps the config default into the
+    band derived from the benchmark ratio, and `EXPENSE_RATIO` is
+    settings-editable — so a stored override pushing the default outside
+    that band makes a RAW read print a share the model never charged.
+
+    The two coincide on shipped config, which is exactly how this class
+    of bug survives a test suite. Move the default out of the band and
+    the logged value must follow the clamp, not the config.
+
+    MUTATION: log `cfg.EXPENSE_RATIO["default"]` instead of
+    `clamp_expense_ratio(None)`.
+    """
+    from analysis import fills
+    from registry import clamp_expense_ratio, expense_ratio_clamp
+
+    monkeypatch.setitem(cfg.EXPENSE_RATIO, "default", 0.99)
+    import registry
+    registry._WARNED.clear()
+
+    lo, hi = expense_ratio_clamp()
+    charged = clamp_expense_ratio(None)
+    assert charged == pytest.approx(hi), "the clamp did not bind — pick a " \
+                                         "default further outside the band"
+    assert charged != cfg.EXPENSE_RATIO["default"]
+
+    (row,) = [f for f in fills.collect(expense_ratio=None)
+              if f.source_key == fills.EXPENSE_RATIO_DEFAULT]
+    assert row.value_used == pytest.approx(charged)
+    assert f"{charged:.1%}" in row.label
+
+
+# ── item (c): the rent ramp that is not there ────────────────────────
+
+def test_a_value_add_deal_without_market_rent_says_the_ramp_is_excluded(
+        tmp_path):
+    """MUTATION: hard-code `rent_ramp_excluded=False` and the memo prints
+    "a 0% rent gap", which reads as "already at market" — the opposite of
+    "we have no idea what market is"."""
+    result = _run(_thin_va_deal(), tmp_path)
+
+    assert result.va_results, "fixture must trigger the value-add engine"
+    base = result.va_results[ScenarioType.BASE]
+    assert base["rent_ramp_excluded"] is True
+    # the substitution itself: market rent IS the in-place rent
+    assert base["market_rent_psf"] == pytest.approx(base["in_place_rent_psf"])
+    assert base["target_rent_psf"] == pytest.approx(base["in_place_rent_psf"])
+
+    text = _memo_text(result.memo_path)
+    assert "Rent ramp excluded" in text
+    assert "0% rent gap" not in text, "a suppressed gap, not a zeroed one"
+    assert any(f["source_key"] == "market_rent_absent"
+               for f in result.assumption_fill_log)
+
+
+def test_a_value_add_deal_with_market_rent_carries_no_such_flag(tmp_path):
+    """The negative half. A flag that is always on is not a flag, and
+    this is the assertion that fails if `rent_ramp_excluded` is wired to
+    a constant."""
+    cim = _thin_va_deal()
+    cim.market_rent_psf = 1.55
+    result = _run(cim, tmp_path)
+
+    base = result.va_results[ScenarioType.BASE]
+    assert base["rent_ramp_excluded"] is False
+    assert base["market_rent_psf"] > base["in_place_rent_psf"]
+    text = _memo_text(result.memo_path)
+    assert "Rent ramp excluded" not in text
+    assert "rent gap" in text
+    assert not any(f["source_key"] == "market_rent_absent"
+                   for f in result.assumption_fill_log)
+
+
+def test_a_zero_occupancy_asset_is_not_quietly_re_let_to_eighty_percent():
+    """`or 0.80` treated an honestly-reported pre-lease-up asset as 80%
+    occupied and underwrote the ramp from there. `is None` is the fix,
+    and this is the case that separates the two — the defect class the
+    repo has already recorded against the solver's target IRR and the
+    management-fee target."""
+    from model.value_add_model import _resolve_va_inputs
+
+    cim = _thin_va_deal()
+    cim.physical_occupancy = 0.0
+    resolved = _resolve_va_inputs(cim, {})
+    assert resolved.current_occ == 0.0
+    assert not any(f.source_key == "occupancy_absent" for f in resolved.fills)
+
+    cim.physical_occupancy = None
+    resolved = _resolve_va_inputs(cim, {})
+    assert resolved.current_occ == 0.80
+    assert any(f.source_key == "occupancy_absent" for f in resolved.fills)
+
+
+def test_the_solver_objective_does_not_multiply_the_log(tmp_path):
+    """`compute_va_irr_at_price` is the bisection objective, called once
+    per iteration. Recording from inside it would make the log's LENGTH
+    an artifact of the search — twenty copies of one substitution."""
+    result = _run(_thin_va_deal(), tmp_path)
+
+    keys = [f["source_key"] for f in result.assumption_fill_log]
+    assert len(keys) == len(set(keys)) or keys.count("market_rent_absent") == 1
+    assert keys.count("market_rent_absent") == 1
+
+
+# ── the register's own contract ──────────────────────────────────────
+
+def test_the_source_vocabulary_cannot_drift_from_its_labels():
+    """The keys ARE the label table's keys — one structure, so there is
+    nothing to keep in sync. A tuple beside a dict would be the
+    duplicated-constant defect this item exists to close, needing a test
+    whose only job is policing the two."""
+    from analysis import fills
+
+    assert fills.SOURCE_KEYS == tuple(fills.SOURCE_LABELS)
+    assert all(fills.SOURCE_LABELS[k] for k in fills.SOURCE_KEYS), (
+        "a source key with no prose renders as its raw slug in an IC memo")
+
+
+def test_every_fill_a_pipeline_run_emits_carries_a_declared_key(tmp_path):
+    from analysis import fills
+
+    emitted = set()
+    for deal in (stabilized_deal(), _thin_va_deal()):
+        for row in _run(deal, tmp_path).assumption_fill_log:
+            emitted.add(row["source_key"])
+            assert row["label"], f"{row['field']} logged without a sentence"
+    assert emitted <= set(fills.SOURCE_KEYS), emitted - set(fills.SOURCE_KEYS)
+    assert emitted, "neither fixture logged anything — the wire is dead"
+
+
+def test_the_log_round_trips_and_tolerates_a_row_from_an_older_run():
+    """`from_dicts` drops unknown keys and defaults the optional ones, so
+    adding a column later does not 500 the results page for every run
+    already in the database."""
+    from analysis import fills
+
+    original = [fills.Fill(field="cc_pct", value_used=0.0,
+                           source_key=fills.CC_PCT_ABSENT, label="x",
+                           unit=fills.UNIT_PCT, detail={"nrsf": 1})]
+    assert fills.from_dicts(fills.to_dicts(original)) == original
+
+    stored = [{"field": "nrsf_ratio", "source_key": "benchmark_low",
+               "a_column_added_next_quarter": 7}]
+    (restored,) = fills.from_dicts(stored)
+    assert restored.field == "nrsf_ratio"
+    assert restored.value_used is None and restored.label == ""
+
+    # a row missing the two required columns is dropped, not raised on
+    assert fills.from_dicts([{"value_used": 3}]) == []
+
+
+def test_one_formatter_serves_every_surface():
+    """Two formatters is how "0.8" and "80%" end up in one document. The
+    memo, the workbook and the results page all normalize through
+    `from_dicts` first — they need `source_label` anyway — so this takes
+    a `Fill` and nothing else."""
+    from analysis import fills
+
+    fill = fills.Fill(field="mgmt_fee_pct", value_used=0.06,
+                      source_key=fills.MGMT_FEE_TARGET, label="x",
+                      unit=fills.UNIT_PCT, detail={"egr": 500_000})
+    assert fills.format_value(fill) == "6.0%"
+    assert fills.format_value(fills.from_dicts(fills.to_dicts([fill]))[0]) == "6.0%"
+    assert fills.format_detail(fill) == "egr=500000"
+
+    dollars = fills.Fill(field="cap_reserve", value_used=9000,
+                         source_key=fills.BENCHMARK_LOW, label="x",
+                         unit=fills.UNIT_DOLLARS)
+    assert fills.format_value(dollars) == "$9,000"
+    assert fills.format_value(
+        fills.Fill(field="f", value_used=None,
+                   source_key=fills.STATE_ABSENT, label="x")) == "—"
+
+
+def test_the_asset_class_reports_whether_the_cim_evidenced_it():
+    """`detect_asset_type` returns the default by ABSENCE of evidence, so
+    the exit cap's row can be a guess with nothing saying so. One
+    implementation, two return values — a separate "was it evidenced"
+    predicate would be a second copy of the same branch."""
+    from extract.parser import CIMData
+    from registry import classify_asset_type, detect_asset_type
+
+    silent = CIMData(property_name="silent")
+    assert classify_asset_type(silent) == ("Self Storage", False)
+
+    stated = CIMData(property_name="stated", cc_pct=0.30)
+    assert classify_asset_type(stated) == ("Self Storage", True)
+
+    cc = CIMData(property_name="cc", cc_pct=0.80)
+    assert classify_asset_type(cc) == ("Climate-Controlled Self Storage", True)
+
+    brv = CIMData(property_name="brv", brv_enclosed_sf=10_000)
+    assert classify_asset_type(brv) == ("Boat & RV Storage", True)
+
+    # and the old name still answers the old question, from the same code
+    for cim in (silent, stated, cc, brv):
+        assert detect_asset_type(cim) == classify_asset_type(cim)[0]
+
+
+def test_the_two_replacement_cost_copies_still_agree(tmp_path):
+    """`analysis.filters._estimate_replacement_cost` is a SECOND copy of
+    the build-up in `analysis.physical`, and it feeds gate 3 directly.
+    Only `physical` records the cc_pct fill, so the log would describe a
+    number gate 3 never used if the copies drifted. MUTATION: change one
+    copy's `cc_pct or 0.0` to `or 0.5`."""
+    from analysis.filters import _estimate_replacement_cost
+    from analysis.physical import analyze_physical
+
+    cim = _thin_va_deal()          # no cc_pct, no typed SF — the fill path
+    gate_view = _estimate_replacement_cost(cim)
+    memo_view = analyze_physical(cim)["replacement_cost"]["total_replacement"]
+    assert gate_view == pytest.approx(memo_view)
+
+
+def test_the_two_value_add_occupancy_defaults_are_still_declared_apart():
+    """They disagree — 0.80 for the lease-up start, 0.85 for backing
+    in-place rent out of EGR, for the SAME field. Category 4 named them
+    so the disagreement is visible; backlog item T clause 5 owns
+    resolving it. This test fails if someone collapses them as a tidy-up,
+    which would re-underwrite every thin deal without deciding anything.
+    """
+    from model import value_add_model as vam
+
+    assert vam.VA_DEFAULT_OCCUPANCY == 0.80
+    assert vam.VA_EGR_ASSUMED_OCCUPANCY == 0.85
+    assert vam.VA_DEFAULT_OCCUPANCY != vam.VA_EGR_ASSUMED_OCCUPANCY
+
+
+def test_the_value_add_fills_survive_the_json_boundary(tmp_path):
+    """`va_results` is persisted through `webapp.services.json_safe`,
+    whose last line is `str(obj)` for anything it does not recognize —
+    so a `Fill` dataclass left on a scenario dict lands in the run record
+    as "Fill(field='...', ...)": valid JSON, renders fine, never raises,
+    and is not data. MUTATION: store `list(inputs.fills)` instead of
+    `to_dicts(...)`."""
+    from webapp.services import json_safe
+
+    result = _run(_thin_va_deal(), tmp_path)
+    stored = json_safe({"va_results": result.va_results})
+    rows = stored["va_results"][ScenarioType.BASE.value]["input_fills"]
+
+    assert rows and all(isinstance(row, dict) for row in rows), rows
+    assert all("field" in row and "source_key" in row for row in rows)
+    assert not any(isinstance(v, str) and v.startswith("Fill(")
+                   for row in rows for v in row.values())
+
+
+def test_the_cli_discloses_the_same_assumptions_the_web_app_does(tmp_path,
+                                                                 monkeypatch):
+    """The CLI is a SEPARATE orchestration from `engine.run_analysis`, so
+    every wire has to be run twice or one entry point ships a document
+    that hides what the other discloses. An audit agent caught the memo,
+    the workbook and the LP summary all reaching `run.stage_output` with
+    no fill log at all.
+
+    MUTATION: drop `assumption_fill_log=ctx.assumption_fill_log` from any
+    of the three writer calls in `run.stage_output`.
+    """
+    import run as cli
+    from context import AnalysisContext
+
+    ctx = AnalysisContext(pdf_path=str(tmp_path / "deal.pdf"))
+    ctx.cim_data = stabilized_deal()
+
+    class _NoComps:
+        def query_expense_benchmarks(self, **kw):
+            return None
+
+        def query_rent_comps(self, **kw):
+            return None
+
+        def save_analysis(self, **kw):
+            return None
+
+    comp_db = _NoComps()
+    cli.stage_analyze(ctx, comp_db)
+    cli.stage_valuate(ctx)
+    cli.stage_gates_and_risks(ctx)
+
+    assert ctx.assumption_fill_log, "the CLI never assembled a fill log"
+    cli.stage_output(ctx, comp_db)
+
+    text = _memo_text(ctx.memo_path)
+    assert "Appendix A. Assumptions Filled From Defaults" in text
+    for row in ctx.assumption_fill_log:
+        assert row["field"] in text
+
+
+@pytest.mark.django_db
+def test_the_worker_actually_persists_the_fill_log(tmp_path, monkeypatch):
+    """The one wire from `run_analysis` to the database, and until now no
+    test touched it — `test_the_fill_log_reaches_the_results_page` builds
+    `result_json` by hand, so it would pass against a worker that dropped
+    the key on the floor.
+
+    That is not a hypothetical: item E3a shipped exactly this defect (the
+    levered lens computed on every deal, set on the result object, never
+    added to the persisted payload, discarded when the worker returned).
+    Two audit agents found it then and one found the gap here.
+
+    MUTATION: delete `"assumption_fill_log": result.assumption_fill_log`
+    from the payload in `webapp/services.py`.
+    """
+    from webapp.models import AnalysisRun, Deal
+    from webapp.services import _analysis_worker, cim_to_dict
+
+    deal = Deal.objects.create(
+        deal_id="persist-fills", property_name="Persist Fills",
+        deal_dir=str(tmp_path), cim_json=cim_to_dict(stabilized_deal()))
+    run = AnalysisRun.objects.create(deal=deal, status="running")
+    _analysis_worker(run.pk)
+
+    run.refresh_from_db()
+    assert run.status == "done", run.error
+    stored = (run.result_json or {}).get("assumption_fill_log")
+    assert stored, "the run recorded no assumptions — the key never landed"
+    assert all(isinstance(row, dict) for row in stored)
+    assert {row["field"] for row in stored} == {"cap_reserve"}
+    assert stored[0]["source_key"] == "benchmark_low"
+    # and it survives the round trip the results page makes
+    from webapp.results import fill_log_context
+    rows = fill_log_context(run.result_json)["fill_rows"]
+    assert [r["field"] for r in rows] == ["cap_reserve"]
+    assert rows[0]["value"].startswith("$")
+
+
+def test_the_fill_log_renders_in_declared_order_not_insertion_order(tmp_path):
+    """`collect` sorts by the declared source-key order so a reader meets
+    whole-asset provenance before individual expense lines. Insertion
+    order is financials-then-physical-then-VA-then-provenance, which is
+    almost the reverse."""
+    from analysis import fills
+
+    cim = _thin_va_deal()
+    cim.state = ""                      # add a STATE_ABSENT row up top
+    log = _run(cim, tmp_path).assumption_fill_log
+
+    keys = [row["source_key"] for row in log]
+    assert keys == sorted(keys, key=fills.SOURCE_KEYS.index), (
+        "collect() returned the log in insertion order")
+    # the whole-asset rows really do come before the per-line ones, and
+    # more than one source key is present or this proves nothing
+    assert len(set(keys)) > 1, keys
+    assert keys.index(fills.STATE_ABSENT) < keys.index(fills.BENCHMARK_LOW)
+
+
+def test_the_exit_cap_provenance_fills_follow_the_published_flags(tmp_path):
+    """Both halves of the table lookup that prices the exit — which row
+    and which column — are logged off flags the resolver publishes, not
+    off a second classification. An ANALYST-entered cap moved neither, so
+    neither is logged: the condition `checks._market_exit_cap` already
+    uses for the vintage half.
+
+    MUTATION: stop passing `asset_class_known` from `engine.py`, or drop
+    it from `resolve_market_cap`'s return."""
+    from analysis import fills
+
+    cim = _thin_va_deal()
+    cim.year_built = None               # unknown vintage -> fallback band
+    cim.cc_pct = None                   # no evidence of the asset class
+
+    table_run = _run(cim, tmp_path)
+    assert table_run.market_cap["source"] == "table"
+    assert table_run.market_cap["age_band_known"] is False
+    assert table_run.market_cap["asset_class_known"] is False
+    keys = {row["source_key"] for row in table_run.assumption_fill_log}
+    assert fills.AGE_BAND_FALLBACK in keys
+    assert fills.ASSET_CLASS_DEFAULT in keys
+
+    analyst_run = _run(cim, tmp_path, market_cap_rate=0.061)
+    assert analyst_run.market_cap["source"] == "analyst"
+    keys = {row["source_key"] for row in analyst_run.assumption_fill_log}
+    assert fills.AGE_BAND_FALLBACK not in keys
+    assert fills.ASSET_CLASS_DEFAULT not in keys
+
+
+def test_the_egr_occupancy_assumption_is_logged_beside_the_other_one(tmp_path):
+    """A deal with no unit mix and no GPR backs in-place rent out of EGR,
+    which needs an occupancy the CIM did not state. The SAME field is
+    then assumed twice in one run at two different numbers — 0.85 here,
+    0.80 for the lease-up start — and both rows appear, because that
+    contradiction on one page is the evidence Category 5 needs.
+
+    MUTATION: drop the fill from `_compute_in_place_rent_psf`."""
+    from analysis import fills
+    from model.value_add_model import _resolve_va_inputs
+
+    cim = _thin_va_deal()
+    cim.unit_mix = []
+    cim.ttm_gpr = None
+    cim.ttm_egr = 430_000
+    cim.physical_occupancy = None
+
+    resolved = _resolve_va_inputs(cim, {})
+    logged = {(f.source_key, f.value_used) for f in resolved.fills}
+    assert (fills.EGR_OCCUPANCY_ASSUMED, 0.85) in logged
+    assert (fills.OCCUPANCY_ABSENT, 0.80) in logged
+    assert resolved.in_place_rent_psf == pytest.approx(
+        430_000 / (45_000 * 12 * 0.85))
+
+    # stated occupancy: the rent is backed out of the real number and
+    # only the value-add engine's own default is missing
+    cim.physical_occupancy = 0.70
+    logged = {f.source_key for f in _resolve_va_inputs(cim, {}).fills}
+    assert fills.EGR_OCCUPANCY_ASSUMED not in logged
+    assert fills.OCCUPANCY_ABSENT not in logged

@@ -353,9 +353,16 @@ def solve_max_price_value_add(cim_data, financial_analysis: dict,
         return (price * capex_pct_of_price if capex_pct_of_price
                 else (capex or 0.0))
 
-    # Estimate NOI for bounds — use adjusted or CIM
+    # Estimate NOI for bounds — use adjusted or CIM. NOT `or 100_000`
+    # (item T Category 4): that literal did not widen the search, it
+    # RELOCATED it, to the window a $100k-NOI property would be priced
+    # in — $500k to $5M regardless of the asset. `solver_price_bracket`
+    # already handles a missing NOI by falling through to its declared
+    # dollar window, which is the honest answer to "price bracket for a
+    # deal whose NOI we do not know", and the other two solvers carry no
+    # such literal.
     adj_noi = financial_analysis.get("adjusted_ttm_noi", {}).get("analyst_adjusted_noi")
-    ttm_noi = adj_noi or cim_data.ttm_noi or 100_000
+    ttm_noi = adj_noi or cim_data.ttm_noi
 
     bracket = solver_price_bracket(ttm_noi)      # kept — the loop mutates
     low, high = bracket
@@ -396,7 +403,11 @@ def solve_max_price_value_add(cim_data, financial_analysis: dict,
     _warn_if_truncated("value-add max-offer solver", best_price, converged,
                        best_irr, *bracket, target_irr)
 
-    implied_cap = ttm_noi / best_price if best_price and best_price > 0 else None
+    # `ttm_noi` joins the guard now that it can legitimately be None: an
+    # implied entry cap needs a numerator, and reporting one derived from
+    # a fabricated NOI was the whole point of deleting the literal above.
+    implied_cap = (ttm_noi / best_price
+                   if ttm_noi and best_price and best_price > 0 else None)
     va_acquisition_cost = (best_price * costs["acquisition_closing_pct"]
                            if best_price else None)
     solved_capex = capex_at(best_price) if best_price else (capex or 0.0)

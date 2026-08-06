@@ -162,9 +162,6 @@ _NO_INCOME = 0
 # income and no expense line for a category gets zero, not a guess.
 _NO_CAPEX = 0
 _NO_EXPENSE = 0
-# Divide-by-zero guard for the $/SF conversions, not an area estimate:
-# a deal with no NRSF has no per-SF expense to write either way.
-_NRSF_FALLBACK = 1
 
 # We model ONE senior loan. Mezz/junior paper is out of scope (scoped
 # backlog item D), so H65 stays flat zero rather than reading a term.
@@ -619,7 +616,14 @@ def _write_opex(ws, cim_data, financial_analysis: dict,
     In-Place column (G): CIM actual $/SF/year
     Stabilized column (I): analyst-adjusted $/SF/year
     """
-    nrsf = cim_data.nrsf or _NRSF_FALLBACK
+    # NOT `or 1` (item T Category 4). It was never the divide-by-zero
+    # guard its old comment claimed: dividing a total dollar expense by
+    # one square foot writes that total into a column headed "$/SF",
+    # which is the fiction this item deletes rather than a safe default.
+    # `require_underwritable` refuses a deal with no NRSF before either
+    # caller reaches this writer, so the guard below is unreachable
+    # belt-and-braces for a direct call.
+    nrsf = cim_data.nrsf
     expense_analysis = financial_analysis.get("expense_analysis", {})
     expense_lines = expense_analysis.get("lines", [])
 
@@ -636,13 +640,13 @@ def _write_opex(ws, cim_data, financial_analysis: dict,
         adjusted_value = line.get("adjusted_value")
 
         # In-place: CIM actual as $/SF/year
-        if cim_value is not None:
+        if cim_value is not None and nrsf:
             in_place_psf = cim_value / nrsf
         else:
             in_place_psf = _NO_EXPENSE
 
         # Stabilized: analyst-adjusted as $/SF/year
-        if adjusted_value is not None:
+        if adjusted_value is not None and nrsf:
             stabilized_psf = adjusted_value / nrsf
         else:
             stabilized_psf = in_place_psf

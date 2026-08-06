@@ -62,6 +62,11 @@ class AnalysisResult:
     # Model error-check register (analysis/checks.py), JSON-safe rows
     checks: list = field(default_factory=list)
     check_summary: dict = field(default_factory=dict)
+    # Assumption fill log (analysis/fills.py), JSON-safe rows — every
+    # value this run invented because the CIM did not supply it. Separate
+    # from `checks` because it has no pass/fail axis, and from `errors`
+    # because a flat list of strings cannot carry (field, value, source).
+    assumption_fill_log: list = field(default_factory=list)
     # Outputs
     memo_path: str = ""
     excel_path: str = ""
@@ -231,6 +236,17 @@ def run_analysis(result: AnalysisResult, progress: Callable = None,
     """
     cim_data = result.cim_data
 
+    # Before anything else. NRSF and TTM NOI have no defensible default —
+    # every $/SF benchmark divides by the first and the solver's price
+    # bracket derives from the second — so a deal missing either is
+    # refused rather than underwritten as a 1-SF / $100k fiction (item T
+    # Category 4). Raising here rather than inside `analyze_financials`
+    # is deliberate: that function also serves the assumptions page's
+    # live preview, where the analyst is still typing the very field
+    # this would refuse.
+    from analysis.fills import require_underwritable
+    require_underwritable(cim_data)
+
     def _progress(step, total, msg):
         if progress:
             progress(step, total, msg)
@@ -252,7 +268,7 @@ def run_analysis(result: AnalysisResult, progress: Callable = None,
             result.errors.append(f"Enrichment failed: {e}")
 
     from analysis.valuation import resolve_market_cap
-    from registry import detect_asset_type
+    from registry import classify_asset_type
 
     # Step 1: Financial analysis
     _progress(1, 9, "Analyzing financials...")
@@ -289,15 +305,17 @@ def run_analysis(result: AnalysisResult, progress: Callable = None,
 
     capital = resolve_capital_structure(capital_structure)
     asking = cim_data.asking_price or 0
-    nrsf = cim_data.nrsf or 1
+    # No `or 1` (item T Category 4). `require_underwritable` above already
+    # refused a deal without it, so there is nothing left to guard against
+    # — and the fallback was never a guard, it was a second, silent size
+    # for the property that only the code below could see.
+    nrsf = cim_data.nrsf
 
     # CapEx and the reserve are entered on a basis (item D / H). Resolve
     # to dollars ONCE, here, and hand dollars to everything downstream —
     # the scenario engine, the VA engine, the solvers, the memo and the
     # Excel writer all read the same figure rather than each re-deriving
-    # it from a rate. `cim_data.nrsf` is passed raw, NOT the `or 1`
-    # fallback above: a $/SF rate times a fabricated 1 SF is a fabricated
-    # dollar amount, and resolve_capital_amount's job is to refuse that.
+    # it from a rate.
     capex = resolve_capital_amount(
         cim_data.capex_estimate, capital["capex_basis"],
         nrsf=cim_data.nrsf, units=cim_data.total_units, price=asking)
@@ -343,9 +361,16 @@ def run_analysis(result: AnalysisResult, progress: Callable = None,
     # silently disabled the unknown-vintage finding in the check register,
     # which is gated on `source == "table"` (review finding, PR #31).
     if not market_cap:
+        # `classify_asset_type`, not `detect_asset_type`: the class is
+        # half of the table lookup that prices every exit, and its default
+        # is reached by ABSENCE of evidence. The resolver reports the
+        # other half's provenance (`age_band_known`) itself; this hands it
+        # the half only the caller knows (item T Category 4).
+        asset_class, asset_class_known = classify_asset_type(cim_data)
         market_cap = resolve_market_cap(
-            detect_asset_type(cim_data), cim_data.year_built,
-            market_cap=market_cap_rate)
+            asset_class, cim_data.year_built,
+            market_cap=market_cap_rate,
+            asset_class_known=asset_class_known)
     result.market_cap = market_cap
 
     # Bound here, not only inside the branch: the template writer reads
@@ -497,6 +522,20 @@ def run_analysis(result: AnalysisResult, progress: Callable = None,
     result.checks = model_checks.to_dicts(_check_results)
     result.check_summary = model_checks.summarize(_check_results)
 
+    # Assumption fill log — same discipline as the register above and for
+    # the same reason: assembled ONCE here from what each stage recorded,
+    # then handed to every surface, so the memo, the workbook and the
+    # results page cannot report three different sets of assumptions
+    # (item T Category 4).
+    from analysis import fills as model_fills
+    result.assumption_fill_log = model_fills.to_dicts(model_fills.collect(
+        cim_data=cim_data,
+        financial_analysis=result.financial_analysis,
+        physical_analysis=result.physical_analysis,
+        market_cap=result.market_cap,
+        va_results=result.va_results,
+        expense_ratio=result.expense_ratio))
+
     # Step 9: Generate output files
     _progress(9, 9, "Generating memo & model...")
     if not output_dir:
@@ -521,6 +560,7 @@ def run_analysis(result: AnalysisResult, progress: Callable = None,
         va_results=result.va_results,
         va_max_offer=result.va_max_offer,
         checks=result.checks,
+        assumption_fill_log=result.assumption_fill_log,
         sources_uses=result.sources_uses,
         # The levered lens (item E3b). Both writers degrade cleanly when
         # these are empty — a deal with no NOI or no asking price prices
@@ -552,6 +592,7 @@ def run_analysis(result: AnalysisResult, progress: Callable = None,
             gate_results=result.gate_results,
             gate_summary=result.gate_summary,
             check_summary=result.check_summary,
+            assumption_fill_log=result.assumption_fill_log,
             sources_uses=result.sources_uses,
             levered=result.levered,
             debt=result.debt,
@@ -570,6 +611,7 @@ def run_analysis(result: AnalysisResult, progress: Callable = None,
         va_results=result.va_results,
         va_max_offer=result.va_max_offer,
         checks=result.checks,
+        assumption_fill_log=result.assumption_fill_log,
         sources_uses=result.sources_uses,
         levered=result.levered,
         debt=result.debt,

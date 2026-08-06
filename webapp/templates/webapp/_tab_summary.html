@@ -48,6 +48,46 @@
   </details>
   {% endif %}
 
+  {% comment %} Assumption fill log (item T Category 4) — directly under the
+     register because both answer "how far do I trust the numbers below",
+     and above the capital stack because those numbers are computed on
+     these. Open whenever it is non-empty: a disclosure the reader has to
+     click is not a disclosure, and unlike the register there is no
+     "all clear" state worth collapsing to — an empty log renders nothing
+     at all. Same table furniture as the two panels either side of it, so
+     the tab stays one grid rather than three. {% endcomment %}
+  {% if fill_rows %}
+  <details open>
+    <summary class="cursor-pointer select-none text-sm font-semibold mb-1.5">
+      Assumptions Filled —
+      <span class="text-amber-700">{{ fill_rows|length }} input{{ fill_rows|length|pluralize }} not in the CIM</span>
+      <span class="font-normal text-slate-500">(the model used a default or benchmark for each)</span>
+    </summary>
+    <div class="bg-white border border-slate-200 rounded-lg overflow-x-auto">
+      <table class="w-full text-sm border-collapse">
+        <thead>
+          <tr class="text-left border-b border-slate-300 text-xs text-slate-600">
+            <th class="py-1.5 pl-3 pr-3">Input</th>
+            <th class="py-1.5 pr-3 text-right">Value Used</th>
+            <th class="py-1.5 pr-3">Source</th>
+            <th class="py-1.5 pr-3">What This Means</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for f in fill_rows %}
+          <tr class="border-b border-slate-100">
+            <td class="py-1.5 pl-3 pr-3 font-medium">{{ f.field }}</td>
+            <td class="py-1.5 pr-3 text-right tabular-nums">{{ f.value }}</td>
+            <td class="py-1.5 pr-3 text-slate-600">{{ f.source }}</td>
+            <td class="py-1.5 pr-3 text-slate-600">{{ f.label }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </details>
+  {% endif %}
+
   {% comment %} Capital — Sources and Uses read as one table, not two
      stacked ones: they are the same total counted two ways, and stacking
      spends a whole block of vertical space making that point. {% endcomment %}
