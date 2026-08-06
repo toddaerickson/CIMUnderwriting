@@ -7,6 +7,7 @@ replacement cost for comparison against asking price.
 
 from config import REPLACEMENT_COST, FACILITY_TYPES
 from registry import age_band, asset_age
+from analysis.fills import CC_PCT_ABSENT, Fill, UNIT_PCT
 
 
 def analyze_physical(cim_data) -> dict:
@@ -26,6 +27,12 @@ def analyze_physical(cim_data) -> dict:
         "property_profile": profile,
         "replacement_cost": repl,
         "price_vs_replacement": comparison,
+        # Item T Category 4. `analysis.filters._estimate_replacement_cost`
+        # is a SECOND copy of the same build-up feeding gate 3, and it
+        # deliberately records nothing: two copies logging the same
+        # substitution would double-count it. This one is the log's
+        # source, and a test pins that the two copies still agree.
+        "fills": repl.get("fills", []),
     }
 
 
@@ -100,9 +107,28 @@ def _compute_replacement_cost(cim_data) -> dict:
     }
     has_typed_sf = any(v is not None and v > 0 for v in type_sf_map.values())
 
+    fills = []
+
     if not has_typed_sf:
         # Legacy fallback: derive from cc_pct
         cc_pct = cim_data.cc_pct or 0.0
+        # With no typed square footage AND no climate-controlled share,
+        # the whole building is costed as drive-up at $55-85/SF when
+        # climate-controlled space runs $90-130/SF. That understates
+        # replacement cost, and replacement cost is what the asking price
+        # is screened against — so the fallback pushes gate 3 toward FAIL
+        # and an analyst reading the memo cannot see that it was a guess.
+        if cim_data.cc_pct is None:
+            fills.append(Fill(
+                field="cc_pct", value_used=0.0,
+                source_key=CC_PCT_ABSENT, unit=UNIT_PCT,
+                label=("The climate-controlled share is not stated and no "
+                       "facility-type square footage was extracted, so the "
+                       "entire building is costed as non-climate-controlled. "
+                       "Climate-controlled space costs materially more to "
+                       "build, so replacement cost is understated if any "
+                       "exists."),
+                detail={"nrsf": nrsf}))
         type_sf_map = {
             "ss_driveup":   nrsf * (1.0 - cc_pct),
             "ss_enclosed":  nrsf * cc_pct,
@@ -173,6 +199,7 @@ def _compute_replacement_cost(cim_data) -> dict:
         "total_replacement": total_replacement,
         "replacement_per_sf": total_replacement / nrsf if nrsf else None,
         "facility_type_details": type_details,
+        "fills": fills,
     }
 
 

@@ -1314,8 +1314,45 @@
         "A65": {
           "v": "  Bull Derived Exit Cap"
         },
+        "A67": {
+          "fill": "00003366",
+          "v": "Assumptions Filled From Defaults"
+        },
+        "A68": {
+          "v": "Input"
+        },
+        "A69": {
+          "v": "asset_class"
+        },
         "A7": {
           "v": "Total Units"
+        },
+        "A70": {
+          "v": "cc_pct"
+        },
+        "A71": {
+          "v": "property_tax"
+        },
+        "A72": {
+          "v": "advertising"
+        },
+        "A73": {
+          "v": "cap_reserve"
+        },
+        "A74": {
+          "v": "ga"
+        },
+        "A75": {
+          "v": "insurance"
+        },
+        "A76": {
+          "v": "payroll"
+        },
+        "A77": {
+          "v": "repairs"
+        },
+        "A78": {
+          "v": "utilities"
         },
         "A8": {
           "v": "Physical Occupancy"
@@ -1474,13 +1511,79 @@
         "B65": {
           "v": 0.06
         },
+        "B68": {
+          "v": "Value Used"
+        },
+        "B69": {
+          "v": "Self Storage"
+        },
         "B7": {
           "fill": "00FFFFCC",
           "v": 320
         },
+        "B70": {
+          "v": "0.0%"
+        },
+        "B71": {
+          "v": "$62,405"
+        },
+        "B72": {
+          "v": "$2,400"
+        },
+        "B73": {
+          "v": "$6,000"
+        },
+        "B74": {
+          "v": "$3,600"
+        },
+        "B75": {
+          "v": "$7,200"
+        },
+        "B76": {
+          "v": "$10,400"
+        },
+        "B77": {
+          "v": "$7,200"
+        },
+        "B78": {
+          "v": "$4,000"
+        },
         "B8": {
           "fill": "00FFFFCC",
           "v": 0.88
+        },
+        "C68": {
+          "v": "Source"
+        },
+        "C69": {
+          "v": "config default (asset class)"
+        },
+        "C70": {
+          "v": "assumed 0% climate-controlled"
+        },
+        "C71": {
+          "v": "state income-based tax formula"
+        },
+        "C72": {
+          "v": "benchmark floor x NRSF"
+        },
+        "C73": {
+          "v": "benchmark floor x NRSF"
+        },
+        "C74": {
+          "v": "benchmark floor x NRSF"
+        },
+        "C75": {
+          "v": "benchmark floor x NRSF"
+        },
+        "C76": {
+          "v": "benchmark floor x NRSF"
+        },
+        "C77": {
+          "v": "benchmark floor x NRSF"
+        },
+        "C78": {
+          "v": "benchmark floor x NRSF"
         }
       },
       "Levered Returns": {
@@ -2598,7 +2701,7 @@
         "Mitigant: Conduct thorough property condition assessment. Budget adequate capital reserves.",
         "Primary failure mode: {'category': 'Screening Gate', 'risk': 'Failed Gate 3: Price \u2264 Replacement Cost', 'description': 'Actual: $4,200,000 vs threshold: \u2264 $3,885,750. Asking $105/SF vs replacement $97/SF', 'severity': 'High', 'mitigation': 'This gate failure requires specific justification to proceed.'}",
         "Market Snapshot",
-        "Screening result: DECLINE",
+        "Screening result: DECLINE - 10 assumption(s) filled from defaults",
         "Prepared by CIM Analyst from the seller's Confidential Information Memorandum supplemented by benchmark assumptions. Figures are underwriting estimates, not results, and are subject to due diligence. Past or projected performance is not a guarantee of future results. This document is for internal and prospect discussion only. It is not an offer to sell or a solicitation of an offer to buy any security, and it is not investment advice."
       ],
       "tables": [
@@ -2770,6 +2873,7 @@
         "Occupancy check: the CIM quotes physical occupancy only. Request economic occupancy (collected rent vs gross potential at street rates) before proceeding \u2014 a broker quoting a single occupancy figure is almost always quoting physical, and the spread between the two is where CIMs hide weakness.",
         "Model Checks",
         "5 of 13 integrity checks flagged. Blocking findings were accepted by the analyst with the discrepancy recorded; advisory findings do not stop the model but change how its outputs should be read.",
+        "10 model inputs were not stated in the CIM and were filled from a default or a benchmark. Every one is listed with its source in Appendix A; the returns below are computed on them.",
         "Screening Gates",
         "Returns Snapshot (Unlevered)",
         "Maximum Offer Price (for 10% Base Case IRR): $5,143,814",
@@ -2893,7 +2997,9 @@
         "Gate 6 (NOI Step-Up \u2264 15%): TTM and/or CIM Yr1 NOI not extracted",
         "Gate 7 (Major City / Top-50 MSA): MSA not auto-matched to top-50 \u2014 set Market Verification in assumptions to resolve",
         "Maximum Offer: $5,143,814 (-22.5% discount to asking price of $4,200,000)",
-        "Note: This analysis is based on CIM-provided data supplemented by benchmark assumptions. All figures should be verified during due diligence."
+        "Note: This analysis is based on CIM-provided data supplemented by benchmark assumptions. All figures should be verified during due diligence.",
+        "Appendix A. Assumptions Filled From Defaults",
+        "The CIM did not state the inputs below. The model used the value in the second column, from the source in the third \u2014 not a figure from this deal. Each one moves the returns in section 6, so an assumption an IC reader disagrees with is an assumption to change on the assumptions page and re-run, not a number to discount by eye."
       ],
       "tables": [
         [
@@ -3389,6 +3495,74 @@
             "Valuation",
             "Medium",
             "Negotiate price below replacement cost or demonstrate irreplaceable location/market value."
+          ]
+        ],
+        [
+          [
+            "Input",
+            "Value Used",
+            "Source",
+            "What This Means"
+          ],
+          [
+            "asset_class",
+            "Self Storage",
+            "config default (asset class)",
+            "Nothing in the CIM identifies the asset class (no boat/RV square footage, no climate-controlled share), so it was classed as 'Self Storage' by default and the exit cap came from that row of the table."
+          ],
+          [
+            "cc_pct",
+            "0.0%",
+            "assumed 0% climate-controlled",
+            "The climate-controlled share is not stated and no facility-type square footage was extracted, so the entire building is costed as non-climate-controlled. Climate-controlled space costs materially more to build, so replacement cost is understated if any exists."
+          ],
+          [
+            "property_tax",
+            "$62,405",
+            "state income-based tax formula",
+            "Property Taxes is not stated in the CIM. Estimated at $62,405 from TTM NOI via the TX income-based formula (NOI / 7% cap x 73% assessed x 2.2% rate)."
+          ],
+          [
+            "advertising",
+            "$2,400",
+            "benchmark floor x NRSF",
+            "Advertising is not stated in the CIM. Booked at the benchmark floor of $0.06/SF x 40,000 SF = $2,400 \u2014 the low end of the $0.06-$0.17/SF range, so the true expense is likelier higher."
+          ],
+          [
+            "cap_reserve",
+            "$6,000",
+            "benchmark floor x NRSF",
+            "Capital Reserve is not stated in the CIM. Booked at the benchmark floor of $0.15/SF x 40,000 SF = $6,000 \u2014 the low end of the $0.15-$0.25/SF range, so the true expense is likelier higher."
+          ],
+          [
+            "ga",
+            "$3,600",
+            "benchmark floor x NRSF",
+            "General & Administrative is not stated in the CIM. Booked at the benchmark floor of $0.09/SF x 40,000 SF = $3,600 \u2014 the low end of the $0.09-$0.18/SF range, so the true expense is likelier higher."
+          ],
+          [
+            "insurance",
+            "$7,200",
+            "benchmark floor x NRSF",
+            "Insurance is not stated in the CIM. Booked at the benchmark floor of $0.18/SF x 40,000 SF = $7,200 \u2014 the low end of the $0.18-$0.38/SF range, so the true expense is likelier higher."
+          ],
+          [
+            "payroll",
+            "$10,400",
+            "benchmark floor x NRSF",
+            "Payroll is not stated in the CIM. Booked at the benchmark floor of $0.26/SF x 40,000 SF = $10,400 \u2014 the low end of the $0.26-$0.51/SF range, so the true expense is likelier higher."
+          ],
+          [
+            "repairs",
+            "$7,200",
+            "benchmark floor x NRSF",
+            "Repairs & Maintenance is not stated in the CIM. Booked at the benchmark floor of $0.18/SF x 40,000 SF = $7,200 \u2014 the low end of the $0.18-$0.36/SF range, so the true expense is likelier higher."
+          ],
+          [
+            "utilities",
+            "$4,000",
+            "benchmark floor x NRSF",
+            "Utilities is not stated in the CIM. Booked at the benchmark floor of $0.10/SF x 40,000 SF = $4,000 \u2014 the low end of the $0.10-$0.22/SF range, so the true expense is likelier higher."
           ]
         ]
       ]

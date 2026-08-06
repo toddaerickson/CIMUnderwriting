@@ -1002,6 +1002,12 @@ def _analysis_worker(run_pk):
             # recomputed later against whatever the deal looks like then.
             "checks": result.checks,
             "check_summary": result.check_summary,
+            # Assumption fill log (item T Category 4) — stored with the
+            # run for the same reason the register above is: an
+            # assumption belongs to the numbers it produced. Re-deriving
+            # it later would answer for whatever config says then, and
+            # the returns on screen were computed on what it said now.
+            "assumption_fill_log": result.assumption_fill_log,
             # The levered lens (item E3a). Persisted HERE, with the run,
             # rather than recomputed later: the LP net IRR belongs to the
             # assumption set stamped above, and a figure re-derived next

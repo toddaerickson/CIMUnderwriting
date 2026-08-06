@@ -648,20 +648,28 @@ def test_a_rate_that_resolves_to_zero_becomes_a_run_warning(mock_cim_data,
                                                             tmp_path,
                                                             monkeypatch):
     """A saved basis outlives the value it was validated against: a
-    re-extraction that loses NRSF turns a valid $/SF CapEx into $0 on the
-    next run. A quiet $0 line in the capital stack is an empty state
-    hiding a real failure (review finding)."""
+    re-extraction that loses the figure a rate multiplies turns a valid
+    per-unit CapEx into $0 on the next run. A quiet $0 line in the capital
+    stack is an empty state hiding a real failure (review finding).
+
+    The driver was NRSF when this test was written. Item T Category 4
+    made a deal with no NRSF unrunnable outright — `run_analysis` refuses
+    it before this warning could be appended — so the same defect is
+    exercised through the unit count, which has no such gate and no
+    default. The behaviour under test is unchanged: a rate whose driver
+    went missing must WARN, never book $0 silently.
+    """
     # data.comp_db binds COMP_DB_PATH at import — redirect it or the run
     # writes into the repo's real comps database.
     monkeypatch.setattr("data.comp_db.COMP_DB_PATH", str(tmp_path / "c.db"))
     from engine import AnalysisResult, run_analysis
 
-    mock_cim_data.nrsf = None
+    mock_cim_data.total_units = None
     mock_cim_data.capex_estimate = 0.50
     result = AnalysisResult(pdf_path=str(tmp_path / "none.pdf"))
     result.cim_data = mock_cim_data
     run_analysis(result, output_dir=str(tmp_path),
-                 capital_structure={"capex_basis": "per_sf"})
+                 capital_structure={"capex_basis": "per_unit"})
 
     assert any("resolved to $0" in e for e in result.errors), result.errors
     assert any("CapEx" in e for e in result.errors)

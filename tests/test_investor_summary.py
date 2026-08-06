@@ -46,7 +46,7 @@ _BUILD_ARGS = ("property_name", "cim_data", "market_analysis",
                "physical_analysis", "scenario_results", "risk_analysis",
                "rent_analysis", "value_add", "va_results", "gate_results",
                "gate_summary", "check_summary", "sources_uses", "levered",
-               "debt", "thesis")
+               "debt", "assumption_fill_log", "thesis")
 
 
 # ── Fixtures ─────────────────────────────────────────────────────────
@@ -155,7 +155,8 @@ def _kwargs(**over):
               rent_analysis=RENT, value_add=VALUE_ADD, va_results=VA_RESULTS,
               gate_results=GATES, gate_summary=GATE_SUMMARY,
               check_summary=CHECK_SUMMARY, sources_uses=SOURCES_USES,
-              levered=LEVERED, debt=DEBT, thesis=None)
+              levered=LEVERED, debt=DEBT, assumption_fill_log=None,
+              thesis=None)
     kw.update(over)
     return kw
 

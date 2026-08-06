@@ -13,12 +13,31 @@ Returns Bear / Base / Bull scenarios with IRR, MOIC, yield-on-cost,
 stabilized NOI, development spread, and monthly detail.
 """
 
+from dataclasses import dataclass
+
 import numpy_financial as npf
+from analysis.fills import (EXPENSES_ABSENT, Fill, MARKET_RENT_ABSENT,
+                            OCCUPANCY_ABSENT, UNIT_DOLLARS, UNIT_PCT,
+                            UNIT_PSF_MO)
 from analysis.valuation import (COERCED_SCENARIOS, resolve_exit_cap,
                                 resolve_hold_years, resolve_market_cap,
                                 resolve_transaction_costs)
 from config import VALUE_ADD_SCENARIOS, VALUE_ADD_TRIGGERS
 from registry import ScenarioType
+
+#: Starting occupancy when the CIM states none, for the engine that
+#: models the lease-up. Item T Category 4 named it and logs it; it did
+#: NOT reconcile it, and the constant below is why that matters.
+VA_DEFAULT_OCCUPANCY = 0.80
+
+#: Occupancy assumed when in-place rent has to be backed out of EGR.
+#: **This is the SAME field as `VA_DEFAULT_OCCUPANCY` at a different
+#: number**, and they have disagreed since the initial commit. Category 4
+#: makes the disagreement visible rather than resolving it: backlog item
+#: T scope clause 5 owns "stabilized occupancy, decided once" and picking
+#: a winner here would re-underwrite every thin deal as a tidy-up. Do not
+#: quietly collapse these into one constant — decide them.
+VA_EGR_ASSUMED_OCCUPANCY = 0.85
 
 
 def detect_value_add(cim_data) -> bool:
@@ -82,39 +101,32 @@ def run_value_add_scenarios(cim_data, financial_analysis: dict,
     """
     scenarios = custom_scenarios or VALUE_ADD_SCENARIOS
 
-    # Compute starting metrics from CIM data
-    in_place_rent_psf = _compute_in_place_rent_psf(cim_data)
-    market_rent_psf = cim_data.market_rent_psf or in_place_rent_psf
-    current_occ = cim_data.physical_occupancy or 0.80
-    nrsf = cim_data.nrsf or 1
-
-    # Get adjusted expenses from financial analysis
-    adj_expenses = financial_analysis.get("expense_analysis", {}).get(
-        "total_adjusted_expenses", 0)
-    if not adj_expenses:
-        # Fallback: use CIM total expenses
-        adj_expenses = cim_data.ttm_total_expenses or 0
-
-    # Monthly starting expense (annual / 12)
-    monthly_expenses_start = adj_expenses / 12
+    inputs = _resolve_va_inputs(cim_data, financial_analysis)
 
     results = {}
     for name, params in scenarios.items():
         result = _run_single_va_scenario(
             name=name,
             params=params,
-            nrsf=nrsf,
-            in_place_rent_psf=in_place_rent_psf,
-            market_rent_psf=market_rent_psf,
-            current_occ=current_occ,
-            monthly_expenses_start=monthly_expenses_start,
+            nrsf=inputs.nrsf,
+            in_place_rent_psf=inputs.in_place_rent_psf,
+            market_rent_psf=inputs.market_rent_psf,
+            current_occ=inputs.current_occ,
+            monthly_expenses_start=inputs.monthly_expenses_start,
             asking_price=asking_price,
             capex=capex,
             hold_years=hold_years,
             costs=transaction_costs,
             reserve=reserve,
             market_cap=market_cap,
+            rent_ramp_excluded=inputs.rent_ramp_excluded,
         )
+        # Every scenario runs off ONE resolved input set, so each carries
+        # the same log. `analysis.fills.collect` de-duplicates, and
+        # attaching it per scenario keeps `va_results` scenario-keyed —
+        # a sibling key beside "bear"/"base"/"bull" would break every
+        # consumer that iterates this dict.
+        result["input_fills"] = list(inputs.fills)
         results[name] = result
 
     return results
@@ -131,7 +143,8 @@ def _run_single_va_scenario(name: str, params: dict,
                              hold_years: int = None,
                              costs: dict = None,
                              reserve: float = 0.0,
-                             market_cap: dict = None) -> dict:
+                             market_cap: dict = None,
+                             rent_ramp_excluded: bool = False) -> dict:
     """Compute a single value-add scenario with monthly granularity.
 
     This is a genuinely different engine from `analysis.valuation.
@@ -276,6 +289,12 @@ def _run_single_va_scenario(name: str, params: dict,
         "in_place_rent_psf": in_place_rent_psf,
         "target_rent_psf": target_rent_psf,
         "market_rent_psf": market_rent_psf,
+        # Travels BESIDE the number it explains, so no surface can print
+        # this market rent without knowing it is the in-place rent copied
+        # (item T Category 4). Every consumer that would show a rent gap
+        # must suppress it when this is True — a printed "0.0% gap" reads
+        # as a measurement, and it is the absence of one.
+        "rent_ramp_excluded": rent_ramp_excluded,
         "current_occupancy": current_occ,
         "target_occupancy": target_occ,
         "cash_flows": cash_flows,
@@ -324,33 +343,116 @@ def compute_va_irr_at_price(cim_data, financial_analysis: dict,
     from by design. Nothing passes a non-default scenario today; this
     keeps that from becoming wrong the moment something does.
     """
-    in_place_rent_psf = _compute_in_place_rent_psf(cim_data)
-    market_rent_psf = cim_data.market_rent_psf or in_place_rent_psf
-    current_occ = cim_data.physical_occupancy or 0.80
-    nrsf = cim_data.nrsf or 1
-
-    adj_expenses = financial_analysis.get("expense_analysis", {}).get(
-        "total_adjusted_expenses", 0)
-    if not adj_expenses:
-        adj_expenses = cim_data.ttm_total_expenses or 0
-    monthly_expenses_start = adj_expenses / 12
+    # The SAME resolver `run_value_add_scenarios` uses. These two blocks
+    # were verbatim duplicates, which is how the log and the numbers
+    # would have drifted the first time either was edited. Its fills are
+    # discarded here on purpose: this is the bisection objective, called
+    # once per solver iteration, so recording from inside it would
+    # produce twenty copies of one substitution and a log whose length
+    # is an artifact of the search.
+    inputs = _resolve_va_inputs(cim_data, financial_analysis)
 
     result = _run_single_va_scenario(
         name=scenario,
         params=params,
-        nrsf=nrsf,
-        in_place_rent_psf=in_place_rent_psf,
-        market_rent_psf=market_rent_psf,
-        current_occ=current_occ,
-        monthly_expenses_start=monthly_expenses_start,
+        nrsf=inputs.nrsf,
+        in_place_rent_psf=inputs.in_place_rent_psf,
+        market_rent_psf=inputs.market_rent_psf,
+        current_occ=inputs.current_occ,
+        monthly_expenses_start=inputs.monthly_expenses_start,
         asking_price=price,
         capex=capex,
         hold_years=hold_years,
         costs=costs,
         reserve=reserve,
         market_cap=market_cap,
+        rent_ramp_excluded=inputs.rent_ramp_excluded,
     )
     return result.get("irr")
+
+
+@dataclass(frozen=True)
+class VAInputs:
+    """The value-add engine's starting point, resolved once.
+
+    `rent_ramp_excluded` travels beside `market_rent_psf` rather than
+    being re-derived downstream, because the two are the same fact: when
+    market rent had to be set equal to in-place rent, the rent half of
+    the value-add thesis is gone and the number that would say so is a
+    rent gap of exactly 0%.
+    """
+    nrsf: float
+    in_place_rent_psf: float
+    market_rent_psf: float
+    current_occ: float
+    monthly_expenses_start: float
+    rent_ramp_excluded: bool
+    fills: tuple = ()
+
+
+def _resolve_va_inputs(cim_data, financial_analysis: dict) -> VAInputs:
+    """Resolve the engine's inputs, recording every one it had to invent.
+
+    Item T Category 4. Nothing here changes what the engine underwrites —
+    the substitutions are the ones this module has always made — but each
+    now leaves a row saying what was missing and what stood in for it.
+    """
+    fills = []
+
+    in_place_rent_psf = _compute_in_place_rent_psf(cim_data)
+    market_rent_psf = cim_data.market_rent_psf
+    rent_ramp_excluded = not market_rent_psf
+    if rent_ramp_excluded:
+        market_rent_psf = in_place_rent_psf
+        fills.append(Fill(
+            field="market_rent_psf", value_used=in_place_rent_psf,
+            source_key=MARKET_RENT_ABSENT, unit=UNIT_PSF_MO,
+            label=("Rent ramp excluded — no market-rent data. Market rent "
+                   "was set equal to in-place rent, so the rent gap is 0% "
+                   "and this value-add case is an occupancy ramp only. Any "
+                   "upside from pushing rents to market is NOT in these "
+                   "returns."),
+            detail={"in_place_rent_psf": in_place_rent_psf}))
+
+    # `is None`, not truthiness. A stated 0% physical occupancy is an
+    # honestly-reported pre-lease-up asset and it passes `detect_value_add`
+    # — the falsy check silently re-let it to 80% and underwrote the ramp
+    # from there. Same defect class already recorded against the solver's
+    # target IRR and the management-fee target.
+    current_occ = cim_data.physical_occupancy
+    if current_occ is None:
+        current_occ = VA_DEFAULT_OCCUPANCY
+        fills.append(Fill(
+            field="physical_occupancy", value_used=VA_DEFAULT_OCCUPANCY,
+            source_key=OCCUPANCY_ABSENT, unit=UNIT_PCT,
+            label=(f"Physical occupancy is not stated. The value-add engine "
+                   f"starts the lease-up from {VA_DEFAULT_OCCUPANCY:.0%}, so "
+                   f"the occupancy gain driving these returns is assumed, "
+                   f"not measured."),
+            detail={"target_note": "ramps to the scenario's target occupancy"}))
+
+    adj_expenses = financial_analysis.get("expense_analysis", {}).get(
+        "total_adjusted_expenses", 0)
+    if not adj_expenses:
+        adj_expenses = cim_data.ttm_total_expenses or 0
+        if not adj_expenses:
+            fills.append(Fill(
+                field="ttm_total_expenses", value_used=0,
+                source_key=EXPENSES_ABSENT, unit=UNIT_DOLLARS,
+                label=("No operating expenses reached the value-add engine, "
+                       "so every projected month books revenue with no cost "
+                       "against it. Its NOI is revenue."),
+                detail={}))
+
+    return VAInputs(
+        nrsf=cim_data.nrsf,
+        in_place_rent_psf=in_place_rent_psf,
+        market_rent_psf=market_rent_psf,
+        current_occ=current_occ,
+        monthly_expenses_start=adj_expenses / 12,
+        rent_ramp_excluded=rent_ramp_excluded,
+        fills=tuple(fills),
+    )
 
 
 def _compute_in_place_rent_psf(cim_data) -> float:
@@ -383,16 +485,26 @@ def _compute_in_place_rent_psf(cim_data) -> float:
         if total_sf > 0:
             return total_rent / total_sf
 
-    # Fallback from GPR
-    nrsf = cim_data.nrsf or 1
+    # Fallback from GPR. NOT `nrsf or 1` (item T Category 4): dividing a
+    # year of gross potential rent by one square foot reports the whole
+    # building's revenue as a monthly $/SF rent, and every rent gap in
+    # the model is measured against it. With no NRSF there is no $/SF
+    # figure to compute, which is what 0.0 has always meant here.
+    nrsf = cim_data.nrsf
+    if not nrsf:
+        return 0.0
+
     gpr = cim_data.ttm_gpr
-    occ = cim_data.physical_occupancy or 0.85
     if gpr:
         return gpr / (nrsf * 12)
 
-    # Last resort: use EGR adjusted for vacancy
+    # Last resort: use EGR adjusted for vacancy. A stated 0% occupancy
+    # beside a non-zero EGR is contradictory data, not an input to divide
+    # by, so it falls through to "no figure" rather than raising.
     egr = cim_data.ttm_egr
-    if egr:
+    occ = (VA_EGR_ASSUMED_OCCUPANCY if cim_data.physical_occupancy is None
+           else cim_data.physical_occupancy)
+    if egr and occ:
         return egr / (nrsf * 12 * occ)
 
     return 0.0

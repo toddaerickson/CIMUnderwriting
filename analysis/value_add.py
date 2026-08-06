@@ -156,10 +156,14 @@ def _expense_opportunities(cim_data, fin, mgmt_fee_target_pct=None) -> list:
         # raised KeyError on any CIM quoting a fee above the band and took
         # the whole value-add section down with it. The fee still gets its
         # own opportunity, computed on the right basis, further down.
+        # `cim_data.nrsf` joins the conditions rather than defaulting to
+        # 1 (item T Category 4): a saving sized as "CIM dollars minus a
+        # $/SF band times one square foot" is the CIM figure back again,
+        # dressed as an opportunity. No square footage, no $/SF saving.
         if (line.get("flag") == "ABOVE RANGE" and line.get("cim_value")
-                and line.get("benchmark_range")):
+                and line.get("benchmark_range") and cim_data.nrsf):
             bench_high = line["benchmark_range"][1]
-            nrsf = cim_data.nrsf or 1
+            nrsf = cim_data.nrsf
             savings = line["cim_value"] - (bench_high * nrsf)
             if savings > 0:
                 ops.append({

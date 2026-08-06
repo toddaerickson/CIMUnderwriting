@@ -286,19 +286,36 @@ DEFAULT_ASSET_TYPE = ASSET_TYPES[0]
 
 def detect_asset_type(cim_data) -> str:
     """Determine asset type from CIM data fields."""
+    return classify_asset_type(cim_data)[0]
+
+
+def classify_asset_type(cim_data) -> tuple[str, bool]:
+    """`(asset type, whether the CIM gave evidence for it)`.
+
+    Same decision as `detect_asset_type`, which delegates here — ONE
+    implementation, because the second return value only means anything
+    if it is produced by the code that actually chooses the class.
+
+    The flag exists because the default is reached by ABSENCE of
+    evidence (the comment above `DEFAULT_ASSET_TYPE` says so) and the
+    class picks the `MARKET_CAP_RATES` row that prices the exit. A stated
+    climate-controlled share at or below 50% IS evidence — it says the
+    asset is not CC-dominated — so only a CIM silent on both counts is
+    unevidenced. Item T Category 4 logs that case as an assumption.
+    """
     brv_sf = sum(filter(None, [
         getattr(cim_data, "brv_enclosed_sf", None),
         getattr(cim_data, "brv_covered_sf", None),
         getattr(cim_data, "brv_open_sf", None),
     ]))
     if brv_sf > 0:
-        return "Boat & RV Storage"
+        return "Boat & RV Storage", True
 
     cc_pct = getattr(cim_data, "cc_pct", None)
     if cc_pct is not None and cc_pct > 0.5:
-        return "Climate-Controlled Self Storage"
+        return "Climate-Controlled Self Storage", True
 
-    return DEFAULT_ASSET_TYPE
+    return DEFAULT_ASSET_TYPE, cc_pct is not None
 
 
 # ── Asset Age ──────────────────────────────────────────────────────

@@ -26,6 +26,7 @@ def generate_memo(property_name: str, cim_data, gate_results: list,
                   checks: list = None, sources_uses: dict = None,
                   levered: dict = None, debt: dict = None,
                   levered_max_offer: dict = None,
+                  assumption_fill_log: list = None,
                   output_dir: str = ".") -> str:
     """
     Generate the SS Investment Memo .docx.
@@ -49,7 +50,7 @@ def generate_memo(property_name: str, cim_data, gate_results: list,
 
     # ── Section 1: Investment Summary ───────────────────────────
     _add_section_1(doc, cim_data, gate_results, scenario_results, max_offer,
-                   checks)
+                   checks, assumption_fill_log)
 
     # ── Section 2: Market Overview ──────────────────────────────
     _add_section_2(doc, market_analysis)
@@ -78,6 +79,13 @@ def generate_memo(property_name: str, cim_data, gate_results: list,
 
     # ── Section 10: Recommendation ──────────────────────────────
     _add_section_10(doc, gate_results, scenario_results, max_offer, risk_analysis, cim_data)
+
+    # ── Appendix A: Assumptions Filled From Defaults ────────────
+    # Last, because sections 1-10 carry their number in the heading and an
+    # eleventh numbered section would renumber a document IC readers
+    # navigate by number. Section 1 carries the count so a reader knows
+    # to turn here (item T Category 4).
+    _add_assumptions_appendix(doc, assumption_fill_log)
 
     doc.save(filepath)
     return filepath
@@ -125,7 +133,7 @@ def _add_title_page(doc, cim_data):
 
 
 def _add_section_1(doc, cim_data, gate_results, scenario_results, max_offer,
-                   checks=None):
+                   checks=None, assumption_fill_log=None):
     doc.add_heading("1. Investment Summary", level=1)
 
     # Key metrics table
@@ -154,6 +162,8 @@ def _add_section_1(doc, cim_data, gate_results, scenario_results, max_offer,
     _add_occupancy_spread_note(doc, cim_data)
 
     _add_model_checks(doc, checks)
+
+    _add_fill_count(doc, assumption_fill_log)
 
     doc.add_paragraph()
 
@@ -249,6 +259,64 @@ def _add_model_checks(doc, checks):
         row[0].text = c.get("label") or c.get("id") or ""
         row[1].text = (c.get("severity") or "").title()
         row[2].text = c.get("message") or ""
+
+
+def _add_fill_count(doc, assumption_fill_log):
+    """One sentence in section 1 naming how many inputs this run invented.
+
+    The appendix carries the detail, but an appendix nobody is told about
+    is a stamp nobody reads — the exact failure item T exists to close.
+    It sits beside the check register because both answer "how far should
+    I trust the numbers below", and a reader who sees neither line has
+    been told the CIM supplied everything.
+    """
+    if not assumption_fill_log:
+        return
+    n = len(assumption_fill_log)
+    doc.add_paragraph(
+        f"{n} model input{'' if n == 1 else 's'} {'was' if n == 1 else 'were'} "
+        f"not stated in the CIM and {'was' if n == 1 else 'were'} filled from "
+        f"a default or a benchmark. Every one is listed with its source in "
+        f"Appendix A; the returns below are computed on them."
+    )
+
+
+def _add_assumptions_appendix(doc, assumption_fill_log):
+    """Appendix A — every value this run invented, with its provenance.
+
+    Item T Category 4. Rendered only when the log is non-empty, matching
+    `_add_model_checks`: an appendix reading "none" on a complete CIM is
+    a page IC readers learn to skip, and the section-1 sentence above is
+    already silent in that case.
+    """
+    if not assumption_fill_log:
+        return
+
+    from analysis.fills import format_value, from_dicts
+
+    doc.add_page_break()
+    doc.add_heading("Appendix A. Assumptions Filled From Defaults", level=1)
+    doc.add_paragraph(
+        "The CIM did not state the inputs below. The model used the value in "
+        "the second column, from the source in the third — not a figure from "
+        "this deal. Each one moves the returns in section 6, so an assumption "
+        "an IC reader disagrees with is an assumption to change on the "
+        "assumptions page and re-run, not a number to discount by eye."
+    )
+
+    table = doc.add_table(rows=1, cols=4)
+    table.style = "Light Grid Accent 1"
+    hdr = table.rows[0].cells
+    hdr[0].text = "Input"
+    hdr[1].text = "Value Used"
+    hdr[2].text = "Source"
+    hdr[3].text = "What This Means"
+    for fill in from_dicts(assumption_fill_log):
+        row = table.add_row().cells
+        row[0].text = fill.field
+        row[1].text = format_value(fill)
+        row[2].text = fill.source_label
+        row[3].text = fill.label
 
 
 def _add_occupancy_spread_note(doc, cim_data):
@@ -793,7 +861,21 @@ def _add_section_7(doc, value_add, va_results=None, va_max_offer=None):
         current_occ = base.get("current_occupancy")
         target_occ = base.get("target_occupancy")
 
-        if in_place and market:
+        # A rent gap is only a measurement when a market rent was
+        # measured. With none, this engine sets market equal to in-place
+        # and the sentence below would print "0% rent gap" — which reads
+        # as "rents are already at market", the opposite of "we do not
+        # know what market is" (item T Category 4). Suppressed, not
+        # zeroed: a number that cannot be misread is worth more than one
+        # that can.
+        if base.get("rent_ramp_excluded"):
+            doc.add_paragraph(
+                f"Rent ramp excluded — no market-rent data. This case is an "
+                f"occupancy ramp only, from {_fmt_pct(current_occ)} to a "
+                f"target of {_fmt_pct(target_occ)}; no upside from pushing "
+                f"rents toward market is in the returns below."
+            )
+        elif in_place and market:
             doc.add_paragraph(
                 f"In-place rent of ${in_place:.2f}/SF/mo vs market of ${market:.2f}/SF/mo "
                 f"represents a {((market - in_place) / in_place):.0%} rent gap. "
@@ -1054,6 +1136,7 @@ def generate_investor_summary(property_name: str, cim_data,
                               check_summary: dict = None,
                               sources_uses: dict = None,
                               levered: dict = None, debt: dict = None,
+                              assumption_fill_log: list = None,
                               thesis: list = None,
                               output_dir: str = ".") -> str:
     """Generate the 2-page LP-facing investor summary .docx.
@@ -1076,7 +1159,7 @@ def generate_investor_summary(property_name: str, cim_data,
         property_name, cim_data, market_analysis, physical_analysis,
         scenario_results, risk_analysis, rent_analysis, value_add,
         va_results, gate_results, gate_summary, check_summary,
-        sources_uses, levered, debt, thesis)
+        sources_uses, levered, debt, assumption_fill_log, thesis)
 
     page1.check()
     # The floor guards the opposite defect: a page 2 the truncation
@@ -1097,7 +1180,7 @@ def generate_investor_summary(property_name: str, cim_data,
 def _is_build(property_name, cim_data, market_analysis, physical_analysis,
               scenario_results, risk_analysis, rent_analysis, value_add,
               va_results, gate_results, gate_summary, check_summary,
-              sources_uses, levered, debt, thesis):
+              sources_uses, levered, debt, assumption_fill_log, thesis):
     """Compose the document and return it with both page budgets.
 
     Split out so the tests can assert the budget NUMBERS rather than only
@@ -1136,7 +1219,8 @@ def _is_build(property_name, cim_data, market_analysis, physical_analysis,
     _is_scenarios(doc, page2, scenario_results)
     _is_risks(doc, page2, risk_analysis)
     _is_market(doc, page2, market_analysis, gate_results)
-    _is_footer(doc, page2, gate_summary, check_summary)
+    _is_footer(doc, page2, gate_summary, check_summary,
+               assumption_fill_log)
 
     return doc, page1, page2
 
@@ -1532,7 +1616,13 @@ def _is_plan_to_achieve(doc, budget, value_add, va_results, base):
                           + (f" over {months} months" if months else ""))
         ip, tp = va.get("in_place_rent_psf"), va.get("target_rent_psf")
         mp = va.get("market_rent_psf")
-        if ip and tp:
+        # The LP-facing document is the one that leaves the firm, so the
+        # rule binds hardest here: with no market-rent data there is no
+        # rent leg to the bridge and no "market" to quote — the copied
+        # in-place rent is not one (item T Category 4).
+        if va.get("rent_ramp_excluded"):
+            bridge.append("no rent ramp (no market-rent data)")
+        elif ip and tp:
             leg = f"rent ${ip:.2f} -> ${tp:.2f}/SF"
             if mp:
                 leg += f" against a ${mp:.2f} market"
@@ -1642,7 +1732,8 @@ def _is_market(doc, budget, market_analysis, gate_results):
     _is_table(doc, budget, "mkt/table", rows, [2.6, 4.7])
 
 
-def _is_footer(doc, budget, gate_summary, check_summary):
+def _is_footer(doc, budget, gate_summary, check_summary,
+               assumption_fill_log=None):
     bits = []
     rec = (gate_summary or {}).get("recommendation")
     if rec:
@@ -1650,6 +1741,15 @@ def _is_footer(doc, budget, gate_summary, check_summary):
     blocking = (check_summary or {}).get("blocking_failed")
     if blocking:
         bits.append(f"{blocking} blocking model check(s) unresolved")
+    # The COUNT, never the table (item T Category 4). Every block on
+    # these two pages is charged against a fixed page budget that RAISES
+    # on overflow, and a fill log is variable-length by nature — one deal
+    # with eleven filled inputs would cost an LP the document. The count
+    # is one clause on a paragraph already budgeted, and the IC memo's
+    # Appendix A carries the detail for anyone who asks.
+    filled = len(assumption_fill_log or [])
+    if filled:
+        bits.append(f"{filled} assumption(s) filled from defaults")
     if bits:
         _is_para(doc, budget, "footer/status", " - ".join(bits), bold=True)
 

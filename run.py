@@ -120,6 +120,12 @@ def stage_analyze(ctx: AnalysisContext, comp_db):
     from analysis.rent_analysis import analyze_rents
     from analysis.value_add import identify_value_add
     from analysis.risks import identify_risks
+    from analysis.fills import require_underwritable
+
+    # Same gate `engine.run_analysis` opens with, and it must be the same
+    # gate: a deal the web app refuses to underwrite cannot be one the
+    # CLI prices anyway (item T Category 4).
+    require_underwritable(ctx.cim_data)
 
     ctx.financial_analysis = analyze_financials(ctx.cim_data, comp_db=comp_db)
     if ctx.adjusted_noi:
@@ -390,7 +396,17 @@ def main():
     stage_extract(ctx)
     stage_parse(ctx)
     stage_enrich(ctx, comp_db)
-    stage_analyze(ctx, comp_db)
+    # A deal with no NRSF or no TTM NOI stops here rather than producing
+    # a memo and a workbook full of numbers derived from a fiction (item
+    # T Category 4). Exit 2 distinguishes "this CIM cannot be
+    # underwritten" from exit 1's "no PDF was selected".
+    from analysis.fills import MissingUnderwritingInput
+    try:
+        stage_analyze(ctx, comp_db)
+    except MissingUnderwritingInput as e:
+        logger.error("\nCannot underwrite this deal: %s", e)
+        logger.error("No memo or model was written.")
+        sys.exit(2)
     stage_valuate(ctx)
     stage_gates_and_risks(ctx)
     stage_output(ctx, comp_db)

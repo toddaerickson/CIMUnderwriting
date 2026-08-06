@@ -87,8 +87,18 @@ class AnalysisContext:
         return (self.cim_data.capex_estimate or 0) if self.cim_data else 0
 
     @property
-    def nrsf(self) -> float:
-        return (self.cim_data.nrsf or 1) if self.cim_data else 1
+    def nrsf(self) -> Optional[float]:
+        """The property's rentable square footage, or None.
+
+        Deliberately NOT `or 1` (item T Category 4). A one-square-foot
+        property is not a safe default, it is a second size for the asset
+        that silently rescales every $/SF figure derived from it, and
+        `run.stage_analyze` refuses a deal without NRSF before this is
+        read on the analysis path. `asking_price` and `capex` above keep
+        their `or 0` because zero dollars IS the semantic of an absent
+        amount; one square foot is not the semantic of an absent size.
+        """
+        return self.cim_data.nrsf if self.cim_data else None
 
     @property
     def property_name(self) -> str:
