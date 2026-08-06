@@ -3541,61 +3541,61 @@
             "asset_class",
             "Self Storage",
             "config default (asset class)",
-            "Nothing in the CIM identifies the asset class (no boat/RV square footage, no climate-controlled share), so it was classed as 'Self Storage' by default and the exit cap came from that row of the table."
+            "Nothing in the CIM identifies the class \u2014 no boat/RV square footage, no climate-controlled share \u2014 so the exit cap came from the default row of the table."
           ],
           [
             "cc_pct",
             "0.0%",
             "assumed 0% climate-controlled",
-            "The climate-controlled share is not stated and no facility-type square footage was extracted, so the entire building is costed as non-climate-controlled. Climate-controlled space costs materially more to build, so replacement cost is understated if any exists."
+            "No facility-type SF either, so the whole building is costed as drive-up. CC space costs more to build, so replacement cost \u2014 what the asking price is screened against \u2014 is understated if any exists."
           ],
           [
             "property_tax",
             "$62,405",
             "state income-based tax formula",
-            "Property Taxes is not stated in the CIM. Estimated at $62,405 from TTM NOI via the TX income-based formula (NOI / 7% cap x 73% assessed x 2.2% rate)."
+            "Estimated from this deal's own NOI: NOI / 7% cap x 73% assessed x 2.2% TX rate. Not the assessor's number, and not a reassessment at your basis."
           ],
           [
             "advertising",
             "$2,400",
             "benchmark floor x NRSF",
-            "Advertising is not stated in the CIM. Booked at the benchmark floor of $0.06/SF x 40,000 SF = $2,400 \u2014 the low end of the $0.06-$0.17/SF range, so the true expense is likelier higher."
+            "Booked at $0.06/SF \u2014 the LOW end of the $0.06-$0.17/SF benchmark range, so the true expense is likelier higher."
           ],
           [
             "cap_reserve",
             "$6,000",
             "benchmark floor x NRSF",
-            "Capital Reserve is not stated in the CIM. Booked at the benchmark floor of $0.15/SF x 40,000 SF = $6,000 \u2014 the low end of the $0.15-$0.25/SF range, so the true expense is likelier higher."
+            "Booked at $0.15/SF \u2014 the LOW end of the $0.15-$0.25/SF benchmark range, so the true expense is likelier higher."
           ],
           [
             "ga",
             "$3,600",
             "benchmark floor x NRSF",
-            "General & Administrative is not stated in the CIM. Booked at the benchmark floor of $0.09/SF x 40,000 SF = $3,600 \u2014 the low end of the $0.09-$0.18/SF range, so the true expense is likelier higher."
+            "Booked at $0.09/SF \u2014 the LOW end of the $0.09-$0.18/SF benchmark range, so the true expense is likelier higher."
           ],
           [
             "insurance",
             "$7,200",
             "benchmark floor x NRSF",
-            "Insurance is not stated in the CIM. Booked at the benchmark floor of $0.18/SF x 40,000 SF = $7,200 \u2014 the low end of the $0.18-$0.38/SF range, so the true expense is likelier higher."
+            "Booked at $0.18/SF \u2014 the LOW end of the $0.18-$0.38/SF benchmark range, so the true expense is likelier higher."
           ],
           [
             "payroll",
             "$10,400",
             "benchmark floor x NRSF",
-            "Payroll is not stated in the CIM. Booked at the benchmark floor of $0.26/SF x 40,000 SF = $10,400 \u2014 the low end of the $0.26-$0.51/SF range, so the true expense is likelier higher."
+            "Booked at $0.26/SF \u2014 the LOW end of the $0.26-$0.51/SF benchmark range, so the true expense is likelier higher."
           ],
           [
             "repairs",
             "$7,200",
             "benchmark floor x NRSF",
-            "Repairs & Maintenance is not stated in the CIM. Booked at the benchmark floor of $0.18/SF x 40,000 SF = $7,200 \u2014 the low end of the $0.18-$0.36/SF range, so the true expense is likelier higher."
+            "Booked at $0.18/SF \u2014 the LOW end of the $0.18-$0.36/SF benchmark range, so the true expense is likelier higher."
           ],
           [
             "utilities",
             "$4,000",
             "benchmark floor x NRSF",
-            "Utilities is not stated in the CIM. Booked at the benchmark floor of $0.10/SF x 40,000 SF = $4,000 \u2014 the low end of the $0.10-$0.22/SF range, so the true expense is likelier higher."
+            "Booked at $0.10/SF \u2014 the LOW end of the $0.10-$0.22/SF benchmark range, so the true expense is likelier higher."
           ]
         ]
       ]

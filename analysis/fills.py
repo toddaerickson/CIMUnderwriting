@@ -312,9 +312,9 @@ def _provenance_rows(market_cap, expense_ratio) -> list:
             rows.append(Fill(
                 field="year_built", value_used=mc.get("age_band"),
                 source_key=AGE_BAND_FALLBACK, unit=UNIT_TEXT,
-                label=(f"Year built is not stated, so the exit cap was "
-                       f"anchored in the {mc.get('age_band')!r} age band by "
-                       f"fallback rather than from the asset's actual age."),
+                label=("Year built is not stated, so the exit cap was "
+                       "anchored in the fallback age band rather than in the "
+                       "asset's actual age."),
                 detail={"market_cap": mc.get("market_cap"),
                         "asset_class": mc.get("asset_class")}))
         # `is False`, never falsy: `None` means the caller that resolved
@@ -325,11 +325,9 @@ def _provenance_rows(market_cap, expense_ratio) -> list:
             rows.append(Fill(
                 field="asset_class", value_used=mc.get("asset_class"),
                 source_key=ASSET_CLASS_DEFAULT, unit=UNIT_TEXT,
-                label=(f"Nothing in the CIM identifies the asset class (no "
-                       f"boat/RV square footage, no climate-controlled "
-                       f"share), so it was classed as "
-                       f"{mc.get('asset_class')!r} by default and the exit "
-                       f"cap came from that row of the table."),
+                label=("Nothing in the CIM identifies the class — no boat/RV "
+                       "square footage, no climate-controlled share — so the "
+                       "exit cap came from the default row of the table."),
                 detail={"market_cap": mc.get("market_cap"),
                         "age_band": mc.get("age_band")}))
 
@@ -352,10 +350,10 @@ def _provenance_rows(market_cap, expense_ratio) -> list:
         rows.append(Fill(
             field="opex_revenue_ratio", value_used=charged,
             source_key=EXPENSE_RATIO_DEFAULT, unit=UNIT_PCT,
-            label=(f"No OpEx/Revenue ratio could be computed from the "
-                   f"financials, so every projected year loads expenses at "
-                   f"{charged:.1%} of revenue — the config default, clamped "
-                   f"to the band the model believes."),
+            label=(f"The financials yielded no OpEx/Revenue ratio, so every "
+                   f"projected year loads expenses at {charged:.1%} of "
+                   f"revenue — the config default, clamped to the band the "
+                   f"model believes."),
             detail={"config_default": cfg.EXPENSE_RATIO["default"],
                     "clamped_to": charged}))
     return rows

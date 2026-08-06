@@ -425,11 +425,10 @@ def _resolve_va_inputs(cim_data, financial_analysis: dict) -> VAInputs:
         fills.append(Fill(
             field="market_rent_psf", value_used=in_place_rent_psf,
             source_key=MARKET_RENT_ABSENT, unit=UNIT_PSF_MO,
-            label=("Rent ramp excluded — no market-rent data. Market rent "
-                   "was set equal to in-place rent, so the rent gap is 0% "
-                   "and this value-add case is an occupancy ramp only. Any "
-                   "upside from pushing rents to market is NOT in these "
-                   "returns."),
+            label=("Rent ramp excluded — market rent was set equal to "
+                   "in-place rent, so the gap is 0% and this case is an "
+                   "occupancy ramp only. Upside from pushing rents to market "
+                   "is NOT in these returns."),
             detail={"in_place_rent_psf": in_place_rent_psf}))
 
     # `is None`, not truthiness. A stated 0% physical occupancy is an
@@ -443,10 +442,8 @@ def _resolve_va_inputs(cim_data, financial_analysis: dict) -> VAInputs:
         fills.append(Fill(
             field="physical_occupancy", value_used=VA_DEFAULT_OCCUPANCY,
             source_key=OCCUPANCY_ABSENT, unit=UNIT_PCT,
-            label=(f"Physical occupancy is not stated. The value-add engine "
-                   f"starts the lease-up from {VA_DEFAULT_OCCUPANCY:.0%}, so "
-                   f"the occupancy gain driving these returns is assumed, "
-                   f"not measured."),
+            label=("The lease-up starts here, so the occupancy gain driving "
+                   "these returns is assumed, not measured."),
             detail={"target_note": "ramps to the scenario's target occupancy"}))
 
     adj_expenses = financial_analysis.get("expense_analysis", {}).get(
@@ -536,11 +533,9 @@ def _compute_in_place_rent_psf(cim_data) -> tuple:
         return rent, (Fill(
             field="physical_occupancy", value_used=VA_EGR_ASSUMED_OCCUPANCY,
             source_key=EGR_OCCUPANCY_ASSUMED, unit=UNIT_PCT,
-            label=(f"Physical occupancy is not stated, and in-place rent had "
-                   f"to be backed out of EGR — which needs one. Assumed "
-                   f"{VA_EGR_ASSUMED_OCCUPANCY:.0%}, giving an in-place rent "
-                   f"of ${rent:,.2f}/SF/mo that every rent gap in the model "
-                   f"is measured against."),
+            label=(f"In-place rent had to be backed out of EGR, which needs "
+                   f"an occupancy. Gives ${rent:,.2f}/SF/mo, the figure every "
+                   f"rent gap in the model is measured against."),
             detail={"ttm_egr": egr, "nrsf": nrsf}) if assumed else None)
 
     return 0.0, None

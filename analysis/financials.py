@@ -167,9 +167,8 @@ def _analyze_expenses(cim_data, nrsf: float, egr: float, state: str = "",
         fills.append(Fill(
             field="state", value_used="national",
             source_key=STATE_ABSENT, unit=UNIT_TEXT,
-            label=("No state on this deal, so every expense line is "
-                   "benchmarked against national ranges and the state "
-                   "property-tax multiplier is 1.0x rather than this "
+            label=("Expense lines are benchmarked against national ranges "
+                   "and the property-tax multiplier is 1.0x, not this "
                    "market's."),
             detail={"benchmark_source": benchmark_source,
                     "property_tax_multiplier": 1.0}))
@@ -230,12 +229,12 @@ def _analyze_expenses(cim_data, nrsf: float, egr: float, state: str = "",
                 fills.append(Fill(
                     field=benchmark_key, value_used=formula_tax,
                     source_key=STATE_TAX_FORMULA, unit=UNIT_DOLLARS,
-                    label=(f"{category} is not stated in the CIM. Estimated "
-                           f"at ${formula_tax:,.0f} from TTM NOI via the "
-                           f"{state} income-based formula "
-                           f"(NOI / {ptax_formula['cap_rate']:.0%} cap x "
+                    label=(f"Estimated from this deal's own NOI: "
+                           f"NOI / {ptax_formula['cap_rate']:.0%} cap x "
                            f"{ptax_formula['assessment_ratio']:.0%} assessed x "
-                           f"{ptax_formula['tax_rate']:.1%} rate)."),
+                           f"{ptax_formula['tax_rate']:.1%} {state} rate. Not "
+                           f"the assessor's number, and not a reassessment at "
+                           f"your basis."),
                     detail={"state": state, "ttm_noi": cim_data.ttm_noi,
                             **ptax_formula}))
 
@@ -300,10 +299,8 @@ def _analyze_expenses(cim_data, nrsf: float, egr: float, state: str = "",
             fills.append(Fill(
                 field=benchmark_key, value_used=floor_estimate,
                 source_key=BENCHMARK_LOW, unit=UNIT_DOLLARS,
-                label=(f"{category} is not stated in the CIM. Booked at the "
-                       f"benchmark floor of ${bench_low:.2f}/SF x "
-                       f"{nrsf:,.0f} SF = ${floor_estimate:,.0f} — the low "
-                       f"end of the ${bench_low:.2f}-${bench_high:.2f}/SF "
+                label=(f"Booked at ${bench_low:.2f}/SF — the LOW end of the "
+                       f"${bench_low:.2f}-${bench_high:.2f}/SF benchmark "
                        f"range, so the true expense is likelier higher."),
                 detail={"benchmark_low": bench_low, "benchmark_high": bench_high,
                         "nrsf": nrsf, "benchmark_source": benchmark_source}))
@@ -357,9 +354,9 @@ def _analyze_expenses(cim_data, nrsf: float, egr: float, state: str = "",
         fills.append(Fill(
             field="mgmt_fee_pct", value_used=mgmt_target,
             source_key=MGMT_FEE_TARGET, unit=UNIT_PCT,
-            label=(f"No management fee in the CIM. Underwritten at "
-                   f"{mgmt_target:.1%} of EGR (${mgmt_adjusted:,.0f}), the "
-                   f"pro-forma target for this deal."),
+            label=(f"Underwritten at ${mgmt_adjusted:,.0f}/yr — the top of "
+                   f"the {mgmt_low:.0%}-{mgmt_high:.0%} band, the "
+                   f"conservative read of an omission."),
             detail={"egr": egr, "benchmark_range_pct": (mgmt_low, mgmt_high)}))
 
     if mgmt_value:

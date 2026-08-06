@@ -122,12 +122,10 @@ def _compute_replacement_cost(cim_data) -> dict:
             fills.append(Fill(
                 field="cc_pct", value_used=0.0,
                 source_key=CC_PCT_ABSENT, unit=UNIT_PCT,
-                label=("The climate-controlled share is not stated and no "
-                       "facility-type square footage was extracted, so the "
-                       "entire building is costed as non-climate-controlled. "
-                       "Climate-controlled space costs materially more to "
-                       "build, so replacement cost is understated if any "
-                       "exists."),
+                label=("No facility-type SF either, so the whole building is "
+                       "costed as drive-up. CC space costs more to build, so "
+                       "replacement cost — what the asking price is screened "
+                       "against — is understated if any exists."),
                 detail={"nrsf": nrsf}))
         type_sf_map = {
             "ss_driveup":   nrsf * (1.0 - cc_pct),
