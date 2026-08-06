@@ -45,6 +45,32 @@ POPULATION_TIERS = {
     "strong_density": 100_000,     # top narrative tier — "strong demand driver"
 }
 
+# ── Occupancy narrative tiers ───────────────────────────────────────
+#
+# NARRATIVE tiers, not screens — the same lane as POPULATION_TIERS above.
+# `GATES["min_physical_occupancy"]` is the only occupancy number that
+# passes or fails a deal; these three grade how an occupancy READS in the
+# memo's demand narrative and risk list.
+#
+# `healthy` (0.85) EQUALS `GATES["stabilized_occupancy"]` today and is
+# deliberately a separate key: one asks "does this read as stable demand?"
+# and the other asks "has this post-2020 vintage ever stabilized?".
+# Collapsing them would tie the memo's prose to a screening threshold, so
+# that tuning the narrative silently re-screens deals.
+# `test_occupancy_narrative_tiers_are_config_not_the_stabilization_gate`
+# is what stops that.
+#
+# Ordering invariant: over_occupied >= strong >= healthy. These are
+# settings-editable, so two independently valid edits can invert the pair
+# and produce a band no occupancy can land in — the same composed-value
+# hole `registry.EXPENSE_RATIO_LIMITS` closed for the expense clamp.
+# `test_the_occupancy_tiers_stay_ordered` is the guard.
+OCCUPANCY_TIERS = {
+    "over_occupied": 0.95,   # above → rate suppression risk (rents too low)
+    "strong":        0.90,   # at/above → "demand exceeds supply"
+    "healthy":       0.85,   # at/above → "stable demand"
+}
+
 # Sensitivity-grid green band. PRESENTATION ONLY — nothing screens on it.
 # The grid's other boundary is `GATES["min_irr_5yr"]`, so a cell reads
 # green above this, yellow down to the gate, red below it. Kept an

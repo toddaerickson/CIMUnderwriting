@@ -7,7 +7,7 @@ from CIM-extracted data.
 
 # Both are mutated in place by the per-run override patch, so a
 # module-level binding still sees a ConfigOverride (webapp.services).
-from config import GATES, POPULATION_TIERS
+from config import GATES, OCCUPANCY_TIERS, POPULATION_TIERS
 
 
 def analyze_market(cim_data) -> dict:
@@ -122,12 +122,14 @@ def _assess_demand(cim_data) -> dict:
 
     occ = cim_data.physical_occupancy
     if occ:
-        if occ >= 0.90:
+        if occ >= OCCUPANCY_TIERS["strong"]:
             positives.append(f"Strong occupancy at {occ:.1%} — demand exceeds supply.")
-        elif occ >= 0.85:
+        elif occ >= OCCUPANCY_TIERS["healthy"]:
             positives.append(f"Healthy occupancy at {occ:.1%} — stable demand.")
         else:
-            negatives.append(f"Occupancy at {occ:.1%} — below stabilized threshold.")
+            negatives.append(f"Occupancy at {occ:.1%} — below the "
+                             f"{OCCUPANCY_TIERS['healthy']:.0%} stabilized "
+                             f"threshold.")
 
     pop = cim_data.population_3mi
     # `max(...)` is the guard that keeps the two settings from contradicting

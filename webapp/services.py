@@ -202,7 +202,7 @@ _PATCHED_DICTS = ("GATES", "EXPENSE_BENCHMARKS", "EXPENSE_RATIO",
                   "SCENARIO_DEFAULTS", "VALUE_ADD_SCENARIOS",
                   "VALUE_ADD_TRIGGERS", "VALUE_ADD_ASSUMPTIONS",
                   "TRANSACTION_COSTS", "MARKET_CAP_RATES",
-                  "POPULATION_TIERS")
+                  "POPULATION_TIERS", "OCCUPANCY_TIERS")
 _ORIG_CONFIG = {n: copy.deepcopy(getattr(cfg, n)) for n in _PATCHED_DICTS}
 _ANALYSIS_LOCK = threading.Lock()
 

@@ -222,6 +222,52 @@ def test_population_tiers_are_settings_editable_end_to_end():
     assert skipped == []
 
 
+# ── OCCUPANCY_TIERS — narrative grading, settings-editable ───────────
+
+def test_occupancy_narrative_tiers_are_config_not_the_stabilization_gate(
+        monkeypatch):
+    """`OCCUPANCY_TIERS["healthy"]` and `GATES["stabilized_occupancy"]`
+    are both 0.85 today and they are NOT the same number: one grades how
+    an occupancy reads in the memo's demand narrative, the other decides
+    whether a post-2020 vintage has ever stabilized.
+
+    Asserting 0.85 behaviour would pass against either. So move the tier
+    and leave the gate alone — only code reading the tier follows.
+    """
+    import config as cfg
+    from analysis.market import _assess_demand
+
+    cim = _thin_va_deal()
+    cim.physical_occupancy = 0.87
+
+    baseline = _assess_demand(cim)
+    assert any("Healthy occupancy" in p for p in baseline["positives"])
+
+    monkeypatch.setitem(cfg.OCCUPANCY_TIERS, "healthy", 0.88)
+    moved = _assess_demand(cim)
+
+    # 0.87 read as "healthy" at a 0.85 floor and is below it at 0.88
+    assert not any("Healthy occupancy" in p for p in moved["positives"])
+    assert any("stabilized threshold" in n for n in moved["negatives"])
+    # the GATE did not move
+    assert cfg.GATES["stabilized_occupancy"] == 0.85
+
+
+def test_the_occupancy_tiers_stay_ordered():
+    """Three independently editable settings that must stay ordered.
+    Per-field bounds cannot see this: 0.95/0.90/0.85 each sit inside
+    (0, 1) individually, and so do 0.85/0.90/0.95 — inverted, which
+    leaves `strong` unreachable and every occupancy reading as
+    "healthy" at best. Same composed-value hole the expense-ratio clamp
+    took three audit rounds to close.
+    """
+    import config as cfg
+
+    t = cfg.OCCUPANCY_TIERS
+    assert t["over_occupied"] >= t["strong"] >= t["healthy"], (
+        f"occupancy tiers out of order: {t}")
+
+
 @pytest.mark.django_db
 def test_a_stored_override_row_reaches_the_analysis(mock_cim_data):
     """The whole chain, from a row in the database to a changed narrative:

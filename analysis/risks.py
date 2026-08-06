@@ -7,7 +7,7 @@ CIM data and analysis outputs.
 
 from typing import Optional
 
-from config import GATES, POPULATION_TIERS, RISK_TRIGGERS
+from config import GATES, OCCUPANCY_TIERS, POPULATION_TIERS, RISK_TRIGGERS
 from registry import ScenarioType, asset_age
 
 
@@ -260,7 +260,7 @@ def _operational_risks(cim_data) -> list:
             "severity": "Medium",
             "mitigation": "Budget for extended lease-up period. Assess marketing spend required.",
         })
-    elif occ and occ > 0.95:
+    elif occ and occ > OCCUPANCY_TIERS["over_occupied"]:
         risks.append({
             "category": "Operational",
             "risk": "Over-occupied — potential rate suppression",
