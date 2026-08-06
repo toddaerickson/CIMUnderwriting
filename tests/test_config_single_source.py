@@ -2070,7 +2070,7 @@ def test_the_refusal_names_both_fields_when_both_are_missing(tmp_path):
     cim.ttm_noi = None
     with pytest.raises(MissingUnderwritingInput) as exc:
         _run(cim, tmp_path)
-    assert "NRSF and TTM NOI are missing" in str(exc.value)
+    assert "NRSF and TTM NOI missing" in str(exc.value)
 
 
 @pytest.mark.django_db
@@ -2286,14 +2286,16 @@ def test_the_solver_objective_does_not_multiply_the_log(tmp_path):
 
 # ── the register's own contract ──────────────────────────────────────
 
-def test_every_fill_source_key_is_declared():
-    """An exact set, never a superset: a superset assertion passes when a
-    new fill ships with a typo'd key, which renders as the raw string in
-    the Source column of an IC memo."""
+def test_the_source_vocabulary_cannot_drift_from_its_labels():
+    """The keys ARE the label table's keys — one structure, so there is
+    nothing to keep in sync. A tuple beside a dict would be the
+    duplicated-constant defect this item exists to close, needing a test
+    whose only job is policing the two."""
     from analysis import fills
 
-    assert set(fills.SOURCE_KEYS) == set(fills.SOURCE_LABELS)
-    assert len(fills.SOURCE_KEYS) == len(set(fills.SOURCE_KEYS))
+    assert fills.SOURCE_KEYS == tuple(fills.SOURCE_LABELS)
+    assert all(fills.SOURCE_LABELS[k] for k in fills.SOURCE_KEYS), (
+        "a source key with no prose renders as its raw slug in an IC memo")
 
 
 def test_every_fill_a_pipeline_run_emits_carries_a_declared_key(tmp_path):
@@ -2330,18 +2332,26 @@ def test_the_log_round_trips_and_tolerates_a_row_from_an_older_run():
 
 
 def test_one_formatter_serves_every_surface():
-    """The memo renders live `Fill` objects and the results page renders
-    the stored dicts. Two formatters is how "0.8" and "80%" end up in one
-    document."""
+    """Two formatters is how "0.8" and "80%" end up in one document. The
+    memo, the workbook and the results page all normalize through
+    `from_dicts` first — they need `source_label` anyway — so this takes
+    a `Fill` and nothing else."""
     from analysis import fills
 
     fill = fills.Fill(field="mgmt_fee_pct", value_used=0.06,
                       source_key=fills.MGMT_FEE_TARGET, label="x",
-                      unit=fills.UNIT_PCT)
+                      unit=fills.UNIT_PCT, detail={"egr": 500_000})
     assert fills.format_value(fill) == "6.0%"
-    assert fills.format_value(fills.to_dicts([fill])[0]) == "6.0%"
-    assert fills.format_value({"value_used": None}) == "—"
-    assert fills.format_value({"value_used": 9000, "unit": "$"}) == "$9,000"
+    assert fills.format_value(fills.from_dicts(fills.to_dicts([fill]))[0]) == "6.0%"
+    assert fills.format_detail(fill) == "egr=500000"
+
+    dollars = fills.Fill(field="cap_reserve", value_used=9000,
+                         source_key=fills.BENCHMARK_LOW, label="x",
+                         unit=fills.UNIT_DOLLARS)
+    assert fills.format_value(dollars) == "$9,000"
+    assert fills.format_value(
+        fills.Fill(field="f", value_used=None,
+                   source_key=fills.STATE_ABSENT, label="x")) == "—"
 
 
 def test_the_asset_class_reports_whether_the_cim_evidenced_it():

@@ -86,8 +86,7 @@ def fill_log_context(r) -> dict:
     return {"fill_rows": [{"field": f.field,
                            "value": fills.format_value(f),
                            "source": f.source_label,
-                           "label": f.label} for f in rows],
-            "fill_summary": fills.summarize(rows)}
+                           "label": f.label} for f in rows]}
 
 
 def _metric_rows(block, metrics):

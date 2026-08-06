@@ -268,7 +268,7 @@ def run_analysis(result: AnalysisResult, progress: Callable = None,
             result.errors.append(f"Enrichment failed: {e}")
 
     from analysis.valuation import resolve_market_cap
-    from registry import detect_asset_type
+    from registry import classify_asset_type
 
     # Step 1: Financial analysis
     _progress(1, 9, "Analyzing financials...")
@@ -361,9 +361,16 @@ def run_analysis(result: AnalysisResult, progress: Callable = None,
     # silently disabled the unknown-vintage finding in the check register,
     # which is gated on `source == "table"` (review finding, PR #31).
     if not market_cap:
+        # `classify_asset_type`, not `detect_asset_type`: the class is
+        # half of the table lookup that prices every exit, and its default
+        # is reached by ABSENCE of evidence. The resolver reports the
+        # other half's provenance (`age_band_known`) itself; this hands it
+        # the half only the caller knows (item T Category 4).
+        asset_class, asset_class_known = classify_asset_type(cim_data)
         market_cap = resolve_market_cap(
-            detect_asset_type(cim_data), cim_data.year_built,
-            market_cap=market_cap_rate)
+            asset_class, cim_data.year_built,
+            market_cap=market_cap_rate,
+            asset_class_known=asset_class_known)
     result.market_cap = market_cap
 
     # Bound here, not only inside the branch: the template writer reads

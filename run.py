@@ -168,10 +168,11 @@ def stage_valuate(ctx: AnalysisContext):
     # discipline engine.run_analysis follows. Miss one and the memo, the
     # .xlsx, the .xlsm and the solvers disagree about the same deal.
     from analysis.valuation import resolve_market_cap
-    from registry import detect_asset_type
+    from registry import classify_asset_type
+    asset_class, asset_class_known = classify_asset_type(ctx.cim_data)
     ctx.market_cap = resolve_market_cap(
-        detect_asset_type(ctx.cim_data),
-        getattr(ctx.cim_data, "year_built", None))
+        asset_class, getattr(ctx.cim_data, "year_built", None),
+        asset_class_known=asset_class_known)
     logger.info("  Market cap: %.3f%% (%s, %s band, %s)",
                 ctx.market_cap["market_cap"] * 100,
                 ctx.market_cap["asset_class"], ctx.market_cap["age_band"],

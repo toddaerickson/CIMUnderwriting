@@ -32,8 +32,9 @@ in a new costume. `analyze_financials` and `analyze_physical` return
 their fills on the dict they already return; the value-add engine
 publishes its own on each scenario. `collect()` gathers those, adds the
 handful derivable from provenance the pipeline already publishes
-(`market_cap["age_band_known"]`, `registry.classify_asset_type`), and
-returns one ordered, de-duplicated log.
+(`market_cap["age_band_known"]` and `["asset_class_known"]`, both stamped
+by the code that made the choice), and returns one ordered, de-duplicated
+log.
 
 That mirrors `analysis.checks`: evaluated ONCE at the engine, then handed
 to every surface, so the memo, the workbook and the results page cannot
@@ -55,6 +56,8 @@ the value was declined, not substituted, and that is a run warning.
 
 from dataclasses import asdict, dataclass, field
 
+import config as cfg
+
 # ── Source-key vocabulary ───────────────────────────────────────────
 # Closed set. A fill whose source is not one of these is a fill nobody
 # labelled, and `test_every_fill_source_key_is_declared` says so.
@@ -71,26 +74,17 @@ OCCUPANCY_ABSENT = "occupancy_absent"
 MARKET_RENT_ABSENT = "market_rent_absent"
 EXPENSES_ABSENT = "expenses_absent"
 
-#: Declaration order, which is also render order. Provenance of the
-#: whole asset first, then the income statement, then the value-add
-#: engine's own inputs — the order a reader asks the questions in.
-SOURCE_KEYS = (
-    ASSET_CLASS_DEFAULT,
-    AGE_BAND_FALLBACK,
-    STATE_ABSENT,
-    CC_PCT_ABSENT,
-    STATE_TAX_FORMULA,
-    MGMT_FEE_TARGET,
-    BENCHMARK_LOW,
-    EXPENSE_RATIO_DEFAULT,
-    OCCUPANCY_ABSENT,
-    MARKET_RENT_ABSENT,
-    EXPENSES_ABSENT,
-)
-
 #: What each source key means, in one clause, for the memo's appendix
 #: legend and the results-page column. The `label` on a Fill says what
 #: happened to THAT field; this says what the source itself is.
+#:
+#: DECLARATION ORDER IS RENDER ORDER — provenance of the whole asset
+#: first, then the income statement, then the value-add engine's own
+#: inputs, which is the order a reader asks the questions in. Keeping the
+#: order and the prose in ONE dict rather than a tuple beside a dict is
+#: not tidiness: two structures listing the same eleven keys is the
+#: duplicated-constant defect this very item exists to close, and it
+#: would need a test whose only job is to police the two for drift.
 SOURCE_LABELS = {
     ASSET_CLASS_DEFAULT: "config default (asset class)",
     AGE_BAND_FALLBACK: "config default (age band)",
@@ -104,6 +98,10 @@ SOURCE_LABELS = {
     MARKET_RENT_ABSENT: "in-place rent",
     EXPENSES_ABSENT: "no expenses booked",
 }
+
+#: The closed vocabulary, DERIVED from the table above so it cannot
+#: disagree with it.
+SOURCE_KEYS = tuple(SOURCE_LABELS)
 
 # ── Units ───────────────────────────────────────────────────────────
 # `format_value` is the ONE formatter. The memo, the workbook and the
@@ -122,7 +120,9 @@ class Fill:
 
     `detail` carries the raw inputs behind the substitution, the same way
     `CheckResult.values` does, so a reader can trace the number to its
-    formula without re-deriving anything.
+    formula without re-deriving anything. It is rendered — see
+    `format_detail` and the workbook's Inputs tab. An unrendered trace
+    would be the very thing this module is named after.
     """
     field: str
     value_used: object
@@ -164,27 +164,22 @@ def require_underwritable(cim_data) -> None:
                if not getattr(cim_data, attr, None)]
     if not missing:
         return
-    subject = " and ".join(missing)
-    verb = "is" if len(missing) == 1 else "are"
     raise MissingUnderwritingInput(
-        f"{subject} {verb} missing from this deal, so it cannot be "
+        f"{' and '.join(missing)} missing from this deal, so it cannot be "
         f"underwritten — every $/SF benchmark and the solver's price "
-        f"bracket are derived from {'it' if len(missing) == 1 else 'them'}. "
-        f"Enter {'it' if len(missing) == 1 else 'them'} on the Assumptions "
-        f"page and re-run.")
+        f"bracket are derived from those inputs. Enter them on the "
+        f"Assumptions page and re-run.")
 
 
-def format_value(fill) -> str:
+def format_value(fill: "Fill") -> str:
     """The one rendering of a fill's value, unit included.
 
-    Takes a `Fill` or the dict `to_dicts` produced, because the memo
-    renders from the live objects and the results page renders from a
-    stored run's JSON.
+    Takes a `Fill`, never a stored dict: every surface already calls
+    `from_dicts` first because it needs `source_label` too, so a dict
+    branch here would be an unexercised path that silently formats
+    something else the day one is passed. Handed a dict, this raises.
     """
-    if isinstance(fill, dict):
-        value, unit = fill.get("value_used"), fill.get("unit") or UNIT_TEXT
-    else:
-        value, unit = fill.value_used, fill.unit
+    value, unit = fill.value_used, fill.unit
     if value is None:
         return "—"
     if not isinstance(value, (int, float)) or isinstance(value, bool):
@@ -223,13 +218,18 @@ def from_dicts(rows) -> list[Fill]:
     return out
 
 
-def summarize(fills) -> dict:
-    """Counts for the surfaces that name the log without listing it —
-    memo section 1 and the LP summary's footer."""
-    rows = list(fills or [])
-    return {"total": len(rows),
-            "fields": len({(r.get("field") if isinstance(r, dict)
-                            else r.field) for r in rows})}
+def format_detail(fill: "Fill") -> str:
+    """The raw inputs behind a substitution, as one auditable string.
+
+    The repo's standing rule is that every value a user sees is traceable
+    to its formula, its source and its raw inputs, and that the trace is
+    built in rather than bolted on. `label` carries the formula in prose;
+    this carries the numbers it was computed from, for the workbook —
+    the analyst's audit artifact, and the one surface with room for it.
+    Without this the `detail` dict would be a field nobody renders, which
+    is the failure this item is named after.
+    """
+    return "; ".join(f"{k}={v}" for k, v in (fill.detail or {}).items())
 
 
 # ── Assembly ────────────────────────────────────────────────────────
@@ -251,7 +251,7 @@ def collect(*, cim_data=None, financial_analysis=None, physical_analysis=None,
     found += _rows_of(financial_analysis)
     found += _rows_of(physical_analysis)
     found += _value_add_rows(va_results)
-    found += _provenance_rows(cim_data, market_cap, expense_ratio)
+    found += _provenance_rows(market_cap, expense_ratio)
 
     order = {key: i for i, key in enumerate(SOURCE_KEYS)}
     seen, out = set(), []
@@ -287,7 +287,7 @@ def _value_add_rows(va_results) -> list:
     return rows
 
 
-def _provenance_rows(cim_data, market_cap, expense_ratio) -> list:
+def _provenance_rows(market_cap, expense_ratio) -> list:
     """The fills whose stage publishes a provenance flag instead of a
     fill — read the flag, never re-run the decision behind it."""
     rows = []
@@ -308,20 +308,21 @@ def _provenance_rows(cim_data, market_cap, expense_ratio) -> list:
                        f"fallback rather than from the asset's actual age."),
                 detail={"market_cap": mc.get("market_cap"),
                         "asset_class": mc.get("asset_class")}))
-        if cim_data is not None:
-            from registry import classify_asset_type
-            _, evidenced = classify_asset_type(cim_data)
-            if not evidenced:
-                rows.append(Fill(
-                    field="asset_class", value_used=mc.get("asset_class"),
-                    source_key=ASSET_CLASS_DEFAULT, unit=UNIT_TEXT,
-                    label=(f"Nothing in the CIM identifies the asset class "
-                           f"(no boat/RV square footage, no climate-controlled "
-                           f"share), so it was classed as "
-                           f"{mc.get('asset_class')!r} by default and the exit "
-                           f"cap came from that row of the table."),
-                    detail={"market_cap": mc.get("market_cap"),
-                            "age_band": mc.get("age_band")}))
+        # `is False`, never falsy: `None` means the caller that resolved
+        # the anchor did not answer the question, and "nobody said" is not
+        # "the CIM did not evidence it". Logging on None would put a row
+        # on every deal resolved by a path that predates the flag.
+        if mc.get("asset_class_known") is False:
+            rows.append(Fill(
+                field="asset_class", value_used=mc.get("asset_class"),
+                source_key=ASSET_CLASS_DEFAULT, unit=UNIT_TEXT,
+                label=(f"Nothing in the CIM identifies the asset class (no "
+                       f"boat/RV square footage, no climate-controlled "
+                       f"share), so it was classed as "
+                       f"{mc.get('asset_class')!r} by default and the exit "
+                       f"cap came from that row of the table."),
+                detail={"market_cap": mc.get("market_cap"),
+                        "age_band": mc.get("age_band")}))
 
     # The OpEx ratio the projection loads expenses at. `analyze_financials`
     # computes it from revenue; with no revenue there is nothing to
@@ -329,7 +330,6 @@ def _provenance_rows(cim_data, market_cap, expense_ratio) -> list:
     # inside the projection, which runs hundreds of times per deal, so it
     # is recorded here from the absence rather than from in there.
     if expense_ratio is None:
-        import config as cfg
         rows.append(Fill(
             field="opex_revenue_ratio", value_used=cfg.EXPENSE_RATIO["default"],
             source_key=EXPENSE_RATIO_DEFAULT, unit=UNIT_PCT,

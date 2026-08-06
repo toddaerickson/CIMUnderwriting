@@ -238,19 +238,25 @@ def _write_assumption_fills(ws, row, assumption_fill_log):
     if not assumption_fill_log:
         return row
 
-    from analysis.fills import format_value, from_dicts
+    from analysis.fills import format_detail, format_value, from_dicts
 
     row += 1
     row = _write_section_header(ws, row, "Assumptions Filled From Defaults",
-                                cols=3)
-    ws.cell(row=row, column=1, value="Input").font = LABEL_FONT
-    ws.cell(row=row, column=2, value="Value Used").font = LABEL_FONT
-    ws.cell(row=row, column=3, value="Source").font = LABEL_FONT
+                                cols=4)
+    for col, head in enumerate(("Input", "Value Used", "Source",
+                                "Derived From"), start=1):
+        ws.cell(row=row, column=col, value=head).font = LABEL_FONT
     row += 1
     for fill in from_dicts(assumption_fill_log):
         ws.cell(row=row, column=1, value=fill.field).font = LABEL_FONT
         ws.cell(row=row, column=2, value=format_value(fill)).font = VALUE_FONT
         ws.cell(row=row, column=3, value=fill.source_label).font = VALUE_FONT
+        # The raw inputs the substitution was computed from. This is the
+        # workbook's job specifically: it is the analyst's audit artifact,
+        # not an LP document, so it is the one surface with room for the
+        # numbers behind the sentence — and a `detail` no surface renders
+        # would be precisely the unread stamp this item exists to kill.
+        ws.cell(row=row, column=4, value=format_detail(fill)).font = VALUE_FONT
         row += 1
     return row
 

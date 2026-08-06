@@ -1584,6 +1584,39 @@
         },
         "C78": {
           "v": "benchmark floor x NRSF"
+        },
+        "D68": {
+          "v": "Derived From"
+        },
+        "D69": {
+          "v": "market_cap=0.0675; age_band=aging"
+        },
+        "D70": {
+          "v": "nrsf=40000"
+        },
+        "D71": {
+          "v": "state=TX; ttm_noi=272000; cap_rate=0.07; assessment_ratio=0.73; tax_rate=0.022"
+        },
+        "D72": {
+          "v": "benchmark_low=0.06; benchmark_high=0.17; nrsf=40000; benchmark_source=regional (TX)"
+        },
+        "D73": {
+          "v": "benchmark_low=0.15; benchmark_high=0.25; nrsf=40000; benchmark_source=regional (TX)"
+        },
+        "D74": {
+          "v": "benchmark_low=0.09; benchmark_high=0.18; nrsf=40000; benchmark_source=regional (TX)"
+        },
+        "D75": {
+          "v": "benchmark_low=0.18; benchmark_high=0.38; nrsf=40000; benchmark_source=regional (TX)"
+        },
+        "D76": {
+          "v": "benchmark_low=0.26; benchmark_high=0.51; nrsf=40000; benchmark_source=regional (TX)"
+        },
+        "D77": {
+          "v": "benchmark_low=0.18; benchmark_high=0.36; nrsf=40000; benchmark_source=regional (TX)"
+        },
+        "D78": {
+          "v": "benchmark_low=0.1; benchmark_high=0.22; nrsf=40000; benchmark_source=regional (TX)"
         }
       },
       "Levered Returns": {

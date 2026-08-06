@@ -37,6 +37,13 @@ VA_DEFAULT_OCCUPANCY = 0.80
 #: T scope clause 5 owns "stabilized occupancy, decided once" and picking
 #: a winner here would re-underwrite every thin deal as a tidy-up. Do not
 #: quietly collapse these into one constant — decide them.
+#:
+#: There is a THIRD, at 0.90: `config.XLSM_TEMPLATE_INPUTS[
+#: "assumed_physical_occupancy"]`, used by `output/template_writer.py`,
+#: which discloses it to a Python log and to no reader. It is not routed
+#: into the fill log here because `template_writer.py` is explicitly out
+#: of item T's scope (folded into item E3b) — but it is the same field
+#: assumed at a third number, and Category 5 must decide all three.
 VA_EGR_ASSUMED_OCCUPANCY = 0.85
 
 
@@ -102,6 +109,9 @@ def run_value_add_scenarios(cim_data, financial_analysis: dict,
     scenarios = custom_scenarios or VALUE_ADD_SCENARIOS
 
     inputs = _resolve_va_inputs(cim_data, financial_analysis)
+    # Built ONCE, outside the loop: every scenario carries the same log,
+    # and nothing downstream mutates it.
+    input_fills = to_dicts(inputs.fills)
 
     results = {}
     for name, params in scenarios.items():
@@ -132,7 +142,7 @@ def run_value_add_scenarios(cim_data, financial_analysis: dict,
         # anything it does not recognize. A dataclass would land in the
         # run record as "Fill(field='market_rent_psf', ...)" — valid
         # JSON, renders fine, never raises, and is not data.
-        result["input_fills"] = to_dicts(inputs.fills)
+        result["input_fills"] = input_fills
         results[name] = result
 
     return results

@@ -1506,6 +1506,12 @@
         },
         "C67": {
           "v": "benchmark floor x NRSF"
+        },
+        "D66": {
+          "v": "Derived From"
+        },
+        "D67": {
+          "v": "benchmark_low=0.15; benchmark_high=0.25; nrsf=52000; benchmark_source=regional (TX)"
         }
       },
       "Levered Returns": {
