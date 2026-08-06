@@ -2396,3 +2396,22 @@ def test_the_two_value_add_occupancy_defaults_are_still_declared_apart():
     assert vam.VA_DEFAULT_OCCUPANCY == 0.80
     assert vam.VA_EGR_ASSUMED_OCCUPANCY == 0.85
     assert vam.VA_DEFAULT_OCCUPANCY != vam.VA_EGR_ASSUMED_OCCUPANCY
+
+
+def test_the_value_add_fills_survive_the_json_boundary(tmp_path):
+    """`va_results` is persisted through `webapp.services.json_safe`,
+    whose last line is `str(obj)` for anything it does not recognize —
+    so a `Fill` dataclass left on a scenario dict lands in the run record
+    as "Fill(field='...', ...)": valid JSON, renders fine, never raises,
+    and is not data. MUTATION: store `list(inputs.fills)` instead of
+    `to_dicts(...)`."""
+    from webapp.services import json_safe
+
+    result = _run(_thin_va_deal(), tmp_path)
+    stored = json_safe({"va_results": result.va_results})
+    rows = stored["va_results"][ScenarioType.BASE.value]["input_fills"]
+
+    assert rows and all(isinstance(row, dict) for row in rows), rows
+    assert all("field" in row and "source_key" in row for row in rows)
+    assert not any(isinstance(v, str) and v.startswith("Fill(")
+                   for row in rows for v in row.values())

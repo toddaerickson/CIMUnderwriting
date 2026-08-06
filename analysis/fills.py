@@ -275,11 +275,15 @@ def _value_add_rows(va_results) -> list:
     off that one set, so each scenario carries the same `input_fills` and
     any of them answers for the run. `collect`'s de-duplication makes
     reading them all equivalent to reading one, and safe if that ever
-    stops being true."""
+    stops being true.
+
+    `input_fills` is stored as dicts, because the scenario dict it rides
+    on is persisted as JSON — so they come back through `from_dicts`.
+    """
     rows = []
     for scenario in (va_results or {}).values():
         if isinstance(scenario, dict):
-            rows += list(scenario.get("input_fills") or [])
+            rows += from_dicts(scenario.get("input_fills"))
     return rows
 
 

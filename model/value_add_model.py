@@ -18,7 +18,7 @@ from dataclasses import dataclass
 import numpy_financial as npf
 from analysis.fills import (EXPENSES_ABSENT, Fill, MARKET_RENT_ABSENT,
                             OCCUPANCY_ABSENT, UNIT_DOLLARS, UNIT_PCT,
-                            UNIT_PSF_MO)
+                            UNIT_PSF_MO, to_dicts)
 from analysis.valuation import (COERCED_SCENARIOS, resolve_exit_cap,
                                 resolve_hold_years, resolve_market_cap,
                                 resolve_transaction_costs)
@@ -126,7 +126,13 @@ def run_value_add_scenarios(cim_data, financial_analysis: dict,
         # attaching it per scenario keeps `va_results` scenario-keyed —
         # a sibling key beside "bear"/"base"/"bull" would break every
         # consumer that iterates this dict.
-        result["input_fills"] = list(inputs.fills)
+        #
+        # DICTS, not `Fill` objects: this dict is persisted through
+        # `webapp.services.json_safe`, whose last line is `str(obj)` for
+        # anything it does not recognize. A dataclass would land in the
+        # run record as "Fill(field='market_rent_psf', ...)" — valid
+        # JSON, renders fine, never raises, and is not data.
+        result["input_fills"] = to_dicts(inputs.fills)
         results[name] = result
 
     return results
