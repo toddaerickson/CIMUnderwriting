@@ -1028,8 +1028,23 @@ def test_a_superseded_out_of_range_row_is_not_told_it_reaches_runs(client,
                                   effective_date=today - dt.timedelta(days=1))
     content = client.get("/settings/").content.decode()
     assert content.count("out of range") == 1
-    assert "It is superseded as well" in content
+    assert "it is superseded, so it does not reach a run either way" in content
     assert "It reaches runs today" not in content
+
+    # AND the note must not claim the skip. This is the assertion the
+    # first draft of this PR lacked: `resolve_config_overrides` returns
+    # only the WINNER, so this superseded row never reaches
+    # `build_config_patch`, the winning 0.12 is applied normally, and
+    # nothing lands in `config_skipped`. Saying "runs use the config
+    # default" here was false — the same class of bug the four-way branch
+    # exists to prevent, in new wording.
+    from webapp.services import build_config_patch, resolve_config_overrides
+    _patch, solver_irr, skipped = build_config_patch(
+        resolve_config_overrides("", today))
+
+    assert solver_irr == 0.12 and skipped == []
+    assert "config_skipped" not in content
+    assert "runs use the config default" not in content
 
 
 @pytest.mark.django_db
@@ -1049,9 +1064,12 @@ def test_the_out_of_range_note_branches_on_all_four_statuses(client, operator):
                                   effective_date=today + dt.timedelta(days=30))
     content = client.get("/settings/").content.decode()
     assert "out of range" in content
-    assert "it is SKIPPED" in content
-    assert "would not have applied until" in content
+    assert "does not reach a run yet in any case" in content
+    assert "will be skipped when that date arrives" in content
     assert "It reaches runs today" not in content
+    # A scheduled row is not offered to build_config_patch at all, so it
+    # must not claim the stamp either.
+    assert "config_skipped" not in content
 
     # The ACTIVE row is the one whose sentence this PR reversed. It used
     # to read "It reaches runs today", which was true then and is false
@@ -1389,3 +1407,61 @@ def test_the_skipped_warning_does_not_edit_the_stored_run_record(
 
     run.refresh_from_db()
     assert run.result_json["errors"] == ["engine said this"]
+
+
+@pytest.mark.django_db
+def test_only_the_row_that_reaches_a_run_may_claim_the_skip(client, operator):
+    """The generalised form of the bug review caught in this PR.
+
+    `resolve_config_overrides` returns ONE row per lane — the winner — so
+    "this row is out of range" and "this run skipped this key" are
+    different claims. The first draft conflated them and told a
+    superseded row that runs were using the config default, while the
+    winning row's value was being applied normally.
+
+    The invariant, asserted directly: the page may say `config_skipped`
+    only when `build_config_patch` actually put the key there.
+    """
+    import datetime as dt
+
+    from django.utils import timezone
+
+    from webapp.models import ConfigOverride
+    from webapp.services import build_config_patch, resolve_config_overrides
+
+    today = timezone.localdate()
+
+    def page_and_run():
+        content = client.get("/settings/").content.decode()
+        _patch, _irr, skipped = build_config_patch(
+            resolve_config_overrides("", today))
+        return content, skipped
+
+    # 1. out-of-range row BEATEN by a newer in-range row: the run applies
+    #    the winner, so nothing is skipped and the page must not say so.
+    ConfigOverride.objects.create(key="SOLVER_TARGET_IRR", value=-0.05,
+                                  effective_date=today - dt.timedelta(days=2))
+    ConfigOverride.objects.create(key="SOLVER_TARGET_IRR", value=0.12,
+                                  effective_date=today - dt.timedelta(days=1))
+    content, skipped = page_and_run()
+    assert skipped == []
+    assert ("config_skipped" in content) is False
+
+    # 2. out-of-range row that IS the winner: now the key really is
+    #    skipped, and the page is entitled to say it.
+    ConfigOverride.objects.all().delete()
+    ConfigOverride.objects.create(key="SOLVER_TARGET_IRR", value=-0.05,
+                                  effective_date=today)
+    content, skipped = page_and_run()
+    assert skipped == ["SOLVER_TARGET_IRR"]
+    assert ("config_skipped" in content) is True
+
+    # 3. a scheduled out-of-range row: not resolved yet, so not skipped
+    #    yet, and the page says when it will be.
+    ConfigOverride.objects.all().delete()
+    ConfigOverride.objects.create(key="SOLVER_TARGET_IRR", value=-0.05,
+                                  effective_date=today + dt.timedelta(days=30))
+    content, skipped = page_and_run()
+    assert skipped == []
+    assert ("config_skipped" in content) is False
+    assert "will be skipped when that date arrives" in content

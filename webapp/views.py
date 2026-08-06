@@ -635,30 +635,43 @@ def settings_page(request):
         # them, so the model uses the config default and the run record
         # lists the key under `config_skipped`.
         #
-        # That is why the note no longer reads `reach[status]` for an
-        # out-of-range row. The four-way branch exists so this page and a
-        # run can never disagree, and after the skip they agree on one
-        # sentence: an out-of-range row does not reach a run, whatever
-        # its status. Saying "It reaches runs today." here would be the
-        # same lie the four-way branch was written to fix, just pointing
-        # the other way. The status is still reported beside it when it
-        # adds a SECOND reason (scheduled, superseded, unknown key), so
-        # nothing that vocabulary carried is lost.
+        # The note STILL branches on all four statuses, and the branch is
+        # now load-bearing in a way the first draft of this change missed.
+        #
+        # `resolve_config_overrides` returns ONE row per lane — the
+        # winner. So "out of range" and "skipped" are not the same claim:
+        # a superseded out-of-range row is never offered to
+        # `build_config_patch` at all, the winning row supplies the value,
+        # and the key never appears in `config_skipped`. A note that said
+        # "it is SKIPPED, runs use the config default" for that row was
+        # simply false — the run used the winner's value. That is the
+        # same class of bug the four-way branch was written to fix (a
+        # scheduled row told "it does reach runs"), reintroduced in new
+        # wording and caught in review.
+        #
+        # So only the ACTIVE row — the one that actually reaches
+        # `build_config_patch` — may claim the skip and the
+        # `config_skipped` stamp. The others say why they do not reach a
+        # run at all, which is true regardless of their value.
         oob = not value_in_bounds(r.key, r.value)
-        also = {
-            "active": "",
-            "scheduled": (f" It would not have applied until "
-                          f"{r.effective_date:%Y-%m-%d} in any case."),
-            "superseded": " It is superseded as well.",
-            "unknown key": " config.py no longer defines this key either.",
+        refusal = {
+            "active": ("so it is SKIPPED: runs use the config default "
+                       "instead and record the key under config_skipped."),
+            "scheduled": (f"and it does not reach a run yet in any case — "
+                          f"it is dated {r.effective_date:%Y-%m-%d}. It "
+                          f"will be skipped when that date arrives."),
+            "superseded": ("though it is superseded, so it does not reach "
+                           "a run either way — a later row supplies this "
+                           "setting."),
+            "unknown key": ("though config.py no longer defines this key, "
+                            "so it does not reach a run either way."),
         }
         overrides.append({
             "row": r, "status": status, "out_of_bounds": oob,
             "out_of_bounds_note": (
-                "Outside the allowed range for this setting, so it is "
-                "SKIPPED: runs use the config default instead and record "
-                f"the key under config_skipped.{also[status]} "
-                "Delete it and re-add the value in range."),
+                "Outside the allowed range for this setting, "
+                f"{refusal[status]} Delete it and re-add the value in "
+                "range."),
             "display_value": format_override_value(r.key, r.value),
             "label": registry.get(r.key, {}).get("label", r.key),
         })
