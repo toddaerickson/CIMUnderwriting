@@ -30,9 +30,15 @@ alongside a register of every occupancy key, guarded by an AST walk.
   must reproduce **byte-for-byte**. Every fixture states occupancy, so any delta
   means something moved that should not have. Enumerate and argue any delta in
   the PR, never silently re-baseline.
-- **Config reads happen at call time.** Never `from config import X` for a
-  scalar — that freezes it at import and defeats `ConfigOverride`. Use
-  `import config as cfg` then `cfg.X`, matching the modules being edited.
+- **Config reads happen at call time, and the idiom differs by TYPE.** A
+  SCALAR must be read `cfg.X` after `import config as cfg` — `from config
+  import X` binds the value and freezes it at import, defeating
+  `ConfigOverride`. A DICT is imported by name (`from config import GATES`)
+  and read directly: `webapp.services` mutates those dicts IN PLACE for the
+  run, so a module-level binding still sees the override, and rebinding the
+  module attribute would leave the module holding the original dict. Both
+  rules are already in force — see the comment above `analysis/market.py`'s
+  import. `OCCUPANCY_TIERS` is a dict and follows the dict rule.
 - **Commit before mutating.** Never `git checkout --` in a mutation script; it
   discards unstaged implementation. Restore by re-applying the inverse edit.
 - **Per-path `git add`.** Never `git add -A` — this clone is shared and a
