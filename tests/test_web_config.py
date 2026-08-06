@@ -1353,9 +1353,23 @@ def test_a_run_with_nothing_skipped_shows_no_such_warning(client, operator,
 @pytest.mark.django_db
 def test_the_skipped_warning_does_not_edit_the_stored_run_record(
         client, operator, tmp_path, settings):
-    """`r["errors"]` IS the run's stored payload. Appending to it in place
-    would rewrite the engine's own record of what it reported — a warning
-    that falsifies the evidence it is warning about."""
+    """`r["errors"]` IS the run's stored payload, so the view concatenates
+    rather than appending.
+
+    **This test does NOT discriminate that choice, and saying so is the
+    point.** A mutation round swapped the concatenation for
+    `ctx["run_warnings"].extend(...)` and the whole suite stayed green,
+    because `deal_detail` never saves the run: the mutation dirties an
+    in-memory list on a model instance that is discarded at the end of
+    the request. Nothing observable changes.
+
+    So the concatenation is DEFENSIVE — correct the day any code on this
+    path calls `save()`, and unprovable until then. What this test does
+    pin is the weaker, real property: rendering the page does not persist
+    a changed record. Left in place because that property is worth
+    holding, and labelled because a test that looks like it guards the
+    immutability would be the more dangerous thing to leave behind.
+    """
     from webapp.models import AnalysisRun, Deal
 
     deals_dir = tmp_path / "deals"
