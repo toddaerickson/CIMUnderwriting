@@ -2180,7 +2180,18 @@ def test_no_solver_carries_a_fabricated_noi_literal():
 def test_no_module_still_sizes_a_property_at_one_square_foot():
     """`nrsf or 1` reintroduced anywhere in the pricing path is the whole
     defect back. An AST walk, not a grep, so `nrsf or 1.0` and
-    `cim_data.nrsf or 1` are caught by shape rather than by spelling."""
+    `cim_data.nrsf or 1` are caught by shape rather than by spelling.
+
+    It RESOLVES module-level names too. The first version of this test
+    matched only inline `ast.Constant` nodes, and reported zero offenders
+    while `output/template_writer.py` carried
+    `cim_data.nrsf or _NRSF_FALLBACK` with `_NRSF_FALLBACK = 1` declared
+    twenty lines up — in a file this test's own path list names. A guard
+    that overclaims its coverage is worse than no guard, because it is
+    read as proof. The name-following idiom is borrowed from
+    `tests/test_template_writer.py::_reachable_literals`, which was
+    written for exactly this evasion.
+    """
     import ast
     from pathlib import Path
 
@@ -2192,6 +2203,29 @@ def test_no_module_still_sizes_a_property_at_one_square_foot():
     offenders = []
     for path in paths:
         tree = ast.parse(path.read_text(), filename=str(path))
+        # module-level `NAME = <number>` bindings, so a literal parked in
+        # a constant one line earlier is still caught
+        consts = {}
+        for node in tree.body:
+            if not isinstance(node, ast.Assign) or len(node.targets) != 1:
+                continue
+            target = node.targets[0]
+            if (isinstance(target, ast.Name)
+                    and isinstance(node.value, ast.Constant)
+                    and isinstance(node.value.value, (int, float))
+                    and not isinstance(node.value.value, bool)):
+                consts[target.id] = node.value.value
+
+        def _number(node):
+            """The number this expression evaluates to, or None."""
+            if (isinstance(node, ast.Constant)
+                    and isinstance(node.value, (int, float))
+                    and not isinstance(node.value, bool)):
+                return node.value
+            if isinstance(node, ast.Name):
+                return consts.get(node.id)
+            return None
+
         for node in ast.walk(tree):
             if not (isinstance(node, ast.BoolOp)
                     and isinstance(node.op, ast.Or)):
@@ -2202,14 +2236,45 @@ def test_no_module_still_sizes_a_property_at_one_square_foot():
             if "nrsf" not in names:
                 continue
             for value in node.values[1:]:
-                if (isinstance(value, ast.Constant)
-                        and isinstance(value.value, (int, float))
-                        and not isinstance(value.value, bool)
-                        and value.value > 0):
+                number = _number(value)
+                if number is not None and number > 0:
                     offenders.append(f"{path.name}:{value.lineno}")
     assert offenders == [], (
         f"NRSF defaulted to a non-zero literal at {offenders} — a property "
         f"sized by fallback rescales every $/SF figure derived from it")
+
+
+def test_the_logged_expense_ratio_is_the_one_the_projection_charges(
+        monkeypatch):
+    """`registry.clamp_expense_ratio` clamps the config default into the
+    band derived from the benchmark ratio, and `EXPENSE_RATIO` is
+    settings-editable — so a stored override pushing the default outside
+    that band makes a RAW read print a share the model never charged.
+
+    The two coincide on shipped config, which is exactly how this class
+    of bug survives a test suite. Move the default out of the band and
+    the logged value must follow the clamp, not the config.
+
+    MUTATION: log `cfg.EXPENSE_RATIO["default"]` instead of
+    `clamp_expense_ratio(None)`.
+    """
+    from analysis import fills
+    from registry import clamp_expense_ratio, expense_ratio_clamp
+
+    monkeypatch.setitem(cfg.EXPENSE_RATIO, "default", 0.99)
+    import registry
+    registry._WARNED.clear()
+
+    lo, hi = expense_ratio_clamp()
+    charged = clamp_expense_ratio(None)
+    assert charged == pytest.approx(hi), "the clamp did not bind — pick a " \
+                                         "default further outside the band"
+    assert charged != cfg.EXPENSE_RATIO["default"]
+
+    (row,) = [f for f in fills.collect(expense_ratio=None)
+              if f.source_key == fills.EXPENSE_RATIO_DEFAULT]
+    assert row.value_used == pytest.approx(charged)
+    assert f"{charged:.1%}" in row.label
 
 
 # ── item (c): the rent ramp that is not there ────────────────────────

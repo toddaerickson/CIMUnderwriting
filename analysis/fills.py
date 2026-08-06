@@ -335,15 +335,27 @@ def _provenance_rows(market_cap, expense_ratio) -> list:
 
     # The OpEx ratio the projection loads expenses at. `analyze_financials`
     # computes it from revenue; with no revenue there is nothing to
-    # compute and `registry.expense_ratio_clamp` supplies the default —
-    # inside the projection, which runs hundreds of times per deal, so it
-    # is recorded here from the absence rather than from in there.
+    # compute and `registry.clamp_expense_ratio` supplies the default —
+    # inside `project_cash_flows`, which runs hundreds of times per deal,
+    # so it is recorded here from the absence rather than from in there.
+    #
+    # The logged value comes from THAT function, called the same way the
+    # projection calls it, not from `cfg.EXPENSE_RATIO["default"]` read
+    # raw. `clamp_expense_ratio` clamps the default into the band derived
+    # from the benchmark ratio, and `EXPENSE_RATIO` is settings-editable:
+    # a stored override pushing the default outside that band would make
+    # a raw read print a share the model never charged. The two coincide
+    # on shipped config, which is exactly how this kind of bug survives.
     if expense_ratio is None:
+        from registry import clamp_expense_ratio
+        charged = clamp_expense_ratio(None)
         rows.append(Fill(
-            field="opex_revenue_ratio", value_used=cfg.EXPENSE_RATIO["default"],
+            field="opex_revenue_ratio", value_used=charged,
             source_key=EXPENSE_RATIO_DEFAULT, unit=UNIT_PCT,
-            label=("No OpEx/Revenue ratio could be computed from the "
-                   "financials, so every projected year loads expenses at "
-                   "the config default share of revenue."),
-            detail={"source": "config.EXPENSE_RATIO['default']"}))
+            label=(f"No OpEx/Revenue ratio could be computed from the "
+                   f"financials, so every projected year loads expenses at "
+                   f"{charged:.1%} of revenue — the config default, clamped "
+                   f"to the band the model believes."),
+            detail={"config_default": cfg.EXPENSE_RATIO["default"],
+                    "clamped_to": charged}))
     return rows
