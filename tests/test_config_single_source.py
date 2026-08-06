@@ -2466,3 +2466,123 @@ def test_the_cli_discloses_the_same_assumptions_the_web_app_does(tmp_path,
     assert "Appendix A. Assumptions Filled From Defaults" in text
     for row in ctx.assumption_fill_log:
         assert row["field"] in text
+
+
+@pytest.mark.django_db
+def test_the_worker_actually_persists_the_fill_log(tmp_path, monkeypatch):
+    """The one wire from `run_analysis` to the database, and until now no
+    test touched it — `test_the_fill_log_reaches_the_results_page` builds
+    `result_json` by hand, so it would pass against a worker that dropped
+    the key on the floor.
+
+    That is not a hypothetical: item E3a shipped exactly this defect (the
+    levered lens computed on every deal, set on the result object, never
+    added to the persisted payload, discarded when the worker returned).
+    Two audit agents found it then and one found the gap here.
+
+    MUTATION: delete `"assumption_fill_log": result.assumption_fill_log`
+    from the payload in `webapp/services.py`.
+    """
+    from webapp.models import AnalysisRun, Deal
+    from webapp.services import _analysis_worker, cim_to_dict
+
+    deal = Deal.objects.create(
+        deal_id="persist-fills", property_name="Persist Fills",
+        deal_dir=str(tmp_path), cim_json=cim_to_dict(stabilized_deal()))
+    run = AnalysisRun.objects.create(deal=deal, status="running")
+    _analysis_worker(run.pk)
+
+    run.refresh_from_db()
+    assert run.status == "done", run.error
+    stored = (run.result_json or {}).get("assumption_fill_log")
+    assert stored, "the run recorded no assumptions — the key never landed"
+    assert all(isinstance(row, dict) for row in stored)
+    assert {row["field"] for row in stored} == {"cap_reserve"}
+    assert stored[0]["source_key"] == "benchmark_low"
+    # and it survives the round trip the results page makes
+    from webapp.results import fill_log_context
+    rows = fill_log_context(run.result_json)["fill_rows"]
+    assert [r["field"] for r in rows] == ["cap_reserve"]
+    assert rows[0]["value"].startswith("$")
+
+
+def test_the_fill_log_renders_in_declared_order_not_insertion_order(tmp_path):
+    """`collect` sorts by the declared source-key order so a reader meets
+    whole-asset provenance before individual expense lines. Insertion
+    order is financials-then-physical-then-VA-then-provenance, which is
+    almost the reverse."""
+    from analysis import fills
+
+    cim = _thin_va_deal()
+    cim.state = ""                      # add a STATE_ABSENT row up top
+    log = _run(cim, tmp_path).assumption_fill_log
+
+    keys = [row["source_key"] for row in log]
+    assert keys == sorted(keys, key=fills.SOURCE_KEYS.index), (
+        "collect() returned the log in insertion order")
+    # the whole-asset rows really do come before the per-line ones, and
+    # more than one source key is present or this proves nothing
+    assert len(set(keys)) > 1, keys
+    assert keys.index(fills.STATE_ABSENT) < keys.index(fills.BENCHMARK_LOW)
+
+
+def test_the_exit_cap_provenance_fills_follow_the_published_flags(tmp_path):
+    """Both halves of the table lookup that prices the exit — which row
+    and which column — are logged off flags the resolver publishes, not
+    off a second classification. An ANALYST-entered cap moved neither, so
+    neither is logged: the condition `checks._market_exit_cap` already
+    uses for the vintage half.
+
+    MUTATION: stop passing `asset_class_known` from `engine.py`, or drop
+    it from `resolve_market_cap`'s return."""
+    from analysis import fills
+
+    cim = _thin_va_deal()
+    cim.year_built = None               # unknown vintage -> fallback band
+    cim.cc_pct = None                   # no evidence of the asset class
+
+    table_run = _run(cim, tmp_path)
+    assert table_run.market_cap["source"] == "table"
+    assert table_run.market_cap["age_band_known"] is False
+    assert table_run.market_cap["asset_class_known"] is False
+    keys = {row["source_key"] for row in table_run.assumption_fill_log}
+    assert fills.AGE_BAND_FALLBACK in keys
+    assert fills.ASSET_CLASS_DEFAULT in keys
+
+    analyst_run = _run(cim, tmp_path, market_cap_rate=0.061)
+    assert analyst_run.market_cap["source"] == "analyst"
+    keys = {row["source_key"] for row in analyst_run.assumption_fill_log}
+    assert fills.AGE_BAND_FALLBACK not in keys
+    assert fills.ASSET_CLASS_DEFAULT not in keys
+
+
+def test_the_egr_occupancy_assumption_is_logged_beside_the_other_one(tmp_path):
+    """A deal with no unit mix and no GPR backs in-place rent out of EGR,
+    which needs an occupancy the CIM did not state. The SAME field is
+    then assumed twice in one run at two different numbers — 0.85 here,
+    0.80 for the lease-up start — and both rows appear, because that
+    contradiction on one page is the evidence Category 5 needs.
+
+    MUTATION: drop the fill from `_compute_in_place_rent_psf`."""
+    from analysis import fills
+    from model.value_add_model import _resolve_va_inputs
+
+    cim = _thin_va_deal()
+    cim.unit_mix = []
+    cim.ttm_gpr = None
+    cim.ttm_egr = 430_000
+    cim.physical_occupancy = None
+
+    resolved = _resolve_va_inputs(cim, {})
+    logged = {(f.source_key, f.value_used) for f in resolved.fills}
+    assert (fills.EGR_OCCUPANCY_ASSUMED, 0.85) in logged
+    assert (fills.OCCUPANCY_ABSENT, 0.80) in logged
+    assert resolved.in_place_rent_psf == pytest.approx(
+        430_000 / (45_000 * 12 * 0.85))
+
+    # stated occupancy: the rent is backed out of the real number and
+    # only the value-add engine's own default is missing
+    cim.physical_occupancy = 0.70
+    logged = {f.source_key for f in _resolve_va_inputs(cim, {}).fills}
+    assert fills.EGR_OCCUPANCY_ASSUMED not in logged
+    assert fills.OCCUPANCY_ABSENT not in logged

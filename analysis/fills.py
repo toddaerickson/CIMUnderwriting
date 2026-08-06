@@ -49,9 +49,11 @@ make `skipped` mean two things.
 Coalescing an absent optional to zero where zero IS the semantic
 (`other_income or 0`), skipping an incomplete unit-mix row, or a
 divide-by-zero guard whose output is discarded. None of those invent a
-magnitude. Nor is a REFUSAL a fill: when a $/SF CapEx rate loses the
-NRSF it multiplies, `engine.run_analysis` warns and books nothing —
-the value was declined, not substituted, and that is a run warning.
+magnitude. Nor is a REFUSAL a fill: when a per-unit CapEx rate loses the
+unit count it multiplies, `engine.run_analysis` warns and books nothing —
+the value was declined, not substituted, and that is a run warning. (It
+used to say NRSF; `require_underwritable` refuses that deal outright now,
+so the surviving case is a driver with no such gate.)
 """
 
 from dataclasses import asdict, dataclass, field
@@ -71,6 +73,7 @@ AGE_BAND_FALLBACK = "age_band_fallback"
 ASSET_CLASS_DEFAULT = "asset_class_default"
 EXPENSE_RATIO_DEFAULT = "expense_ratio_default"
 OCCUPANCY_ABSENT = "occupancy_absent"
+EGR_OCCUPANCY_ASSUMED = "egr_occupancy_assumed"
 MARKET_RENT_ABSENT = "market_rent_absent"
 EXPENSES_ABSENT = "expenses_absent"
 
@@ -95,6 +98,7 @@ SOURCE_LABELS = {
     BENCHMARK_LOW: "benchmark floor x NRSF",
     EXPENSE_RATIO_DEFAULT: "config EXPENSE_RATIO default",
     OCCUPANCY_ABSENT: "value-add engine default",
+    EGR_OCCUPANCY_ASSUMED: "assumed to back rent out of EGR",
     MARKET_RENT_ABSENT: "in-place rent",
     EXPENSES_ABSENT: "no expenses booked",
 }

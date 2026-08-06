@@ -16,9 +16,9 @@ stabilized NOI, development spread, and monthly detail.
 from dataclasses import dataclass
 
 import numpy_financial as npf
-from analysis.fills import (EXPENSES_ABSENT, Fill, MARKET_RENT_ABSENT,
-                            OCCUPANCY_ABSENT, UNIT_DOLLARS, UNIT_PCT,
-                            UNIT_PSF_MO, to_dicts)
+from analysis.fills import (EGR_OCCUPANCY_ASSUMED, EXPENSES_ABSENT, Fill,
+                            MARKET_RENT_ABSENT, OCCUPANCY_ABSENT,
+                            UNIT_DOLLARS, UNIT_PCT, UNIT_PSF_MO, to_dicts)
 from analysis.valuation import (COERCED_SCENARIOS, resolve_exit_cap,
                                 resolve_hold_years, resolve_market_cap,
                                 resolve_transaction_costs)
@@ -61,7 +61,7 @@ def detect_value_add(cim_data) -> bool:
 
     # Check rent gap if market data available
     if cim_data.market_rent_psf and cim_data.unit_mix:
-        in_place = _compute_in_place_rent_psf(cim_data)
+        in_place, _ = _compute_in_place_rent_psf(cim_data)
         if in_place and in_place > 0:
             gap = (cim_data.market_rent_psf - in_place) / in_place
             if gap >= VALUE_ADD_TRIGGERS["min_rent_gap_pct"]:
@@ -415,7 +415,9 @@ def _resolve_va_inputs(cim_data, financial_analysis: dict) -> VAInputs:
     """
     fills = []
 
-    in_place_rent_psf = _compute_in_place_rent_psf(cim_data)
+    in_place_rent_psf, rent_basis_fill = _compute_in_place_rent_psf(cim_data)
+    if rent_basis_fill is not None:
+        fills.append(rent_basis_fill)
     market_rent_psf = cim_data.market_rent_psf
     rent_ramp_excluded = not market_rent_psf
     if rent_ramp_excluded:
@@ -471,8 +473,15 @@ def _resolve_va_inputs(cim_data, financial_analysis: dict) -> VAInputs:
     )
 
 
-def _compute_in_place_rent_psf(cim_data) -> float:
-    """
+def _compute_in_place_rent_psf(cim_data) -> tuple:
+    """`(in-place rent $/SF/mo, a Fill or None)`.
+
+    Returns the fill rather than recording it, because this helper is
+    also called by `detect_value_add`, which decides whether the engine
+    runs at all — recording from in there would log a substitution for a
+    deal the value-add engine never touched. The one caller that IS the
+    engine keeps it; the other drops it (item T Category 4).
+
     Compute weighted-average in-place rent per SF per month from unit mix.
 
     Falls back to GPR / (NRSF * 12 * occupancy) if no unit mix.
@@ -487,7 +496,7 @@ def _compute_in_place_rent_psf(cim_data) -> float:
     """
     override = getattr(cim_data, "in_place_avg_rent_psf", None)
     if override is not None:
-        return override
+        return override, None
     if cim_data.unit_mix:
         total_sf = 0
         total_rent = 0
@@ -499,7 +508,7 @@ def _compute_in_place_rent_psf(cim_data) -> float:
                 total_sf += sf * count
                 total_rent += rate * count
         if total_sf > 0:
-            return total_rent / total_sf
+            return total_rent / total_sf, None
 
     # Fallback from GPR. NOT `nrsf or 1` (item T Category 4): dividing a
     # year of gross potential rent by one square foot reports the whole
@@ -508,19 +517,30 @@ def _compute_in_place_rent_psf(cim_data) -> float:
     # figure to compute, which is what 0.0 has always meant here.
     nrsf = cim_data.nrsf
     if not nrsf:
-        return 0.0
+        return 0.0, None
 
     gpr = cim_data.ttm_gpr
     if gpr:
-        return gpr / (nrsf * 12)
+        return gpr / (nrsf * 12), None
 
     # Last resort: use EGR adjusted for vacancy. A stated 0% occupancy
     # beside a non-zero EGR is contradictory data, not an input to divide
     # by, so it falls through to "no figure" rather than raising.
     egr = cim_data.ttm_egr
-    occ = (VA_EGR_ASSUMED_OCCUPANCY if cim_data.physical_occupancy is None
-           else cim_data.physical_occupancy)
+    occ = cim_data.physical_occupancy
+    assumed = occ is None
+    if assumed:
+        occ = VA_EGR_ASSUMED_OCCUPANCY
     if egr and occ:
-        return egr / (nrsf * 12 * occ)
+        rent = egr / (nrsf * 12 * occ)
+        return rent, (Fill(
+            field="physical_occupancy", value_used=VA_EGR_ASSUMED_OCCUPANCY,
+            source_key=EGR_OCCUPANCY_ASSUMED, unit=UNIT_PCT,
+            label=(f"Physical occupancy is not stated, and in-place rent had "
+                   f"to be backed out of EGR — which needs one. Assumed "
+                   f"{VA_EGR_ASSUMED_OCCUPANCY:.0%}, giving an in-place rent "
+                   f"of ${rent:,.2f}/SF/mo that every rent gap in the model "
+                   f"is measured against."),
+            detail={"ttm_egr": egr, "nrsf": nrsf}) if assumed else None)
 
-    return 0.0
+    return 0.0, None
