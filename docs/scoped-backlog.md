@@ -538,10 +538,46 @@ oracle" discipline applied to the whole pipeline.
    NOI fails; it is not underwritten as a 1-SF / $100k fiction. The
    zero-rent-gap market-rent fallback gains an explicit flag: "rent ramp
    excluded — no market-rent data."
-5. **Reconciliations, decided once in config:** "stabilized" occupancy —
-   0.85 (gate) vs 0.88 (VA target/template) vs 0.90/0.93 (value_add
-   targets) — and the mgmt-fee adjustment target (benchmark floor vs 5%).
-   E3b reads whatever keys exist; this item owns the definitions.
+5. **Reconciliations, decided once in config:**
+   ~~"stabilized" occupancy — 0.85 (gate) vs 0.88 (VA target/template) vs
+   0.90/0.93 (value_add targets) — and the mgmt-fee adjustment target
+   (benchmark floor vs 5%). E3b reads whatever keys exist; this item owns
+   the definitions.~~
+   The mgmt-fee half is **DONE** — closed earlier, in PR #43:
+   `MGMT_FEE_TARGET_PCT` (0.06) with `resolve_mgmt_fee_target` as the one
+   resolver, so `analysis/financials.py` (adjusts an understated fee UP)
+   and `analysis/value_add.py` (sizes a renegotiation saving DOWN) can
+   never resolve the target differently.
+   The occupancy half is **REGISTERED, not reconciled** — not what this
+   clause asked for. `config.OCCUPANCY_KEYS` names all nine occupancy
+   numbers in the codebase, with an AST guard
+   (`test_no_occupancy_threshold_survives_as_a_bare_literal`) forbidding a
+   tenth from appearing as a bare literal, and `config.OCCUPANCY_TIERS`
+   replaced the bare 0.95/0.90/0.85 narrative literals in
+   `analysis/market.py` and `analysis/risks.py`. But the nine were never
+   collapsed to one value — the same call Category 2 made on the three
+   age ladders (`ASSET_AGE_LADDERS`, in config.py): each occupancy number
+   answers a different underwriting question (is demand proven at all vs.
+   has a post-2020 vintage ever stabilized vs. how the number reads in
+   the narrative vs. what a scenario assumes vs. where the value-add
+   engine ramps to...), and forcing them to one number is
+   re-underwriting, which this item's own scope excludes. The measurement
+   that decided it, on the value_add fixture: with exactly one occupancy
+   assumption in play, the choice of number moves base IRR by ~3bps
+   (0.4812%-0.4841% across 0.80/0.85/0.90); two of them disagreeing — as
+   `VA_DEFAULT_OCCUPANCY` (0.80) and `VA_EGR_ASSUMED_OCCUPANCY` (0.85)
+   did, both firing in the SAME run — moves it 14-27bps (0.3417% for the
+   mismatch that actually shipped, 0.2160% for the widest one). The
+   disagreement is 5-9x bigger than the number, which is why the fix was
+   never "pick 0.80 or 0.85 or 0.90." What this clause did not
+   anticipate: `VA_DEFAULT_OCCUPANCY` and `VA_EGR_ASSUMED_OCCUPANCY` were
+   deleted outright rather than folded into the register — there is no
+   Python-side assumed occupancy left at all (see
+   `analysis.fills.require_underwritable`, which now refuses a deal with
+   no stated physical occupancy instead of defaulting one in).
+   `config.XLSM_TEMPLATE_INPUTS["assumed_physical_occupancy"]` (0.90) is
+   the one surviving assumed occupancy anywhere in the codebase, and
+   belongs to item E3b, not this clause.
 6. **Memo assumptions appendix.** Every number that moved an output, its
    value, and its provenance (config default / ConfigOverride / deal
    override / CIM datum / fallback + flag) rendered as a memo section —
