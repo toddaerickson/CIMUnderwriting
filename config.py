@@ -569,10 +569,20 @@ ASSET_AGE_LADDERS = (
 )
 
 # ── The occupancy register (item T Category 5) ──────────────────────
-# Every occupancy number in the model, and the question each answers.
+# Every occupancy LEVEL in the model, and the question each answers.
 # They are deliberately NOT one number: Category 5 registered them the
 # way Category 2 registered the three age ladders, because collapsing
 # them is re-underwriting and item T's scope excludes that.
+#
+# "Level", not "number", and the distinction is the register's whole
+# point. Two occupancy-denominated thresholds are deliberately OUT:
+# `GATES["econ_phys_spread_flag"]` and `GATES["rate_bridge_gap_
+# threshold"]` (both 0.10) measure the DIFFERENCE between two
+# occupancies, not a point on the scale. Registering them would make
+# this "anything occupancy-adjacent", and a register that means
+# everything cannot say a fourth ladder appeared. The AST guard below
+# is scoped to match: it flags an occupancy compared to a bare literal,
+# which is what a LEVEL looks like in code.
 #
 #   GATES["min_physical_occupancy"]              is demand proven at all?
 #   GATES["stabilized_occupancy"]                has a post-2020 vintage
