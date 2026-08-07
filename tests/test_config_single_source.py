@@ -2750,6 +2750,17 @@ def test_no_occupancy_threshold_survives_as_a_bare_literal():
     divide-by-zero guard before `occ_delta / occ`, and `checks.py` bounds
     occupancy against 0 and 1 for validity. Neither invents a threshold,
     and a guard that flags them gets deleted rather than obeyed.
+
+    `is_occ` unwraps two disguises found live in this codebase, not
+    hypothetically: `output/template_writer.py` writes
+    `float(occupancy) >= float(params["stabilized_occ"])`, and
+    `target_occ` (a bare local, not in the name set below) sits right next
+    to `params["target_occupancy"]` in both `model/value_add_model.py` and
+    `output/memo_writer.py`. A guard that only sees `Name` nodes for a
+    fixed spelling misses `float(occ)`, `round(occ, 2)`, dict/subscript
+    reads of an occupancy key, and any local named after the pattern
+    those files already use — each is the same "fourth number" the
+    register exists to catch, just wearing a disguise.
     """
     import ast
     from pathlib import Path
@@ -2757,14 +2768,35 @@ def test_no_occupancy_threshold_survives_as_a_bare_literal():
     root = Path(__file__).resolve().parent.parent
     offenders = []
 
-    OCC_NAMES = {"occ", "current_occ", "phys", "econ",
+    # Bare local/attribute names that hold an occupancy fraction.
+    OCC_NAMES = {"occ", "current_occ", "target_occ", "phys", "econ",
                  "physical_occupancy", "economic_occupancy", "occupancy"}
 
+    # Dict/subscript keys that hold an occupancy fraction — covers
+    # `params["target_occupancy"]`, `base.get("current_occupancy")`'s
+    # subscript cousins, etc. Superset of OCC_NAMES plus the keys that
+    # only ever appear as dict keys, never as a bare local.
+    OCC_KEYS = OCC_NAMES | {
+        "current_occupancy", "target_occupancy", "stabilized_occ",
+        "occupancy_target", "max_occupancy", "ecri_min_occupancy",
+        "assumed_physical_occupancy",
+    }
+
     def is_occ(node):
-        return ((isinstance(node, ast.Name) and node.id in OCC_NAMES)
-                or (isinstance(node, ast.Attribute)
-                    and node.attr in ("physical_occupancy",
-                                      "economic_occupancy")))
+        if isinstance(node, ast.Call):
+            # float(occ), round(occ, 2) — the call itself carries no
+            # identity; whatever it wraps does.
+            return any(is_occ(arg) for arg in node.args)
+        if isinstance(node, ast.Name):
+            return node.id in OCC_NAMES
+        if isinstance(node, ast.Attribute):
+            return node.attr in ("physical_occupancy", "economic_occupancy")
+        if isinstance(node, ast.Subscript):
+            key = node.slice
+            return (isinstance(key, ast.Constant)
+                    and isinstance(key.value, str)
+                    and key.value in OCC_KEYS)
+        return False
 
     def is_threshold_num(node):
         """A bare number that is not 0 or 1 — see the exemption above."""
