@@ -568,6 +568,48 @@ ASSET_AGE_LADDERS = (
     "registry.AGE_BANDS", "RENOVATION_COST", "RISK_TRIGGERS",
 )
 
+# ── The occupancy register (item T Category 5) ──────────────────────
+# Every occupancy number in the model, and the question each answers.
+# They are deliberately NOT one number: Category 5 registered them the
+# way Category 2 registered the three age ladders, because collapsing
+# them is re-underwriting and item T's scope excludes that.
+#
+#   GATES["min_physical_occupancy"]              is demand proven at all?
+#   GATES["stabilized_occupancy"]                has a post-2020 vintage
+#                                                ever stabilized?
+#   OCCUPANCY_TIERS                              how does this occupancy
+#                                                READ? (narrative only)
+#   SCENARIO_DEFAULTS[*]["stabilized_occ"]       what the static DCF
+#                                                assumes per scenario
+#   VALUE_ADD_TRIGGERS["max_occupancy"]          below this the deal is
+#                                                a value-add deal
+#   VALUE_ADD_SCENARIOS[*]["target_occupancy"]   where the lease-up
+#                                                engine ramps TO
+#   VALUE_ADD_ASSUMPTIONS["occupancy_target"]    what a well-run asset
+#                                                reaches (opportunity
+#                                                sizing, not the engine)
+#   VALUE_ADD_ASSUMPTIONS["ecri_min_occupancy"]  full enough to push
+#                                                rents without bleeding
+#   XLSM_TEMPLATE_INPUTS["assumed_physical_occupancy"]
+#                                                the workbook's fallback
+#                                                — item E3b's, and the
+#                                                LAST assumed occupancy
+#                                                left anywhere
+#
+# There is no "assumed occupancy" in the Python model and that is
+# deliberate: see `model/value_add_model.py`'s Category 5 note.
+OCCUPANCY_KEYS = (
+    'GATES["min_physical_occupancy"]',
+    'GATES["stabilized_occupancy"]',
+    "OCCUPANCY_TIERS",
+    'SCENARIO_DEFAULTS[*]["stabilized_occ"]',
+    'VALUE_ADD_TRIGGERS["max_occupancy"]',
+    'VALUE_ADD_SCENARIOS[*]["target_occupancy"]',
+    'VALUE_ADD_ASSUMPTIONS["occupancy_target"]',
+    'VALUE_ADD_ASSUMPTIONS["ecri_min_occupancy"]',
+    'XLSM_TEMPLATE_INPUTS["assumed_physical_occupancy"]',
+)
+
 # ── Comp Database Parameters ───────────────────────────────────────
 
 COMP_DB_PATH = os.environ.get(

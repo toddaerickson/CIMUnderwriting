@@ -2733,3 +2733,97 @@ def test_an_egr_backed_rent_with_no_occupancy_is_refused_not_assumed(tmp_path):
     assert resolved.in_place_rent_psf == pytest.approx(
         430_000 / (45_000 * 12 * 0.70))
     assert all(f.field != "physical_occupancy" for f in resolved.fills)
+
+
+# ── Item T Category 5: the occupancy register ────────────────────────
+
+def test_no_occupancy_threshold_survives_as_a_bare_literal():
+    """`config.OCCUPANCY_KEYS` is only worth having if it is complete.
+    Category 5 decided these numbers stay APART (they answer different
+    questions); a fourth one appearing quietly in some module is not a
+    decision, it is the drift item T exists to stop.
+
+    Walk `analysis/`, `model/` and `output/` and fail on any comparison of
+    an occupancy against a numeric literal.
+
+    EXEMPT: comparison against 0. `value_add.py` reads `occ > 0` as a
+    divide-by-zero guard before `occ_delta / occ`, and `checks.py` bounds
+    occupancy against 0 and 1 for validity. Neither invents a threshold,
+    and a guard that flags them gets deleted rather than obeyed.
+    """
+    import ast
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parent.parent
+    offenders = []
+
+    OCC_NAMES = {"occ", "current_occ", "phys", "econ",
+                 "physical_occupancy", "economic_occupancy", "occupancy"}
+
+    def is_occ(node):
+        return ((isinstance(node, ast.Name) and node.id in OCC_NAMES)
+                or (isinstance(node, ast.Attribute)
+                    and node.attr in ("physical_occupancy",
+                                      "economic_occupancy")))
+
+    def is_threshold_num(node):
+        """A bare number that is not 0 or 1 — see the exemption above."""
+        return (isinstance(node, ast.Constant)
+                and isinstance(node.value, (int, float))
+                and not isinstance(node.value, bool)
+                and node.value not in (0, 1))
+
+    for pkg in ("analysis", "model", "output"):
+        for path in sorted((root / pkg).glob("*.py")):
+            tree = ast.parse(path.read_text(), filename=str(path))
+            for node in ast.walk(tree):
+                if not isinstance(node, ast.Compare):
+                    continue
+                left_occ = is_occ(node.left)
+                right_occ = any(is_occ(c) for c in node.comparators)
+                hit = ((left_occ and any(is_threshold_num(c)
+                                         for c in node.comparators))
+                       or (right_occ and is_threshold_num(node.left)))
+                if hit:
+                    offenders.append(
+                        f"{path.relative_to(root)}:{node.lineno} — "
+                        f"{ast.unparse(node)}")
+
+    assert not offenders, (
+        "occupancy compared to a bare literal; declare the threshold in "
+        "config.py and list it in OCCUPANCY_KEYS:\n  "
+        + "\n  ".join(offenders))
+
+
+def test_the_occupancy_register_names_every_occupancy_key_that_exists():
+    """A register that silently omits a key is worse than none — it reads
+    as completeness. Every config key holding an occupancy must appear in
+    OCCUPANCY_KEYS.
+    """
+    import config as cfg
+
+    named = set(cfg.OCCUPANCY_KEYS)
+    missing = []
+
+    for key in ("min_physical_occupancy", "stabilized_occupancy"):
+        if f'GATES["{key}"]' not in named:
+            missing.append(f'GATES["{key}"]')
+    if "OCCUPANCY_TIERS" not in named:
+        missing.append("OCCUPANCY_TIERS")
+    for dict_name, inner in (
+            ("SCENARIO_DEFAULTS", "stabilized_occ"),
+            ("VALUE_ADD_SCENARIOS", "target_occupancy")):
+        for params in getattr(cfg, dict_name).values():
+            if inner in params and f'{dict_name}[*]["{inner}"]' not in named:
+                missing.append(f'{dict_name}[*]["{inner}"]')
+                break
+    for dict_name, inner in (
+            ("VALUE_ADD_TRIGGERS", "max_occupancy"),
+            ("VALUE_ADD_ASSUMPTIONS", "occupancy_target"),
+            ("VALUE_ADD_ASSUMPTIONS", "ecri_min_occupancy"),
+            ("XLSM_TEMPLATE_INPUTS", "assumed_physical_occupancy")):
+        if inner in getattr(cfg, dict_name) and \
+                f'{dict_name}["{inner}"]' not in named:
+            missing.append(f'{dict_name}["{inner}"]')
+
+    assert not missing, f"occupancy keys absent from OCCUPANCY_KEYS: {missing}"
