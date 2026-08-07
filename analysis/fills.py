@@ -88,9 +88,11 @@ EXPENSES_ABSENT = "expenses_absent"
 #: first, then the income statement, then the value-add engine's own
 #: inputs, which is the order a reader asks the questions in. Keeping the
 #: order and the prose in ONE dict rather than a tuple beside a dict is
-#: not tidiness: two structures listing the same eleven keys is the
+#: not tidiness: two structures listing the same keys is the
 #: duplicated-constant defect this very item exists to close, and it
 #: would need a test whose only job is to police the two for drift.
+#: (`SOURCE_KEYS` below is derived FROM this dict for exactly that
+#: reason — its count can never drift from this one's.)
 SOURCE_LABELS = {
     ASSET_CLASS_DEFAULT: "config default (asset class)",
     AGE_BAND_FALLBACK: "config default (age band)",

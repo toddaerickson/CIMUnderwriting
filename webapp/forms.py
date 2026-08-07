@@ -1334,6 +1334,14 @@ def override_key_registry() -> dict:
         reg[f"POPULATION_TIERS.{k}"] = {
             "group": "Trade-Area Density Tiers (3-mile population)",
             "kind": "scalar", "pct": False, "int": True, "label": _label(k)}
+    # Decimal rates (0.95/0.90/0.85), unlike POPULATION_TIERS' counts — so
+    # pct, not int. Narrative grading only (config.py's own comment above
+    # OCCUPANCY_TIERS); `test_the_occupancy_tiers_stay_ordered` is the
+    # composed-value guard bounds can't see.
+    for k in cfg.OCCUPANCY_TIERS:
+        reg[f"OCCUPANCY_TIERS.{k}"] = {
+            "group": "Occupancy Narrative Tiers", "kind": "scalar",
+            "pct": True, "int": False, "label": _label(k)}
     for k in cfg.VALUE_ADD_TRIGGERS:
         reg[f"VALUE_ADD_TRIGGERS.{k}"] = {
             "group": "Value-Add Triggers", "kind": "scalar",

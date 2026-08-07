@@ -268,6 +268,34 @@ def test_the_occupancy_tiers_stay_ordered():
         f"occupancy tiers out of order: {t}")
 
 
+def test_occupancy_tiers_are_settings_editable_end_to_end():
+    """The registry is what the settings page renders and what
+    `build_config_patch` validates against, so an unregistered key is
+    accepted by the form and then silently skipped at run time — the exact
+    "UI claims the override works" failure item T exists to kill.
+    `POPULATION_TIERS` is the precedent (see
+    test_population_tiers_are_settings_editable_end_to_end); OCCUPANCY_TIERS
+    was added to `_PATCHED_DICTS` but not to the registry, so a stored row
+    was silently dropped."""
+    from webapp.forms import (format_override_value, override_key_registry,
+                              parse_override_value)
+    from webapp.services import _PATCHED_DICTS, build_config_patch
+
+    reg = override_key_registry()
+    key = "OCCUPANCY_TIERS.healthy"
+    assert reg[key]["pct"] is True and reg[key]["int"] is False
+    # Decimal rates, not counts: 0.88 must round-trip as "88%", not "0.88".
+    assert parse_override_value(key, "88") == 0.88
+    assert format_override_value(key, 0.88) == "88%"
+
+    # In _PATCHED_DICTS, so the patch actually reaches the analysis modules
+    # that bound the dict at import.
+    assert "OCCUPANCY_TIERS" in _PATCHED_DICTS
+    patch, _solver, skipped = build_config_patch({key: 0.88})
+    assert patch == {"OCCUPANCY_TIERS": {"healthy": 0.88}}
+    assert skipped == []
+
+
 @pytest.mark.django_db
 def test_a_stored_override_row_reaches_the_analysis(mock_cim_data):
     """The whole chain, from a row in the database to a changed narrative:

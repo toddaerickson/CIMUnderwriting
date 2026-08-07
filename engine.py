@@ -236,14 +236,20 @@ def run_analysis(result: AnalysisResult, progress: Callable = None,
     """
     cim_data = result.cim_data
 
-    # Before anything else. NRSF and TTM NOI have no defensible default —
-    # every $/SF benchmark divides by the first and the solver's price
-    # bracket derives from the second — so a deal missing either is
-    # refused rather than underwritten as a 1-SF / $100k fiction (item T
-    # Category 4). Raising here rather than inside `analyze_financials`
-    # is deliberate: that function also serves the assumptions page's
-    # live preview, where the analyst is still typing the very field
-    # this would refuse.
+    # Before anything else. NRSF, TTM NOI, and physical occupancy (item T
+    # Category 5) have no defensible default — every $/SF benchmark
+    # divides by the first, the solver's price bracket derives from the
+    # second, and there is no honest number to invent for the third — so
+    # a deal missing any of them is refused rather than underwritten as a
+    # 1-SF / $100k / assumed-full fiction (item T Category 4). Occupancy
+    # is checked `is None`, NOT the falsy check NRSF/TTM NOI use: a
+    # stated 0% is real data — an honestly-reported pre-lease-up asset —
+    # that the 75% demand gate downstream already refuses with the right
+    # reason, and a falsy check would refuse it here for the wrong one;
+    # only ABSENCE is ununderwritable. Raising here rather than inside
+    # `analyze_financials` is deliberate: that function also serves the
+    # assumptions page's live preview, where the analyst is still typing
+    # the very field this would refuse.
     from analysis.fills import require_underwritable
     require_underwritable(cim_data)
 

@@ -260,16 +260,26 @@ output/
    wrong one. `VA_DEFAULT_OCCUPANCY` (0.80) and `VA_EGR_ASSUMED_OCCUPANCY`
    (0.85) are deleted outright rather than reconciled to one number — two
    constants answering the same question at different values, and BOTH
-   fired in the same run. Measured on the value_add fixture: when a run
-   only has ONE occupancy assumption in play, the choice of number barely
-   moves the result (base IRR 0.4812%–0.4841% across 0.80/0.85/0.90,
-   0.29bps of spread); it's the two constants DISAGREEING that moves it —
-   the mismatch that actually shipped (0.80 vs 0.85) cost 14bps (down to
-   0.3417%), and the widest mismatch (0.80 vs 0.90) cost 27bps (down to
-   0.2160%). **So the fix was never "pick the right number"** — the
-   disagreement is 48-92x bigger than the number choice, so reconciling to
-   a single value chosen wrong would still have shipped a live bug; only
-   deleting the second constant closes it.
+   fired in the same run. Measured on the value_add fixture (EGR-forced
+   probe: occupancy, the rent override, unit mix and GPR all removed, so
+   both constants fire on the same deal): when the two constants AGREE,
+   the choice of number barely moves the result (base IRR 0.4812%–0.4841%
+   across 0.80/0.85/0.90, 0.29bps of spread — small because the assumed
+   occupancy moves the ramp start and the implied in-place rent in
+   OFFSETTING directions); it's the two constants DISAGREEING that moves
+   it — the mismatch that actually shipped (0.80 vs 0.85) cost 14bps
+   (down to 0.3417%), and the widest mismatch (0.80 vs 0.90) cost 27bps
+   (down to 0.2160%). Inside that probe the disagreement is 48-92x bigger
+   than the agreement-spread, but that ratio is a property of the EGR
+   probe, not of occupancy assumptions generally: isolating a SINGLE
+   constant (only the stated occupancy blanked; unit mix and the EGR
+   route both stay intact) swings base IRR 0.0706%–0.3254% — about 25bps,
+   roughly 88x the 0.29bps figure, because the offsetting effect is gone
+   once only one constant is live. **So the fix was never "pick the right
+   number"** — even the smaller, agreement-case spread is not a safe
+   default to lean on, and reconciling to a single value chosen wrong
+   would still have shipped a live bug; only deleting the second constant
+   closes it.
    `config.XLSM_TEMPLATE_INPUTS["assumed_physical_occupancy"]` (0.90) is
    the one surviving assumed occupancy left anywhere in the codebase, and
    belongs to item E3b, not this decision.
