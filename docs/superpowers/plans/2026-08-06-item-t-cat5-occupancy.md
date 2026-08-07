@@ -215,7 +215,7 @@ In `model/value_add_model.py`:
 #: starts, 0.85 where in-place rent is backed out of EGR — and both fired
 #: in the SAME run, so a deal with no stated occupancy was underwritten
 #: as 80% and 85% full at once. Measured: when the two agree the choice of
-#: number is worth ~3bps of base IRR; when they disagree it is worth
+#: number is worth 0.29bps of base IRR; when they disagree it is worth
 #: 14-27. So the answer was neither number. `analysis.fills.
 #: require_underwritable` refuses the deal and the analyst enters it.
 #:
@@ -395,7 +395,7 @@ Two constants answered ONE question at different numbers and both fired in
 the same run: a deal with no stated occupancy was underwritten as 80% full
 (the lease-up start) and 85% full (backing rent out of EGR) at once.
 
-Measured: when the two agree the choice of number is worth ~3bps of base
+Measured: when the two agree the choice of number is worth 0.29bps of base
 IRR; when they disagree, 14-27. So the answer is neither number — occupancy
 joins NRSF and TTM NOI in require_underwritable.
 

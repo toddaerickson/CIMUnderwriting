@@ -563,12 +563,12 @@ oracle" discipline applied to the whole pipeline.
    engine ramps to...), and forcing them to one number is
    re-underwriting, which this item's own scope excludes. The measurement
    that decided it, on the value_add fixture: with exactly one occupancy
-   assumption in play, the choice of number moves base IRR by ~3bps
+   assumption in play, the choice of number moves base IRR by 0.29bps
    (0.4812%-0.4841% across 0.80/0.85/0.90); two of them disagreeing — as
    `VA_DEFAULT_OCCUPANCY` (0.80) and `VA_EGR_ASSUMED_OCCUPANCY` (0.85)
    did, both firing in the SAME run — moves it 14-27bps (0.3417% for the
    mismatch that actually shipped, 0.2160% for the widest one). The
-   disagreement is 5-9x bigger than the number, which is why the fix was
+   disagreement is 48-92x bigger than the number, which is why the fix was
    never "pick 0.80 or 0.85 or 0.90." What this clause did not
    anticipate: `VA_DEFAULT_OCCUPANCY` and `VA_EGR_ASSUMED_OCCUPANCY` were
    deleted outright rather than folded into the register — there is no

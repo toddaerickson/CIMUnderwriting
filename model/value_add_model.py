@@ -31,7 +31,7 @@ from registry import ScenarioType
 #: starts, 0.85 where in-place rent is backed out of EGR — and both fired
 #: in the SAME run, so a deal with no stated occupancy was underwritten
 #: as 80% and 85% full at once. Measured: when the two agree the choice of
-#: number is worth ~3bps of base IRR; when they disagree it is worth
+#: number is worth 0.29bps of base IRR; when they disagree it is worth
 #: 14-27. So the answer was neither number. `analysis.fills.
 #: require_underwritable` refuses the deal and the analyst enters it.
 #:

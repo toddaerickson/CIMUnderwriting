@@ -38,9 +38,9 @@ and GPR all removed, since `_compute_in_place_rent_psf` tries those first):
 | widest mismatch (0.80 ramp / 0.90 EGR) | $1.1592 | 0.2160% |
 | reversed mismatch (0.90 ramp / 0.85 EGR) | $1.2274 | 0.6214% |
 
-**When the two constants agree, which number you pick barely matters — a 3 bp
+**When the two constants agree, which number you pick barely matters — a 0.29 bp
 spread across 0.80–0.90. When they disagree it costs 14–27 bps.** The
-disagreement is worth roughly five times the choice, because the EGR constant
+disagreement is worth roughly 48-92 times the choice, because the EGR constant
 sets implied in-place rent (higher assumed occupancy → lower implied rent)
 while the ramp constant sets where lease-up begins; agreeing makes revenue
 self-consistent, disagreeing double-counts the same vacancy.

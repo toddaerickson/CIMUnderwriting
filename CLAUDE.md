@@ -263,11 +263,11 @@ output/
    fired in the same run. Measured on the value_add fixture: when a run
    only has ONE occupancy assumption in play, the choice of number barely
    moves the result (base IRR 0.4812%–0.4841% across 0.80/0.85/0.90,
-   ~3bps of spread); it's the two constants DISAGREEING that moves it —
+   0.29bps of spread); it's the two constants DISAGREEING that moves it —
    the mismatch that actually shipped (0.80 vs 0.85) cost 14bps (down to
    0.3417%), and the widest mismatch (0.80 vs 0.90) cost 27bps (down to
    0.2160%). **So the fix was never "pick the right number"** — the
-   disagreement is 5-9x bigger than the number choice, so reconciling to
+   disagreement is 48-92x bigger than the number choice, so reconciling to
    a single value chosen wrong would still have shipped a live bug; only
    deleting the second constant closes it.
    `config.XLSM_TEMPLATE_INPUTS["assumed_physical_occupancy"]` (0.90) is
