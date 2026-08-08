@@ -296,6 +296,66 @@ def test_occupancy_tiers_are_settings_editable_end_to_end():
     assert skipped == []
 
 
+def test_the_occupancy_tier_can_no_longer_shadow_the_gate(mock_cim_data,
+                                                          monkeypatch):
+    """Mirrors `test_the_density_tier_can_no_longer_shadow_the_population_
+    gate`: raising `GATES["min_physical_occupancy"]` above the shipped
+    `strong`/`healthy` tiers must not leave a Gate-2-FAIL deal reading as
+    a demand positive. `_assess_demand` now takes
+    `max(OCCUPANCY_TIERS[...], min_physical_occupancy)` for both tiers.
+
+    92% sits above both default tiers (0.90/0.85) but below a 95% gate.
+    """
+    mock_cim_data.physical_occupancy = 0.92
+    monkeypatch.setitem(cfg.GATES, "min_physical_occupancy", 0.95)
+
+    demand = analyze_market(mock_cim_data)["demand_drivers"]
+    assert not any("Strong occupancy" in p for p in demand["positives"])
+    assert not any("Healthy occupancy" in p for p in demand["positives"])
+    assert any("below the 95% stabilized threshold" in n
+               for n in demand["negatives"])
+
+
+def test_an_occupancy_tier_set_below_the_gate_cannot_contradict_it(
+        mock_cim_data, monkeypatch):
+    """The same guard from the other direction, reproducing the finding
+    exactly: `healthy` lowered to 0.60 must not let a 70%-occupancy deal
+    — a Gate 2 FAIL — read "Healthy occupancy ... stable demand" beside
+    it. The negative note must also name the EFFECTIVE (floored)
+    threshold, not the raw config value the code did not apply.
+
+    BOTH faces matter here for the same reason the population fix's
+    docstring records: guarding `market.py` alone while `risks.py` reads
+    the same `OCCUPANCY_TIERS` dict leaves a second surface free to
+    contradict Gate 2 — that was a real defect caught in review on the
+    population guard. `risks.py`'s "Over-occupied" branch is an `elif`
+    sibling of two branches that already intercept `occ < floor` on
+    their own (the population guard's key has no such sibling), so the
+    only place its floor has room to bite is the vintage-ramp FAIL path
+    with occupancy pinned exactly at the floor — pin it there to prove
+    the `max()` is live, not dead code the elif chain already made moot.
+    """
+    mock_cim_data.physical_occupancy = 0.70
+    monkeypatch.setitem(cfg.OCCUPANCY_TIERS, "healthy", 0.60)
+
+    demand = analyze_market(mock_cim_data)["demand_drivers"]
+    assert not any("Healthy occupancy" in p for p in demand["positives"])
+    assert any("below the 75% stabilized threshold" in n
+               for n in demand["negatives"])
+
+    # The risks.py face: 75% occupancy (exactly the floor) with a
+    # post-2020 vintage still fails Gate 2 on the un-stabilized-vintage
+    # path, not the plain floor path. `over_occupied` dropped to 0.10
+    # must not still label it "over-occupied" beside that FAIL.
+    mock_cim_data.physical_occupancy = 0.75
+    mock_cim_data.year_built = 2022
+    monkeypatch.setitem(cfg.OCCUPANCY_TIERS, "over_occupied", 0.10)
+
+    risk = _risk(_risks_for(mock_cim_data),
+                "Over-occupied — potential rate suppression")
+    assert risk is None
+
+
 @pytest.mark.django_db
 def test_a_stored_override_row_reaches_the_analysis(mock_cim_data):
     """The whole chain, from a row in the database to a changed narrative:

@@ -260,7 +260,13 @@ def _operational_risks(cim_data) -> list:
             "severity": "Medium",
             "mitigation": "Budget for extended lease-up period. Assess marketing spend required.",
         })
-    elif occ and occ > OCCUPANCY_TIERS["over_occupied"]:
+    # Same guard as `market.py::_assess_demand`: `over_occupied` is
+    # settings-editable and only `GATES["min_physical_occupancy"]` is
+    # Gate 2's hard FAIL threshold. Without the floor, a tier set below
+    # the gate could label a Gate 2 FAIL deal "over-occupied" instead of
+    # "unproven demand". On the defaults (0.95 vs 0.75) this is a no-op.
+    elif occ and occ > max(OCCUPANCY_TIERS["over_occupied"],
+                           GATES["min_physical_occupancy"]):
         risks.append({
             "category": "Operational",
             "risk": "Over-occupied — potential rate suppression",
