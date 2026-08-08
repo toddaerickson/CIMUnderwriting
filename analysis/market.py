@@ -5,9 +5,9 @@ Evaluates demographics, MSA strength, and supply/demand indicators
 from CIM-extracted data.
 """
 
-# Both are mutated in place by the per-run override patch, so a
+# All three are mutated in place by the per-run override patch, so a
 # module-level binding still sees a ConfigOverride (webapp.services).
-from config import GATES, POPULATION_TIERS
+from config import GATES, OCCUPANCY_TIERS, POPULATION_TIERS
 
 
 def analyze_market(cim_data) -> dict:
@@ -122,12 +122,24 @@ def _assess_demand(cim_data) -> dict:
 
     occ = cim_data.physical_occupancy
     if occ:
-        if occ >= 0.90:
+        # `max(...)` is the same guard as the density tier below: `strong`
+        # and `healthy` are independently settings-editable, and
+        # `GATES["min_physical_occupancy"]` is Gate 2's hard FAIL
+        # threshold. Without the floor, either tier set below the gate
+        # would let a deal that fails Gate 2 read as a demand positive
+        # ("Strong"/"Healthy" occupancy) right next to it. On the
+        # defaults (0.95/0.90/0.85 vs 0.75) this is a no-op.
+        floor = GATES["min_physical_occupancy"]
+        strong = max(OCCUPANCY_TIERS["strong"], floor)
+        healthy = max(OCCUPANCY_TIERS["healthy"], floor)
+        if occ >= strong:
             positives.append(f"Strong occupancy at {occ:.1%} — demand exceeds supply.")
-        elif occ >= 0.85:
+        elif occ >= healthy:
             positives.append(f"Healthy occupancy at {occ:.1%} — stable demand.")
         else:
-            negatives.append(f"Occupancy at {occ:.1%} — below stabilized threshold.")
+            negatives.append(f"Occupancy at {occ:.1%} — below the "
+                             f"{healthy:.0%} stabilized "
+                             f"threshold.")
 
     pop = cim_data.population_3mi
     # `max(...)` is the guard that keeps the two settings from contradicting

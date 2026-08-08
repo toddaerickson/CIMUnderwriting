@@ -413,9 +413,13 @@ def main():
     stage_extract(ctx)
     stage_parse(ctx)
     stage_enrich(ctx, comp_db)
-    # A deal with no NRSF or no TTM NOI stops here rather than producing
-    # a memo and a workbook full of numbers derived from a fiction (item
-    # T Category 4). Exit 2 distinguishes "this CIM cannot be
+    # A deal missing NRSF, TTM NOI, or physical occupancy (item T
+    # Category 5) stops here rather than producing a memo and a workbook
+    # full of numbers derived from a fiction (item T Category 4).
+    # Occupancy is refused only on ABSENCE (`is None`): a stated 0% is
+    # real data — an honestly-reported pre-lease-up asset — that the 75%
+    # demand gate downstream refuses with the right reason, not a reason
+    # to stop here. Exit 2 distinguishes "this CIM cannot be
     # underwritten" from exit 1's "no PDF was selected".
     from analysis.fills import MissingUnderwritingInput
     try:

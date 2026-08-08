@@ -532,16 +532,66 @@ oracle" discipline applied to the whole pipeline.
    plus the resolution and the stamp-popping guard in `webapp/services.py`)
    now key on `is None`. The rest of this category is untouched.
 4. **Loud fallbacks.** One `assumption_fill_log`: any fallback that fires
-   (occupancy, market rent, mgmt fee, entry cap) records (field, value used,
-   source key) and surfaces in the results UI and the memo appendix.
+   (~~occupancy,~~ market rent, mgmt fee, entry cap) records (field, value
+   used, source key) and surfaces in the results UI and the memo appendix.
+   **Occupancy came off this list in item T Category 5: the
+   assumed-occupancy constants were deleted outright, so a CIM missing
+   physical occupancy is refused (`analysis.fills.require_underwritable`),
+   not logged as a fallback.**
    `nrsf or 1` and `ttm_noi or 100_000` are deleted — a deal without NRSF or
    NOI fails; it is not underwritten as a 1-SF / $100k fiction. The
    zero-rent-gap market-rent fallback gains an explicit flag: "rent ramp
    excluded — no market-rent data."
-5. **Reconciliations, decided once in config:** "stabilized" occupancy —
-   0.85 (gate) vs 0.88 (VA target/template) vs 0.90/0.93 (value_add
-   targets) — and the mgmt-fee adjustment target (benchmark floor vs 5%).
-   E3b reads whatever keys exist; this item owns the definitions.
+5. **Reconciliations, decided once in config:**
+   ~~"stabilized" occupancy — 0.85 (gate) vs 0.88 (VA target/template) vs
+   0.90/0.93 (value_add targets) — and the mgmt-fee adjustment target
+   (benchmark floor vs 5%). E3b reads whatever keys exist; this item owns
+   the definitions.~~
+   The mgmt-fee half is **DONE** — closed earlier, in PR #43:
+   `MGMT_FEE_TARGET_PCT` (0.06) with `resolve_mgmt_fee_target` as the one
+   resolver, so `analysis/financials.py` (adjusts an understated fee UP)
+   and `analysis/value_add.py` (sizes a renegotiation saving DOWN) can
+   never resolve the target differently.
+   The occupancy half is **REGISTERED, not reconciled** — not what this
+   clause asked for. `config.OCCUPANCY_KEYS` names all nine occupancy
+   numbers in the codebase, with an AST guard
+   (`test_no_occupancy_threshold_survives_as_a_bare_literal`) forbidding a
+   tenth from appearing as a bare literal, and `config.OCCUPANCY_TIERS`
+   replaced the bare 0.95/0.90/0.85 narrative literals in
+   `analysis/market.py` and `analysis/risks.py`. But the nine were never
+   collapsed to one value — the same call Category 2 made on the three
+   age ladders (`ASSET_AGE_LADDERS`, in config.py): each occupancy number
+   answers a different underwriting question (is demand proven at all vs.
+   has a post-2020 vintage ever stabilized vs. how the number reads in
+   the narrative vs. what a scenario assumes vs. where the value-add
+   engine ramps to...), and forcing them to one number is
+   re-underwriting, which this item's own scope excludes. The measurement
+   that decided it, on the value_add fixture (EGR-forced probe — occupancy,
+   the rent override, unit mix and GPR all removed, so both constants fire
+   on the same deal): when the two constants AGREE, the choice of number
+   moves base IRR by 0.29bps (0.4812%-0.4841% across 0.80/0.85/0.90); two
+   of them disagreeing — as `VA_DEFAULT_OCCUPANCY` (0.80) and
+   `VA_EGR_ASSUMED_OCCUPANCY` (0.85) did, both firing in the SAME run —
+   moves it 14-27bps (0.3417% for the mismatch that actually shipped,
+   0.2160% for the widest one). Inside that probe the disagreement is
+   48-92x bigger than the agreement-spread, but that ratio belongs to the
+   probe, not to occupancy assumptions generally: isolating a single
+   constant (only the stated occupancy blanked; unit mix and the EGR
+   route both stay intact) swings base IRR 0.0706%-0.3254%, roughly
+   25bps — about 88x the 0.29bps figure, because the probe's
+   near-zero agreement-spread comes from the ramp start and the implied
+   in-place rent moving in OFFSETTING directions, an effect that
+   disappears once only one constant is live. So the fix was never "pick
+   0.80 or 0.85 or 0.90" — even the smaller, agreement-case spread is not
+   a safe number to lean on. What this clause did not
+   anticipate: `VA_DEFAULT_OCCUPANCY` and `VA_EGR_ASSUMED_OCCUPANCY` were
+   deleted outright rather than folded into the register — there is no
+   Python-side assumed occupancy left at all (see
+   `analysis.fills.require_underwritable`, which now refuses a deal with
+   no stated physical occupancy instead of defaulting one in).
+   `config.XLSM_TEMPLATE_INPUTS["assumed_physical_occupancy"]` (0.90) is
+   the one surviving assumed occupancy anywhere in the codebase, and
+   belongs to item E3b, not this clause.
 6. **Memo assumptions appendix.** Every number that moved an output, its
    value, and its provenance (config default / ConfigOverride / deal
    override / CIM datum / fallback + flag) rendered as a memo section —
@@ -570,8 +620,11 @@ threshold), tests.
   delta changes every output the audit found divergent (step-up flag,
   population gate and labels, memo recommendation threshold, sensitivity
   coloring).
-- Fallback drill: a fixture missing occupancy / market rent / NRSF produces
-  the fill log in the UI and the memo, and hard-fails on NRSF/NOI.
+- Fallback drill: a fixture missing ~~occupancy /~~ market rent / NRSF
+  produces the fill log in the UI and the memo, and hard-fails on
+  NRSF/NOI **and occupancy** (item T Category 5 moved occupancy from the
+  logged-fallback list to the hard-fail list — a fixture missing it now
+  refuses the deal instead of producing a fill-log entry).
 - The memo appendix lists every assumption its own run used, with
   provenance — an IC reviewer can audit every number in one place.
 

@@ -16,35 +16,29 @@ stabilized NOI, development spread, and monthly detail.
 from dataclasses import dataclass
 
 import numpy_financial as npf
-from analysis.fills import (EGR_OCCUPANCY_ASSUMED, EXPENSES_ABSENT, Fill,
-                            MARKET_RENT_ABSENT, OCCUPANCY_ABSENT,
-                            UNIT_DOLLARS, UNIT_PCT, UNIT_PSF_MO, to_dicts)
+from analysis.fills import (EXPENSES_ABSENT, Fill, MARKET_RENT_ABSENT,
+                            MissingUnderwritingInput, UNIT_DOLLARS, UNIT_PCT,
+                            UNIT_PSF_MO, to_dicts)
 from analysis.valuation import (COERCED_SCENARIOS, resolve_exit_cap,
                                 resolve_hold_years, resolve_market_cap,
                                 resolve_transaction_costs)
 from config import VALUE_ADD_SCENARIOS, VALUE_ADD_TRIGGERS
 from registry import ScenarioType
 
-#: Starting occupancy when the CIM states none, for the engine that
-#: models the lease-up. Item T Category 4 named it and logs it; it did
-#: NOT reconcile it, and the constant below is why that matters.
-VA_DEFAULT_OCCUPANCY = 0.80
-
-#: Occupancy assumed when in-place rent has to be backed out of EGR.
-#: **This is the SAME field as `VA_DEFAULT_OCCUPANCY` at a different
-#: number**, and they have disagreed since the initial commit. Category 4
-#: makes the disagreement visible rather than resolving it: backlog item
-#: T scope clause 5 owns "stabilized occupancy, decided once" and picking
-#: a winner here would re-underwrite every thin deal as a tidy-up. Do not
-#: quietly collapse these into one constant — decide them.
+#: Physical occupancy is NOT assumed here, and that is Category 5's
+#: decision (2026-08-06), not an oversight. Two constants used to answer
+#: this one question at different numbers — 0.80 where the lease-up ramp
+#: starts, 0.85 where in-place rent is backed out of EGR — and both fired
+#: in the SAME run, so a deal with no stated occupancy was underwritten
+#: as 80% and 85% full at once. Measured: when the two agree the choice of
+#: number is worth 0.29bps of base IRR; when they disagree it is worth
+#: 14-27. So the answer was neither number. `analysis.fills.
+#: require_underwritable` refuses the deal and the analyst enters it.
 #:
-#: There is a THIRD, at 0.90: `config.XLSM_TEMPLATE_INPUTS[
-#: "assumed_physical_occupancy"]`, used by `output/template_writer.py`,
-#: which discloses it to a Python log and to no reader. It is not routed
-#: into the fill log here because `template_writer.py` is explicitly out
-#: of item T's scope (folded into item E3b) — but it is the same field
-#: assumed at a third number, and Category 5 must decide all three.
-VA_EGR_ASSUMED_OCCUPANCY = 0.85
+#: `config.XLSM_TEMPLATE_INPUTS["assumed_physical_occupancy"]` (0.90) is
+#: the same field at a THIRD number and still stands, because
+#: `output/template_writer.py` is item E3b's, not item T's. It inherits
+#: this decision; it does not get to re-take it.
 
 
 def detect_value_add(cim_data) -> bool:
@@ -431,20 +425,17 @@ def _resolve_va_inputs(cim_data, financial_analysis: dict) -> VAInputs:
                    "is NOT in these returns."),
             detail={"in_place_rent_psf": in_place_rent_psf}))
 
-    # `is None`, not truthiness. A stated 0% physical occupancy is an
-    # honestly-reported pre-lease-up asset and it passes `detect_value_add`
-    # — the falsy check silently re-let it to 80% and underwrote the ramp
-    # from there. Same defect class already recorded against the solver's
-    # target IRR and the management-fee target.
+    # No fallback (Category 5). Unreachable through `engine.run_analysis`
+    # and `run.stage_analyze`, which both call `require_underwritable`
+    # first — but this function is also called directly, and a `None`
+    # here would otherwise surface as a TypeError deep inside the monthly
+    # loop rather than as the refusal it actually is.
     current_occ = cim_data.physical_occupancy
     if current_occ is None:
-        current_occ = VA_DEFAULT_OCCUPANCY
-        fills.append(Fill(
-            field="physical_occupancy", value_used=VA_DEFAULT_OCCUPANCY,
-            source_key=OCCUPANCY_ABSENT, unit=UNIT_PCT,
-            label=("The lease-up starts here, so the occupancy gain driving "
-                   "these returns is assumed, not measured."),
-            detail={"target_note": "ramps to the scenario's target occupancy"}))
+        raise MissingUnderwritingInput(
+            "Physical Occupancy missing, so the value-add engine has no "
+            "starting point for the lease-up ramp. Enter it on the "
+            "Assumptions page and re-run.")
 
     adj_expenses = financial_analysis.get("expense_analysis", {}).get(
         "total_adjusted_expenses", 0)
@@ -520,22 +511,13 @@ def _compute_in_place_rent_psf(cim_data) -> tuple:
     if gpr:
         return gpr / (nrsf * 12), None
 
-    # Last resort: use EGR adjusted for vacancy. A stated 0% occupancy
-    # beside a non-zero EGR is contradictory data, not an input to divide
-    # by, so it falls through to "no figure" rather than raising.
+    # No assumed occupancy (Category 5). A missing occupancy is refused
+    # upstream; reaching here without one means a direct caller, and
+    # "no figure" is what this function has always returned for an input
+    # it cannot compute from.
     egr = cim_data.ttm_egr
     occ = cim_data.physical_occupancy
-    assumed = occ is None
-    if assumed:
-        occ = VA_EGR_ASSUMED_OCCUPANCY
     if egr and occ:
-        rent = egr / (nrsf * 12 * occ)
-        return rent, (Fill(
-            field="physical_occupancy", value_used=VA_EGR_ASSUMED_OCCUPANCY,
-            source_key=EGR_OCCUPANCY_ASSUMED, unit=UNIT_PCT,
-            label=(f"In-place rent had to be backed out of EGR, which needs "
-                   f"an occupancy. Gives ${rent:,.2f}/SF/mo, the figure every "
-                   f"rent gap in the model is measured against."),
-            detail={"ttm_egr": egr, "nrsf": nrsf}) if assumed else None)
+        return egr / (nrsf * 12 * occ), None
 
     return 0.0, None

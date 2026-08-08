@@ -45,6 +45,32 @@ POPULATION_TIERS = {
     "strong_density": 100_000,     # top narrative tier — "strong demand driver"
 }
 
+# ── Occupancy narrative tiers ───────────────────────────────────────
+#
+# NARRATIVE tiers, not screens — the same lane as POPULATION_TIERS above.
+# `GATES["min_physical_occupancy"]` is the only occupancy number that
+# passes or fails a deal; these three grade how an occupancy READS in the
+# memo's demand narrative and risk list.
+#
+# `healthy` (0.85) EQUALS `GATES["stabilized_occupancy"]` today and is
+# deliberately a separate key: one asks "does this read as stable demand?"
+# and the other asks "has this post-2020 vintage ever stabilized?".
+# Collapsing them would tie the memo's prose to a screening threshold, so
+# that tuning the narrative silently re-screens deals.
+# `test_occupancy_narrative_tiers_are_config_not_the_stabilization_gate`
+# is what stops that.
+#
+# Ordering invariant: over_occupied >= strong >= healthy. These are
+# settings-editable, so two independently valid edits can invert the pair
+# and produce a band no occupancy can land in — the same composed-value
+# hole `registry.EXPENSE_RATIO_LIMITS` closed for the expense clamp.
+# `test_the_occupancy_tiers_stay_ordered` is the guard.
+OCCUPANCY_TIERS = {
+    "over_occupied": 0.95,   # above → rate suppression risk (rents too low)
+    "strong":        0.90,   # at/above → "demand exceeds supply"
+    "healthy":       0.85,   # at/above → "stable demand"
+}
+
 # Sensitivity-grid green band. PRESENTATION ONLY — nothing screens on it.
 # The grid's other boundary is `GATES["min_irr_5yr"]`, so a cell reads
 # green above this, yellow down to the gate, red below it. Kept an
@@ -540,6 +566,58 @@ RISK_TRIGGERS = {
 # separate, per-value decision"). Do not snap them as a tidy-up.
 ASSET_AGE_LADDERS = (
     "registry.AGE_BANDS", "RENOVATION_COST", "RISK_TRIGGERS",
+)
+
+# ── The occupancy register (item T Category 5) ──────────────────────
+# Every occupancy LEVEL in the model, and the question each answers.
+# They are deliberately NOT one number: Category 5 registered them the
+# way Category 2 registered the three age ladders, because collapsing
+# them is re-underwriting and item T's scope excludes that.
+#
+# "Level", not "number", and the distinction is the register's whole
+# point. Two occupancy-denominated thresholds are deliberately OUT:
+# `GATES["econ_phys_spread_flag"]` and `GATES["rate_bridge_gap_
+# threshold"]` (both 0.10) measure the DIFFERENCE between two
+# occupancies, not a point on the scale. Registering them would make
+# this "anything occupancy-adjacent", and a register that means
+# everything cannot say a fourth ladder appeared. The AST guard below
+# is scoped to match: it flags an occupancy compared to a bare literal,
+# which is what a LEVEL looks like in code.
+#
+#   GATES["min_physical_occupancy"]              is demand proven at all?
+#   GATES["stabilized_occupancy"]                has a post-2020 vintage
+#                                                ever stabilized?
+#   OCCUPANCY_TIERS                              how does this occupancy
+#                                                READ? (narrative only)
+#   SCENARIO_DEFAULTS[*]["stabilized_occ"]       what the static DCF
+#                                                assumes per scenario
+#   VALUE_ADD_TRIGGERS["max_occupancy"]          below this the deal is
+#                                                a value-add deal
+#   VALUE_ADD_SCENARIOS[*]["target_occupancy"]   where the lease-up
+#                                                engine ramps TO
+#   VALUE_ADD_ASSUMPTIONS["occupancy_target"]    what a well-run asset
+#                                                reaches (opportunity
+#                                                sizing, not the engine)
+#   VALUE_ADD_ASSUMPTIONS["ecri_min_occupancy"]  full enough to push
+#                                                rents without bleeding
+#   XLSM_TEMPLATE_INPUTS["assumed_physical_occupancy"]
+#                                                the workbook's fallback
+#                                                — item E3b's, and the
+#                                                LAST assumed occupancy
+#                                                left anywhere
+#
+# There is no "assumed occupancy" in the Python model and that is
+# deliberate: see `model/value_add_model.py`'s Category 5 note.
+OCCUPANCY_KEYS = (
+    'GATES["min_physical_occupancy"]',
+    'GATES["stabilized_occupancy"]',
+    "OCCUPANCY_TIERS",
+    'SCENARIO_DEFAULTS[*]["stabilized_occ"]',
+    'VALUE_ADD_TRIGGERS["max_occupancy"]',
+    'VALUE_ADD_SCENARIOS[*]["target_occupancy"]',
+    'VALUE_ADD_ASSUMPTIONS["occupancy_target"]',
+    'VALUE_ADD_ASSUMPTIONS["ecri_min_occupancy"]',
+    'XLSM_TEMPLATE_INPUTS["assumed_physical_occupancy"]',
 )
 
 # ── Comp Database Parameters ───────────────────────────────────────

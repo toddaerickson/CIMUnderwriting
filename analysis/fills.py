@@ -18,11 +18,16 @@ which item T's own scope excludes. It makes them **say their name**:
     source_key  WHERE that substitute came from, from a closed vocabulary
     label       the sentence a reader sees, in the memo and on screen
 
-Two fallbacks are deleted rather than logged, because no honest label
-exists for them: `nrsf or 1` and `ttm_noi or 100_000`. A one-square-foot
-property and a $100k NOI are not conservative estimates, they are
-fictions that silently rescale every $/SF benchmark and every solver
-bracket in the run. `require_underwritable` refuses the deal instead.
+Three fallbacks are deleted rather than logged, because no honest label
+exists for them: `nrsf or 1`, `ttm_noi or 100_000`, and an assumed
+physical occupancy. A one-square-foot property and a $100k NOI are not
+conservative estimates, they are fictions that silently rescale every
+$/SF benchmark and every solver bracket in the run. Occupancy diverges
+from the other two in HOW it is checked — `is None`, not falsy, because
+a stated 0% is an honestly-reported pre-lease-up asset that the demand
+gate already refuses correctly, while absence is what used to render as
+a TBD gate and proceed. `require_underwritable` refuses the deal
+instead, in all three cases.
 
 ## Where a fill is recorded
 
@@ -72,8 +77,6 @@ CC_PCT_ABSENT = "cc_pct_absent"
 AGE_BAND_FALLBACK = "age_band_fallback"
 ASSET_CLASS_DEFAULT = "asset_class_default"
 EXPENSE_RATIO_DEFAULT = "expense_ratio_default"
-OCCUPANCY_ABSENT = "occupancy_absent"
-EGR_OCCUPANCY_ASSUMED = "egr_occupancy_assumed"
 MARKET_RENT_ABSENT = "market_rent_absent"
 EXPENSES_ABSENT = "expenses_absent"
 
@@ -85,9 +88,11 @@ EXPENSES_ABSENT = "expenses_absent"
 #: first, then the income statement, then the value-add engine's own
 #: inputs, which is the order a reader asks the questions in. Keeping the
 #: order and the prose in ONE dict rather than a tuple beside a dict is
-#: not tidiness: two structures listing the same eleven keys is the
+#: not tidiness: two structures listing the same keys is the
 #: duplicated-constant defect this very item exists to close, and it
 #: would need a test whose only job is to police the two for drift.
+#: (`SOURCE_KEYS` below is derived FROM this dict for exactly that
+#: reason — its count can never drift from this one's.)
 SOURCE_LABELS = {
     ASSET_CLASS_DEFAULT: "config default (asset class)",
     AGE_BAND_FALLBACK: "config default (age band)",
@@ -97,8 +102,6 @@ SOURCE_LABELS = {
     MGMT_FEE_TARGET: "config MGMT_FEE_TARGET_PCT",
     BENCHMARK_LOW: "benchmark floor x NRSF",
     EXPENSE_RATIO_DEFAULT: "config EXPENSE_RATIO default",
-    OCCUPANCY_ABSENT: "value-add engine default",
-    EGR_OCCUPANCY_ASSUMED: "assumed to back rent out of EGR",
     MARKET_RENT_ABSENT: "in-place rent",
     EXPENSES_ABSENT: "no expenses booked",
 }
@@ -149,30 +152,60 @@ class MissingUnderwritingInput(ValueError):
     """
 
 
-#: The two inputs with no defensible fallback. NRSF divides every
-#: benchmark in the expense analysis and multiplies every $/SF rate;
-#: TTM NOI sets the solver's search bracket. Substituting either does not
-#: make the answer approximate, it makes it unrelated to the asset.
-REQUIRED_UNDERWRITING_FIELDS = (("NRSF", "nrsf"), ("TTM NOI", "ttm_noi"))
+def _absent_or_zero(value) -> bool:
+    """Missing when falsy.
+
+    `extract.parser._parse_number` returns 0.0 when it cannot read a
+    figure, AND that 0.0 counts as populated in the extraction report. An
+    `is None` gate would wave a 0-SF property straight into every
+    division this refuses.
+    """
+    return not value
+
+
+def _absent_only(value) -> bool:
+    """Missing only when absent — a stated zero is data.
+
+    Occupancy diverges from the two fields above deliberately (Category 5
+    decision 3). A 0% physical occupancy is an honestly-reported
+    pre-lease-up asset, and `analysis/filters.py` already refuses it as
+    unproven demand with that as the stated reason. Refusing it here
+    instead would give a correct outcome the wrong explanation.
+    """
+    return value is None
+
+
+#: The three inputs with no defensible fallback, each with the predicate
+#: that decides whether THIS field is missing. NRSF divides every
+#: benchmark in the expense analysis and multiplies every $/SF rate; TTM
+#: NOI sets the solver's search bracket; the occupancy gain is what a
+#: value-add deal's return IS. Substituting any of them does not make the
+#: answer approximate, it makes it unrelated to the asset.
+REQUIRED_UNDERWRITING_FIELDS = (
+    ("NRSF", "nrsf", _absent_or_zero),
+    ("TTM NOI", "ttm_noi", _absent_or_zero),
+    ("Physical Occupancy", "physical_occupancy", _absent_only),
+)
 
 
 def require_underwritable(cim_data) -> None:
     """Raise `MissingUnderwritingInput` unless the deal can be priced.
 
-    Falsy, not `is None`: `extract.parser._parse_number` returns 0.0 when
-    it cannot read a figure, so an unparseable NRSF arrives as zero AND
-    counts as populated in the extraction report. An `is None` gate would
-    wave a 0-SF property straight into every division this refuses.
+    Each field carries its own missing-ness test rather than sharing one,
+    because 0.0 means "unreadable" for NRSF and "empty building" for
+    occupancy. See `_absent_or_zero` and `_absent_only`.
     """
-    missing = [label for label, attr in REQUIRED_UNDERWRITING_FIELDS
-               if not getattr(cim_data, attr, None)]
+    missing = [label for label, attr, is_missing in REQUIRED_UNDERWRITING_FIELDS
+               if is_missing(getattr(cim_data, attr, None))]
     if not missing:
         return
     raise MissingUnderwritingInput(
         f"{' and '.join(missing)} missing from this deal, so it cannot be "
-        f"underwritten — every $/SF benchmark and the solver's price "
-        f"bracket are derived from those inputs. Enter them on the "
-        f"Assumptions page and re-run.")
+        f"underwritten — every $/SF benchmark divides by NRSF, the solver's "
+        f"price bracket derives from TTM NOI, and an assumed occupancy "
+        f"invents the very gain a value-add return is made of. Enter "
+        f"{'it' if len(missing) == 1 else 'them'} on the Assumptions page "
+        f"and re-run.")
 
 
 def format_value(fill: "Fill") -> str:

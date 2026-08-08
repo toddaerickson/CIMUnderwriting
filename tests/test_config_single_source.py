@@ -222,6 +222,140 @@ def test_population_tiers_are_settings_editable_end_to_end():
     assert skipped == []
 
 
+# ── OCCUPANCY_TIERS — narrative grading, settings-editable ───────────
+
+def test_occupancy_narrative_tiers_are_config_not_the_stabilization_gate(
+        monkeypatch):
+    """`OCCUPANCY_TIERS["healthy"]` and `GATES["stabilized_occupancy"]`
+    are both 0.85 today and they are NOT the same number: one grades how
+    an occupancy reads in the memo's demand narrative, the other decides
+    whether a post-2020 vintage has ever stabilized.
+
+    Asserting 0.85 behaviour would pass against either. So move the tier
+    and leave the gate alone — only code reading the tier follows.
+    """
+    import config as cfg
+    from analysis.market import _assess_demand
+
+    cim = _thin_va_deal()
+    cim.physical_occupancy = 0.87
+
+    baseline = _assess_demand(cim)
+    assert any("Healthy occupancy" in p for p in baseline["positives"])
+
+    monkeypatch.setitem(cfg.OCCUPANCY_TIERS, "healthy", 0.88)
+    moved = _assess_demand(cim)
+
+    # 0.87 read as "healthy" at a 0.85 floor and is below it at 0.88
+    assert not any("Healthy occupancy" in p for p in moved["positives"])
+    assert any("stabilized threshold" in n for n in moved["negatives"])
+    # the GATE did not move
+    assert cfg.GATES["stabilized_occupancy"] == 0.85
+
+
+def test_the_occupancy_tiers_stay_ordered():
+    """Three independently editable settings that must stay ordered.
+    Per-field bounds cannot see this: 0.95/0.90/0.85 each sit inside
+    (0, 1) individually, and so do 0.85/0.90/0.95 — inverted, which
+    leaves `strong` unreachable and every occupancy reading as
+    "healthy" at best. Same composed-value hole the expense-ratio clamp
+    took three audit rounds to close.
+    """
+    import config as cfg
+
+    t = cfg.OCCUPANCY_TIERS
+    assert t["over_occupied"] >= t["strong"] >= t["healthy"], (
+        f"occupancy tiers out of order: {t}")
+
+
+def test_occupancy_tiers_are_settings_editable_end_to_end():
+    """The registry is what the settings page renders and what
+    `build_config_patch` validates against, so an unregistered key is
+    accepted by the form and then silently skipped at run time — the exact
+    "UI claims the override works" failure item T exists to kill.
+    `POPULATION_TIERS` is the precedent (see
+    test_population_tiers_are_settings_editable_end_to_end); OCCUPANCY_TIERS
+    was added to `_PATCHED_DICTS` but not to the registry, so a stored row
+    was silently dropped."""
+    from webapp.forms import (format_override_value, override_key_registry,
+                              parse_override_value)
+    from webapp.services import _PATCHED_DICTS, build_config_patch
+
+    reg = override_key_registry()
+    key = "OCCUPANCY_TIERS.healthy"
+    assert reg[key]["pct"] is True and reg[key]["int"] is False
+    # Decimal rates, not counts: 0.88 must round-trip as "88%", not "0.88".
+    assert parse_override_value(key, "88") == 0.88
+    assert format_override_value(key, 0.88) == "88%"
+
+    # In _PATCHED_DICTS, so the patch actually reaches the analysis modules
+    # that bound the dict at import.
+    assert "OCCUPANCY_TIERS" in _PATCHED_DICTS
+    patch, _solver, skipped = build_config_patch({key: 0.88})
+    assert patch == {"OCCUPANCY_TIERS": {"healthy": 0.88}}
+    assert skipped == []
+
+
+def test_the_occupancy_tier_can_no_longer_shadow_the_gate(mock_cim_data,
+                                                          monkeypatch):
+    """Mirrors `test_the_density_tier_can_no_longer_shadow_the_population_
+    gate`: raising `GATES["min_physical_occupancy"]` above the shipped
+    `strong`/`healthy` tiers must not leave a Gate-2-FAIL deal reading as
+    a demand positive. `_assess_demand` now takes
+    `max(OCCUPANCY_TIERS[...], min_physical_occupancy)` for both tiers.
+
+    92% sits above both default tiers (0.90/0.85) but below a 95% gate.
+    """
+    mock_cim_data.physical_occupancy = 0.92
+    monkeypatch.setitem(cfg.GATES, "min_physical_occupancy", 0.95)
+
+    demand = analyze_market(mock_cim_data)["demand_drivers"]
+    assert not any("Strong occupancy" in p for p in demand["positives"])
+    assert not any("Healthy occupancy" in p for p in demand["positives"])
+    assert any("below the 95% stabilized threshold" in n
+               for n in demand["negatives"])
+
+
+def test_an_occupancy_tier_set_below_the_gate_cannot_contradict_it(
+        mock_cim_data, monkeypatch):
+    """The same guard from the other direction, reproducing the finding
+    exactly: `healthy` lowered to 0.60 must not let a 70%-occupancy deal
+    — a Gate 2 FAIL — read "Healthy occupancy ... stable demand" beside
+    it. The negative note must also name the EFFECTIVE (floored)
+    threshold, not the raw config value the code did not apply.
+
+    BOTH faces matter here for the same reason the population fix's
+    docstring records: guarding `market.py` alone while `risks.py` reads
+    the same `OCCUPANCY_TIERS` dict leaves a second surface free to
+    contradict Gate 2 — that was a real defect caught in review on the
+    population guard. `risks.py`'s "Over-occupied" branch is an `elif`
+    sibling of two branches that already intercept `occ < floor` on
+    their own (the population guard's key has no such sibling), so the
+    only place its floor has room to bite is the vintage-ramp FAIL path
+    with occupancy pinned exactly at the floor — pin it there to prove
+    the `max()` is live, not dead code the elif chain already made moot.
+    """
+    mock_cim_data.physical_occupancy = 0.70
+    monkeypatch.setitem(cfg.OCCUPANCY_TIERS, "healthy", 0.60)
+
+    demand = analyze_market(mock_cim_data)["demand_drivers"]
+    assert not any("Healthy occupancy" in p for p in demand["positives"])
+    assert any("below the 75% stabilized threshold" in n
+               for n in demand["negatives"])
+
+    # The risks.py face: 75% occupancy (exactly the floor) with a
+    # post-2020 vintage still fails Gate 2 on the un-stabilized-vintage
+    # path, not the plain floor path. `over_occupied` dropped to 0.10
+    # must not still label it "over-occupied" beside that FAIL.
+    mock_cim_data.physical_occupancy = 0.75
+    mock_cim_data.year_built = 2022
+    monkeypatch.setitem(cfg.OCCUPANCY_TIERS, "over_occupied", 0.10)
+
+    risk = _risk(_risks_for(mock_cim_data),
+                "Over-occupied — potential rate suppression")
+    assert risk is None
+
+
 @pytest.mark.django_db
 def test_a_stored_override_row_reaches_the_analysis(mock_cim_data):
     """The whole chain, from a row in the database to a changed narrative:
@@ -2318,24 +2452,63 @@ def test_a_value_add_deal_with_market_rent_carries_no_such_flag(tmp_path):
                    for f in result.assumption_fill_log)
 
 
-def test_a_zero_occupancy_asset_is_not_quietly_re_let_to_eighty_percent():
-    """`or 0.80` treated an honestly-reported pre-lease-up asset as 80%
-    occupied and underwrote the ramp from there. `is None` is the fix,
-    and this is the case that separates the two — the defect class the
-    repo has already recorded against the solver's target IRR and the
-    management-fee target."""
+def test_a_zero_occupancy_asset_resolves_but_an_absent_one_is_refused():
+    """`or 0.80` used to treat an honestly-reported pre-lease-up asset as
+    80% occupied and underwrite the ramp from there; `is None` was the
+    first fix, distinguishing 0.0 (data) from `None` (absence) while
+    still assuming 80% on absence. Category 5 goes further and deletes
+    the assumption outright: absence is no longer a fallback, it is a
+    refusal — the same `is None`/falsy split, carried one step further.
+    """
+    from analysis.fills import MissingUnderwritingInput
     from model.value_add_model import _resolve_va_inputs
 
     cim = _thin_va_deal()
     cim.physical_occupancy = 0.0
     resolved = _resolve_va_inputs(cim, {})
     assert resolved.current_occ == 0.0
-    assert not any(f.source_key == "occupancy_absent" for f in resolved.fills)
+    assert not any(f.field == "physical_occupancy" for f in resolved.fills)
 
     cim.physical_occupancy = None
-    resolved = _resolve_va_inputs(cim, {})
-    assert resolved.current_occ == 0.80
-    assert any(f.source_key == "occupancy_absent" for f in resolved.fills)
+    with pytest.raises(MissingUnderwritingInput):
+        _resolve_va_inputs(cim, {})
+
+
+def test_absent_occupancy_is_refused_but_a_stated_zero_reaches_the_gate():
+    """Decision 3 of the Category 5 spec, and the reason
+    `require_underwritable` needed a per-field predicate.
+
+    `extract.parser._parse_number` returns 0.0 when it cannot read a
+    figure, which is why NRSF and TTM NOI are checked with a FALSY test.
+    Occupancy is different: a stated 0% is an honestly-reported
+    pre-lease-up asset, and `analysis/filters.py` already fails it
+    correctly as "unproven demand — below the 75% floor". Refusing it as
+    a MISSING input would give a true refusal the wrong reason.
+
+    Absence is the ununderwritable case: `filters.py` renders `None` as
+    a TBD gate, so before this change a deal with no occupancy sailed
+    through the whole model on a fabricated one.
+    """
+    import pytest
+    from analysis.fills import MissingUnderwritingInput, require_underwritable
+    from analysis.filters import evaluate_gates
+
+    cim = _thin_va_deal()
+
+    cim.physical_occupancy = None
+    with pytest.raises(MissingUnderwritingInput) as exc:
+        require_underwritable(cim)
+    assert "Physical Occupancy" in str(exc.value)
+
+    # A stated 0% is data, not absence: the input check passes it and the
+    # demand gate is what refuses it, naming the real reason. Gate 2 is
+    # the unproven-demand gate; the dicts key on an INT `gate` and a
+    # singular `note` (analysis/filters.py:126-131).
+    cim.physical_occupancy = 0.0
+    require_underwritable(cim)          # must NOT raise
+    gate_2 = next(g for g in evaluate_gates(cim) if g["gate"] == 2)
+    assert gate_2["result"] == "FAIL"
+    assert "75%" in gate_2["note"]
 
 
 def test_the_solver_objective_does_not_multiply_the_log(tmp_path):
@@ -2459,18 +2632,17 @@ def test_the_two_replacement_cost_copies_still_agree(tmp_path):
     assert gate_view == pytest.approx(memo_view)
 
 
-def test_the_two_value_add_occupancy_defaults_are_still_declared_apart():
-    """They disagree — 0.80 for the lease-up start, 0.85 for backing
-    in-place rent out of EGR, for the SAME field. Category 4 named them
-    so the disagreement is visible; backlog item T clause 5 owns
-    resolving it. This test fails if someone collapses them as a tidy-up,
-    which would re-underwrite every thin deal without deciding anything.
+def test_neither_value_add_occupancy_default_survives():
+    """Category 5 (2026-08-06) answered "which number?" with "none of
+    them". Two constants answered ONE question — where the lease-up ramp
+    starts, and what occupancy backs in-place rent out of EGR — at 0.80
+    and 0.85, and both fired in the same run. Re-introducing either is
+    re-introducing a number nobody chose for the deal being priced.
     """
     from model import value_add_model as vam
 
-    assert vam.VA_DEFAULT_OCCUPANCY == 0.80
-    assert vam.VA_EGR_ASSUMED_OCCUPANCY == 0.85
-    assert vam.VA_DEFAULT_OCCUPANCY != vam.VA_EGR_ASSUMED_OCCUPANCY
+    assert not hasattr(vam, "VA_DEFAULT_OCCUPANCY")
+    assert not hasattr(vam, "VA_EGR_ASSUMED_OCCUPANCY")
 
 
 def test_the_value_add_fills_survive_the_json_boundary(tmp_path):
@@ -2621,33 +2793,157 @@ def test_the_exit_cap_provenance_fills_follow_the_published_flags(tmp_path):
     assert fills.ASSET_CLASS_DEFAULT not in keys
 
 
-def test_the_egr_occupancy_assumption_is_logged_beside_the_other_one(tmp_path):
+def test_an_egr_backed_rent_with_no_occupancy_is_refused_not_assumed(tmp_path):
     """A deal with no unit mix and no GPR backs in-place rent out of EGR,
-    which needs an occupancy the CIM did not state. The SAME field is
-    then assumed twice in one run at two different numbers — 0.85 here,
-    0.80 for the lease-up start — and both rows appear, because that
-    contradiction on one page is the evidence Category 5 needs.
+    which needs an occupancy. That USED to be the case where the SAME
+    field got assumed twice in one run at two different numbers — 0.85
+    here, 0.80 for the lease-up start. Category 5 deleted both: now an
+    absent occupancy is refused before either fallback fires, and a
+    stated one resolves cleanly with no occupancy fill at all.
 
-    MUTATION: drop the fill from `_compute_in_place_rent_psf`."""
-    from analysis import fills
+    MUTATION: reintroduce either assumed-occupancy fallback."""
+    from analysis.fills import MissingUnderwritingInput
     from model.value_add_model import _resolve_va_inputs
 
     cim = _thin_va_deal()
     cim.unit_mix = []
     cim.ttm_gpr = None
     cim.ttm_egr = 430_000
-    cim.physical_occupancy = None
 
-    resolved = _resolve_va_inputs(cim, {})
-    logged = {(f.source_key, f.value_used) for f in resolved.fills}
-    assert (fills.EGR_OCCUPANCY_ASSUMED, 0.85) in logged
-    assert (fills.OCCUPANCY_ABSENT, 0.80) in logged
-    assert resolved.in_place_rent_psf == pytest.approx(
-        430_000 / (45_000 * 12 * 0.85))
+    cim.physical_occupancy = None
+    with pytest.raises(MissingUnderwritingInput):
+        _resolve_va_inputs(cim, {})
 
     # stated occupancy: the rent is backed out of the real number and
-    # only the value-add engine's own default is missing
+    # neither occupancy fill exists to be logged any more
     cim.physical_occupancy = 0.70
-    logged = {f.source_key for f in _resolve_va_inputs(cim, {}).fills}
-    assert fills.EGR_OCCUPANCY_ASSUMED not in logged
-    assert fills.OCCUPANCY_ABSENT not in logged
+    resolved = _resolve_va_inputs(cim, {})
+    assert resolved.in_place_rent_psf == pytest.approx(
+        430_000 / (45_000 * 12 * 0.70))
+    assert all(f.field != "physical_occupancy" for f in resolved.fills)
+
+
+# ── Item T Category 5: the occupancy register ────────────────────────
+
+def test_no_occupancy_threshold_survives_as_a_bare_literal():
+    """`config.OCCUPANCY_KEYS` is only worth having if it is complete.
+    Category 5 decided these numbers stay APART (they answer different
+    questions); a fourth one appearing quietly in some module is not a
+    decision, it is the drift item T exists to stop.
+
+    Walk `analysis/`, `model/` and `output/` and fail on any comparison of
+    an occupancy against a numeric literal.
+
+    EXEMPT: comparison against 0. `value_add.py` reads `occ > 0` as a
+    divide-by-zero guard before `occ_delta / occ`, and `checks.py` bounds
+    occupancy against 0 and 1 for validity. Neither invents a threshold,
+    and a guard that flags them gets deleted rather than obeyed.
+
+    `is_occ` unwraps two disguises found live in this codebase, not
+    hypothetically: `output/template_writer.py` writes
+    `float(occupancy) >= float(params["stabilized_occ"])`, and
+    `target_occ` (a bare local, not in the name set below) sits right next
+    to `params["target_occupancy"]` in both `model/value_add_model.py` and
+    `output/memo_writer.py`. A guard that only sees `Name` nodes for a
+    fixed spelling misses `float(occ)`, `round(occ, 2)`, dict/subscript
+    reads of an occupancy key, and any local named after the pattern
+    those files already use — each is the same "fourth number" the
+    register exists to catch, just wearing a disguise.
+    """
+    import ast
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parent.parent
+    offenders = []
+
+    # Bare local/attribute names that hold an occupancy fraction.
+    OCC_NAMES = {"occ", "current_occ", "target_occ", "phys", "econ",
+                 "physical_occupancy", "economic_occupancy", "occupancy"}
+
+    # Dict/subscript keys that hold an occupancy fraction — covers
+    # `params["target_occupancy"]`, `base.get("current_occupancy")`'s
+    # subscript cousins, etc. Superset of OCC_NAMES plus the keys that
+    # only ever appear as dict keys, never as a bare local.
+    OCC_KEYS = OCC_NAMES | {
+        "current_occupancy", "target_occupancy", "stabilized_occ",
+        "occupancy_target", "max_occupancy", "ecri_min_occupancy",
+        "assumed_physical_occupancy",
+    }
+
+    def is_occ(node):
+        if isinstance(node, ast.Call):
+            # float(occ), round(occ, 2) — the call itself carries no
+            # identity; whatever it wraps does.
+            return any(is_occ(arg) for arg in node.args)
+        if isinstance(node, ast.Name):
+            return node.id in OCC_NAMES
+        if isinstance(node, ast.Attribute):
+            return node.attr in ("physical_occupancy", "economic_occupancy")
+        if isinstance(node, ast.Subscript):
+            key = node.slice
+            return (isinstance(key, ast.Constant)
+                    and isinstance(key.value, str)
+                    and key.value in OCC_KEYS)
+        return False
+
+    def is_threshold_num(node):
+        """A bare number that is not 0 or 1 — see the exemption above."""
+        return (isinstance(node, ast.Constant)
+                and isinstance(node.value, (int, float))
+                and not isinstance(node.value, bool)
+                and node.value not in (0, 1))
+
+    for pkg in ("analysis", "model", "output"):
+        for path in sorted((root / pkg).glob("*.py")):
+            tree = ast.parse(path.read_text(), filename=str(path))
+            for node in ast.walk(tree):
+                if not isinstance(node, ast.Compare):
+                    continue
+                left_occ = is_occ(node.left)
+                right_occ = any(is_occ(c) for c in node.comparators)
+                hit = ((left_occ and any(is_threshold_num(c)
+                                         for c in node.comparators))
+                       or (right_occ and is_threshold_num(node.left)))
+                if hit:
+                    offenders.append(
+                        f"{path.relative_to(root)}:{node.lineno} — "
+                        f"{ast.unparse(node)}")
+
+    assert not offenders, (
+        "occupancy compared to a bare literal; declare the threshold in "
+        "config.py and list it in OCCUPANCY_KEYS:\n  "
+        + "\n  ".join(offenders))
+
+
+def test_the_occupancy_register_names_every_occupancy_key_that_exists():
+    """A register that silently omits a key is worse than none — it reads
+    as completeness. Every config key holding an occupancy must appear in
+    OCCUPANCY_KEYS.
+    """
+    import config as cfg
+
+    named = set(cfg.OCCUPANCY_KEYS)
+    missing = []
+
+    for key in ("min_physical_occupancy", "stabilized_occupancy"):
+        if f'GATES["{key}"]' not in named:
+            missing.append(f'GATES["{key}"]')
+    if "OCCUPANCY_TIERS" not in named:
+        missing.append("OCCUPANCY_TIERS")
+    for dict_name, inner in (
+            ("SCENARIO_DEFAULTS", "stabilized_occ"),
+            ("VALUE_ADD_SCENARIOS", "target_occupancy")):
+        for params in getattr(cfg, dict_name).values():
+            if inner in params and f'{dict_name}[*]["{inner}"]' not in named:
+                missing.append(f'{dict_name}[*]["{inner}"]')
+                break
+    for dict_name, inner in (
+            ("VALUE_ADD_TRIGGERS", "max_occupancy"),
+            ("VALUE_ADD_ASSUMPTIONS", "occupancy_target"),
+            ("VALUE_ADD_ASSUMPTIONS", "ecri_min_occupancy"),
+            ("XLSM_TEMPLATE_INPUTS", "assumed_physical_occupancy")):
+        if inner in getattr(cfg, dict_name) and \
+                f'{dict_name}["{inner}"]' not in named:
+            missing.append(f'{dict_name}["{inner}"]')
+
+    assert not missing, f"occupancy keys absent from OCCUPANCY_KEYS: {missing}"

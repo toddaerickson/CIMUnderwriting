@@ -129,7 +129,10 @@ output/
   still in ramp (< 85% physical). High-physical/low-economic occupancy
   (spread ≥ 10 pts) is the target mismanagement value-add profile, not an
   exclusion — always compare economic vs physical occupancy; a broker
-  quoting one occupancy number is almost always quoting physical.
+  quoting one occupancy number is almost always quoting physical. A CIM
+  that does not state physical occupancy at all is refused outright
+  (`analysis.fills.require_underwritable`, CLI exit 2) — it used to render
+  as a TBD gate and proceed on an assumed number; see design decision 9.
 - Watch: deals whose entire bridge is ECRI in a falling street-rate market —
   the in-place-to-market gap closes from above; verify street-rate trend.
 - Asking price ≤ replacement cost
@@ -245,6 +248,41 @@ output/
    every price it evaluated and reports an observed inversion as
    `monotonicity_warning`; `coerced_region` beside it is ORDINARY DATA
    that fires on most deals, so nothing may raise a UI caveat off it.
+9. **Occupancy is never assumed.** Physical occupancy joins NRSF and TTM
+   NOI as a required underwriting input in
+   `analysis.fills.require_underwritable`: a CIM that does not state it is
+   refused at `engine.run_analysis` and `run.stage_analyze` (CLI exit 2)
+   instead of rendering a TBD gate and proceeding, and the analyst enters
+   it by hand on the Assumptions page. It is tested with `is None`, NOT
+   the falsy check NRSF/TTM NOI use — a stated 0% is an honestly-reported
+   pre-lease-up asset that the 75% demand gate already refuses with the
+   right reason; an `is None` miss there would refuse a real asset for the
+   wrong one. `VA_DEFAULT_OCCUPANCY` (0.80) and `VA_EGR_ASSUMED_OCCUPANCY`
+   (0.85) are deleted outright rather than reconciled to one number — two
+   constants answering the same question at different values, and BOTH
+   fired in the same run. Measured on the value_add fixture (EGR-forced
+   probe: occupancy, the rent override, unit mix and GPR all removed, so
+   both constants fire on the same deal): when the two constants AGREE,
+   the choice of number barely moves the result (base IRR 0.4812%–0.4841%
+   across 0.80/0.85/0.90, 0.29bps of spread — small because the assumed
+   occupancy moves the ramp start and the implied in-place rent in
+   OFFSETTING directions); it's the two constants DISAGREEING that moves
+   it — the mismatch that actually shipped (0.80 vs 0.85) cost 14bps
+   (down to 0.3417%), and the widest mismatch (0.80 vs 0.90) cost 27bps
+   (down to 0.2160%). Inside that probe the disagreement is 48-92x bigger
+   than the agreement-spread, but that ratio is a property of the EGR
+   probe, not of occupancy assumptions generally: isolating a SINGLE
+   constant (only the stated occupancy blanked; unit mix and the EGR
+   route both stay intact) swings base IRR 0.0706%–0.3254% — about 25bps,
+   roughly 88x the 0.29bps figure, because the offsetting effect is gone
+   once only one constant is live. **So the fix was never "pick the right
+   number"** — even the smaller, agreement-case spread is not a safe
+   default to lean on, and reconciling to a single value chosen wrong
+   would still have shipped a live bug; only deleting the second constant
+   closes it.
+   `config.XLSM_TEMPLATE_INPUTS["assumed_physical_occupancy"]` (0.90) is
+   the one surviving assumed occupancy left anywhere in the codebase, and
+   belongs to item E3b, not this decision.
 
 ## Manual steps flagged by the program
 - Population verification (if not in CIM)
