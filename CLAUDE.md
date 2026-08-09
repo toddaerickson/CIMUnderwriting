@@ -283,6 +283,41 @@ output/
    `config.XLSM_TEMPLATE_INPUTS["assumed_physical_occupancy"]` (0.90) is
    the one surviving assumed occupancy left anywhere in the codebase, and
    belongs to item E3b, not this decision.
+10. **Single-operator and in-process are CHOSEN, not overlooked.** An
+    external UI review (2026-08-09) filed both as defects; they are not,
+    and the next review will file them again unless the reasoning is
+    written down.
+    - **No owner FK on `Deal`, and every `get_object_or_404(Deal, pk=pk)`
+      is unscoped.** Correct for a system whose signup is closed outright
+      (`webapp.auth_adapter.ClosedSignupAdapter.is_open_for_signup`
+      returns False) and whose only accounts come from
+      `manage.py bootstrap_operator` reading a one-address
+      `ALLOWED_EMAILS`. Adding an owner column and scoped querysets now
+      would buy nothing and cost a migration on live deal history. It
+      becomes real work the day a SECOND operator exists — and on that
+      day it is the FIRST thing to do, before the account is created,
+      because retrofitting ownership onto rows that predate it means
+      guessing who owned what.
+    - **Analysis runs in an in-process daemon thread, not a task queue.**
+      The thread is the symptom; `webapp.services._patched_config` is the
+      cause. It mutates `config.py`'s module-level dicts IN PLACE for the
+      duration of a run — never rebinding, because importers hold the
+      original dict objects — under a process-local `_ANALYSIS_LOCK`.
+      So throughput is one run at a time per process BY CONSTRUCTION, and
+      a queue is not a drop-in swap: global mutable config has to be
+      threaded through as a parameter first, or every worker inherits the
+      same serialization plus its own divergent copy of the patch state.
+      This is the same in-place-mutation coupling decision 6 cites for
+      why the capital and debt blocks are per-deal and never
+      settings-page editable. Sequence any queue work behind that
+      refactor; do not start with the queue.
+    - **Django already sets `SECURE_CONTENT_TYPE_NOSNIFF` and
+      `X_FRAME_OPTIONS`** (both since 3.0), so `cimweb/settings.py` sets
+      neither and restating them would only invite drift. The defaults
+      are pinned by `test_security_headers_present_in_production_branch`,
+      so a future Django flipping one fails CI instead of silently
+      dropping the header. An audit calling them "missing" has read the
+      settings file, not the response headers.
 
 ## Manual steps flagged by the program
 - Population verification (if not in CIM)

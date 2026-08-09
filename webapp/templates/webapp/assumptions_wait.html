@@ -10,7 +10,12 @@
     to underwrite it again.
   </div>
   {% else %}
-  {% include "webapp/_extract_status.html" %}
+  {# aria-live belongs on this STABLE wrapper — the partial replaces
+     itself with hx-swap="outerHTML", so a live region declared inside it
+     is torn down and rebuilt each poll and never announces. #}
+  <div aria-live="polite" aria-atomic="true">
+    {% include "webapp/_extract_status.html" %}
+  </div>
   {% endif %}
 </div>
 {% endblock %}

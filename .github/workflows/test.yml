@@ -9,6 +9,15 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
+    # `manage.py check` and `collectstatic` load cimweb.settings — the
+    # PRODUCTION module — and DEBUG defaults to False there, so the
+    # insecure-key guard refuses to boot without this. A CI runner is a
+    # build box, not a deploy, so it supplies a throwaway key rather than
+    # the guard learning to look the other way. Same move
+    # scripts/smoke_pg_django.py already makes for the Postgres job, and
+    # cimweb/settings_test.py for pytest.
+    env:
+      DJANGO_SECRET_KEY: ci-only-key-never-deployed
     steps:
       - uses: actions/checkout@v4
 

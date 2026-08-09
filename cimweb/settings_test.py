@@ -1,5 +1,15 @@
 """Test settings: in-memory SQLite, no manifest static storage."""
-from .settings import *  # noqa: F401,F403
+import os
+
+# MUST precede the star-import: settings.py refuses to boot on the
+# insecure default key whenever DEBUG is falsy, and DEBUG defaults to
+# False here exactly as it does in prod. That guard is the point — but a
+# test run is not a deploy, so supply a real (throwaway) key rather than
+# weaken the check. Same shape as the SECURE_SSL_REDIRECT override below:
+# the production default is correct and the test env opts out explicitly.
+os.environ.setdefault("DJANGO_SECRET_KEY", "test-only-key-never-deployed")
+
+from .settings import *  # noqa: E402,F401,F403
 
 DATABASES = {"default": {"ENGINE": "django.db.backends.sqlite3", "NAME": ":memory:"}}
 STORAGES = {

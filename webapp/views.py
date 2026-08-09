@@ -336,6 +336,8 @@ def analyze(request):
         errors.append("A CIM PDF is required.")
     elif not cim.name.lower().endswith(".pdf"):
         errors.append("The CIM must be a .pdf file.")
+    elif not services.looks_like_pdf(cim):
+        errors.append("The CIM is named .pdf but its contents are not a PDF.")
     optional = {}
     for key, label in (("rent_roll", "Rent roll"), ("financials", "Financials")):
         f = request.FILES.get(key)
