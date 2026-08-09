@@ -507,6 +507,31 @@ def _extract_worker(deal_pk, pdf_path, stamp):
 
 ALLOWED_DOC_EXTS = {".pdf", ".xlsx", ".xls", ".csv"}
 MAX_UPLOAD_BYTES = 200 * 1024 * 1024
+PDF_MAGIC = b"%PDF-"
+
+
+def looks_like_pdf(upload) -> bool:
+    """True if the upload's first bytes are the PDF header.
+
+    The extension is a claim by the uploader; this reads the file. A
+    renamed .docx sailed through the extension check and only failed
+    later inside pdfplumber, on the extraction THREAD — where the error
+    surfaces as a generic 'extraction failed' minutes later instead of a
+    field error on the form. Rejecting at the boundary keeps the reason
+    attached to the cause.
+
+    Seeks back to 0 so the caller can still save the file."""
+    try:
+        upload.seek(0)
+        head = upload.read(len(PDF_MAGIC))
+    except (OSError, ValueError):
+        return False
+    finally:
+        try:
+            upload.seek(0)
+        except (OSError, ValueError):
+            pass
+    return head == PDF_MAGIC
 
 
 def _safe_filename(name: str) -> str:

@@ -7,6 +7,7 @@ import os
 from pathlib import Path
 
 import environ
+from django.core.exceptions import ImproperlyConfigured
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
@@ -18,8 +19,28 @@ env = environ.Env(
 environ.Env.read_env(BASE_DIR / ".env")
 
 INSECURE_DEFAULT_SECRET_KEY = "dev-only-insecure-key"
+
+
+def check_secret_key(secret_key: str, debug: bool) -> None:
+    """Refuse to boot production on the dev key.
+
+    The default exists so a fresh clone runs without a .env; with
+    DEBUG=False it is a live session-forgery hole, and Django's own
+    `check --deploy` only WARNS. A missing DJANGO_SECRET_KEY in prod is
+    a deploy misconfiguration, so it fails loudly at import rather than
+    serving signed cookies anyone can mint. Split out as a function so
+    the guard is testable without re-importing the settings module."""
+    if not debug and secret_key == INSECURE_DEFAULT_SECRET_KEY:
+        raise ImproperlyConfigured(
+            "DJANGO_SECRET_KEY is unset and DEBUG is False — refusing to "
+            "start production on the insecure development key. Set "
+            "DJANGO_SECRET_KEY in the environment (see DEPLOY.md)."
+        )
+
+
 SECRET_KEY = env("DJANGO_SECRET_KEY", default=INSECURE_DEFAULT_SECRET_KEY)
 DEBUG = env("DEBUG")
+check_secret_key(SECRET_KEY, DEBUG)
 ALLOWED_HOSTS = env("ALLOWED_HOSTS")
 
 # Comma-separated allowlist of login emails (closed system).
@@ -112,3 +133,20 @@ if not DEBUG:
     SESSION_COOKIE_SECURE = True
     CSRF_COOKIE_SECURE = True
     SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
+    # SECURE_SSL_REDIRECT upgrades a plaintext request only AFTER it has
+    # been sent; HSTS stops the browser from sending it at all. Env-tunable
+    # so a cautious cutover can start at 3600 and raise once verified —
+    # a too-long value is not retractable from a browser that cached it.
+    SECURE_HSTS_SECONDS = env("SECURE_HSTS_SECONDS", default=31536000, cast=int)
+    SECURE_HSTS_INCLUDE_SUBDOMAINS = True
+    # Preload stays OFF: submission to the browser preload list is a
+    # one-way door that needs a deliberate act, not a default.
+    SECURE_HSTS_PRELOAD = False
+
+# Deliberately NOT set here — Django already supplies them, and restating
+# them invites drift if the defaults change:
+#   SECURE_CONTENT_TYPE_NOSNIFF  defaults True since Django 3.0
+#   X_FRAME_OPTIONS              defaults "DENY" since Django 3.0, applied
+#                                by XFrameOptionsMiddleware (in MIDDLEWARE)
+# An audit reporting these as "missing" has read the settings file, not the
+# response headers. Check `curl -I` before adding anything back.

@@ -49,7 +49,12 @@
   {% endif %}
 
   {% if show_progress %}
-  <div class="my-3">{% include "webapp/_run_status.html" with failed=run_failed %}</div>
+  {# aria-live sits on this STABLE wrapper, not on the polled div: the
+     partial swaps itself via hx-swap="outerHTML", so a live region
+     declared inside it is destroyed and recreated on every poll and
+     announces nothing. The wrapper survives, so its subtree mutations
+     are what a screen reader reads out. #}
+  <div class="my-3" aria-live="polite" aria-atomic="true">{% include "webapp/_run_status.html" with failed=run_failed %}</div>
   {% endif %}
 
   {% if not has_snapshot and not done_run %}
