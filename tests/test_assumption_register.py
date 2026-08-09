@@ -1,0 +1,362 @@
+"""Item T Category 6 — the assumption register.
+
+Category 4's lesson, which this file inherits: a register that records
+perfectly and renders nowhere reproduces every number in the pipeline and
+delivers none of the item. So the tests that matter here assert a SURFACE
+or a WIRE, and each names the deliberate break that turns it red.
+
+The two completeness guards are the other half. A register is a claim
+about what it contains, and a claim nobody enforces stops being true the
+first month somebody adds a config key — so membership FAILS BY DEFAULT
+and has to be argued into `NOT_IN_REGISTER` with a reason.
+"""
+
+import pytest
+
+import config as cfg
+from analysis import assumptions as A
+
+
+# ── Completeness guards ─────────────────────────────────────────────
+
+def test_every_settings_editable_key_is_in_the_register_or_declared_out():
+    """The guard the whole item rests on.
+
+    `override_key_registry()` is derived LIVE from config.py, so a new
+    editable constant appears there the moment it is declared — and then
+    fails here until somebody either registers it or writes down why it
+    is exempt. That default matters more than the current pass: a
+    completeness claim maintained by memory is one nobody can rely on.
+    """
+    from webapp.forms import override_key_registry
+
+    have = {row.key for row in A.collect()}
+    missing = []
+    for key in override_key_registry():
+        if key in have:
+            continue
+        if any(key.startswith(prefix) for prefix in A.NOT_IN_REGISTER):
+            continue
+        missing.append(key)
+    assert not missing, (
+        "settings-editable keys that reach no register row and are not "
+        f"declared in NOT_IN_REGISTER: {sorted(missing)}")
+
+
+def test_the_exempt_keys_are_exempt_for_a_stated_reason():
+    """`NOT_IN_REGISTER` is a decision on the record, not a skip list.
+
+    An entry with an empty reason is how an exemption stops being a
+    decision and becomes a place to hide keys.
+    """
+    assert A.NOT_IN_REGISTER, "an empty exemption table means the guard above proves nothing"
+    for prefix, reason in A.NOT_IN_REGISTER.items():
+        assert prefix.endswith("."), f"{prefix} must be a dotted-key prefix"
+        assert len(reason.split()) >= 8, f"{prefix} needs a real reason, got {reason!r}"
+
+
+def test_the_market_cap_table_is_exempt_but_its_resolved_anchor_is_not():
+    """The exemption is only honest because the number that MOVED is
+    still reported. Exempting the table and reporting nothing would be
+    the omission the exemption pretends to justify."""
+    rows = {r.key: r for r in A.collect(
+        market_cap={"market_cap": 0.0625, "source": "table",
+                    "asset_class": "Self-Storage", "age_band": "2000s"})}
+    assert not any(k.startswith("MARKET_CAP_RATES.")
+                   and k != "MARKET_CAP_RATES.resolved" for k in rows)
+    anchor = rows["MARKET_CAP_RATES.resolved"]
+    assert anchor.value == 0.0625
+    assert "Self-Storage" in anchor.detail and "2000s" in anchor.detail
+
+
+def test_the_levered_constants_are_registered_though_no_guard_demands_them():
+    """`DEBT_TERMS` and friends are per-deal only (item E3b), so
+    `override_key_registry()` does not list them and the guard above is
+    silent about them. Silence is not permission to omit a number that
+    moves every levered figure in the memo."""
+    have = {row.key for row in A.collect()}
+    for key in cfg.DEBT_TERMS:
+        assert f"DEBT_TERMS.{key}" in have, key
+    for key in cfg.WATERFALL_TERMS:
+        if key == "gp_coinvest_pct":
+            continue
+        assert f"WATERFALL_TERMS.{key}" in have, key
+    for key in ("AM_FEE_PCT", "AM_FEE_BASE", "DEFAULT_HOLD_YEARS",
+                "SOLVER_TARGET_IRR", "SOLVER_TARGET_LP_NET_IRR",
+                "MGMT_FEE_TARGET_PCT", "IRR_STRONG_THRESHOLD"):
+        assert key in have, key
+    for name in ("SOLVER_BOUNDS", "SENSITIVITY_GRID", "TRANSACTION_COSTS",
+                 "EXPENSE_RATIO", "POPULATION_TIERS", "OCCUPANCY_TIERS"):
+        for key in getattr(cfg, name):
+            assert f"{name}.{key}" in have, f"{name}.{key}"
+
+
+def test_every_numeric_cim_form_field_is_registered():
+    """A new box on the assumptions page moves an output the moment an
+    analyst types in it. If `CIM_FIELDS` does not know about it, the
+    appendix reports a run it did not describe."""
+    from webapp.forms import CIM_FLOAT_FIELDS, CIM_INT_FIELDS, CIM_PCT_FIELDS
+
+    declared = {field for field, _label, _unit in A.CIM_FIELDS}
+    on_form = set(CIM_INT_FIELDS + CIM_FLOAT_FIELDS + CIM_PCT_FIELDS)
+    assert not (on_form - declared), (
+        f"analyst-editable CIM inputs missing from the register: "
+        f"{sorted(on_form - declared)}")
+    assert not (declared - on_form), (
+        f"registered CIM fields with no input box: {sorted(declared - on_form)}")
+
+
+def test_the_guard_fails_when_a_registered_key_disappears(monkeypatch):
+    """The mutation that proves the guard above is load-bearing.
+
+    Without this, a guard that silently matched everything would read as
+    a passing completeness proof — which is precisely the failure
+    `test_no_module_still_sizes_a_property_at_one_square_foot`
+    overclaimed its way into during Category 4.
+    """
+    from webapp.forms import override_key_registry
+
+    real = A.collect
+
+    def crippled(**kwargs):
+        return [r for r in real(**kwargs) if r.key != "GATES.min_irr_5yr"]
+
+    monkeypatch.setattr(A, "collect", crippled)
+    have = {row.key for row in A.collect()}
+    missing = [k for k in override_key_registry()
+               if k not in have
+               and not any(k.startswith(p) for p in A.NOT_IN_REGISTER)]
+    assert missing == ["GATES.min_irr_5yr"]
+
+
+# ── Provenance ──────────────────────────────────────────────────────
+
+def test_a_settings_row_is_labelled_settings_and_carries_what_it_displaced():
+    """The defect that opened this category: an overridden gate rendered
+    identically to the shipped one."""
+    rows = {r.key: r for r in A.collect(
+        config_deltas={"GATES.min_irr_5yr": 0.08},
+        config_defaults={"GATES.min_irr_5yr": 0.10})}
+    row = rows["GATES.min_irr_5yr"]
+    assert row.provenance == A.SETTINGS
+    assert row.was == 0.10
+    assert row.chosen is True
+
+    untouched = rows["GATES.min_yield_on_cost"]
+    assert untouched.provenance == A.CONFIG
+    assert untouched.was is None
+
+
+def test_a_deal_override_beats_a_settings_row_and_only_one_row_survives():
+    """Precedence is the model's own. Two rows for one assumption is how
+    a reader ends up auditing a number the engine never used."""
+    rows = [r for r in A.collect(
+        deal_overrides={"hold_years": 7},
+        config_deltas={"GATES.min_irr_5yr": 0.08},
+        config_defaults={"GATES.min_irr_5yr": 0.10},
+        hold_years=7) if r.key == "DEFAULT_HOLD_YEARS"]
+    assert len(rows) == 1
+    assert rows[0].provenance == A.DEAL
+    assert rows[0].value == 7
+    assert rows[0].was == cfg.DEFAULT_HOLD_YEARS
+
+
+def test_a_per_key_deal_override_does_not_relabel_its_neighbour():
+    """Transaction costs merge PER PARAMETER rather than replacing
+    wholesale, so overriding one must not stamp the other as
+    analyst-entered — the same key-level rule `webapp.services` applies
+    when it pops superseded rows out of the applied stamp."""
+    rows = {r.key: r for r in A.collect(
+        deal_overrides={"transaction_costs": {"disposition_cost_pct": 0.02}},
+        transaction_costs={"disposition_cost_pct": 0.02})}
+    assert rows["TRANSACTION_COSTS.disposition_cost_pct"].provenance == A.DEAL
+    assert rows["TRANSACTION_COSTS.acquisition_closing_pct"].provenance == A.CONFIG
+
+
+def test_an_analyst_corrected_cim_number_shows_what_the_cim_said(mock_cim_data):
+    """The row that makes a correction auditable rather than merely
+    disclosed. Without `was`, "NRSF 60,000 — entered for this deal" hides
+    that the broker's own number was different."""
+    mock_cim_data.nrsf = 60_000
+    rows = {r.key: r for r in A.collect(
+        cim_data=mock_cim_data, cim_snapshot={"nrsf": 58_400})}
+    row = rows["cim.nrsf"]
+    assert row.provenance == A.DEAL
+    assert row.value == 60_000 and row.was == 58_400
+    # An untouched field stays the CIM's, not the analyst's.
+    assert rows["cim.ttm_noi"].provenance == A.CIM
+
+
+def test_an_absent_cim_field_contributes_no_row(mock_cim_data):
+    """It moved no output. A register of numbers the run did not use
+    teaches a reader to skim the ones it did — and a fallback that stood
+    in for it is already a row of its own."""
+    mock_cim_data.market_rent_psf = None
+    keys = {r.key for r in A.collect(cim_data=mock_cim_data)}
+    assert "cim.market_rent_psf" not in keys
+
+
+def test_a_fill_becomes_the_fallback_row_for_the_field_it_filled():
+    """The two registers join here: exactly one row per deal input, whose
+    provenance is `cim`, `deal` or `fallback`."""
+    from analysis import fills
+
+    log = fills.to_dicts([fills.Fill(
+        field="market_rent_psf", value_used=1.25,
+        source_key=fills.MARKET_RENT_ABSENT, unit=fills.UNIT_PSF_MO,
+        label="No market rent stated; in-place rent used.")])
+    rows = {r.key: r for r in A.collect(fill_log=log)}
+    row = rows["fill.market_rent_psf"]
+    assert row.provenance == A.FALLBACK
+    assert A.format_value(row) == "$1.25/SF/mo"
+    assert row.chosen is True
+
+
+def test_an_analyst_entered_exit_cap_is_a_deal_row_a_table_lookup_is_not():
+    """`resolve_market_cap` already publishes which it was; this reads
+    that flag rather than re-deciding it."""
+    analyst = {r.key: r for r in A.collect(
+        market_cap={"market_cap": 0.055, "source": "analyst"})}
+    assert analyst["MARKET_CAP_RATES.resolved"].provenance == A.DEAL
+    table = {r.key: r for r in A.collect(
+        market_cap={"market_cap": 0.06, "source": "table",
+                    "asset_class": "Self-Storage", "age_band": "2010s"})}
+    assert table["MARKET_CAP_RATES.resolved"].provenance == A.CONFIG
+
+
+# ── Values follow the model, not a second copy of it ────────────────
+
+def test_the_expense_bands_are_the_regional_ones_the_run_charged_against(
+        mock_cim_data):
+    """`financials.py` underwrites against `get_regional_benchmarks(state)`.
+    Reporting the national table would print a band the run never used —
+    the same class of defect as Category 4's expense-ratio fill logging a
+    share the projection had clamped away.
+    """
+    national = cfg.EXPENSE_BENCHMARKS["payroll"]
+    regional = cfg.get_regional_benchmarks("TX")["payroll"]
+    assert regional != national, (
+        "fixture no longer proves anything — TX stopped adjusting payroll")
+
+    rows = {r.key: r for r in A.collect(cim_data=mock_cim_data)}
+    assert tuple(rows["EXPENSE_BENCHMARKS.payroll"].value) == tuple(regional)
+    assert "TX" in rows["EXPENSE_BENCHMARKS.payroll"].detail
+
+
+def test_a_zero_solver_target_is_reported_not_swallowed():
+    """The truthiness trap item T Category 3 already had to fix once, in
+    the engine. A register with its own `if target:` would reintroduce it
+    one file away from where it was closed."""
+    rows = {r.key: r for r in A.collect(
+        deal_overrides={"solver_target_irr": 0.0}, solver_target_irr=0.0)}
+    row = rows["SOLVER_TARGET_IRR"]
+    assert row.value == 0.0
+    assert row.provenance == A.DEAL
+
+
+def test_the_registered_value_follows_a_moved_config_default(monkeypatch):
+    """Mutation proof that the register READS config rather than
+    restating it — the failure mode item T exists to close, appearing in
+    the module that reports on it."""
+    monkeypatch.setitem(cfg.GATES, "min_irr_5yr", 0.13)
+    rows = {r.key: r for r in A.collect()}
+    assert rows["GATES.min_irr_5yr"].value == 0.13
+
+
+def test_the_scenario_rows_follow_a_per_deal_scenario_set():
+    """The form stores sections keyed by `ScenarioType.value`; config
+    keys them by the enum. Both spellings reach `collect`, and guessing
+    wrong reports the config default for a run that used the analyst's."""
+    from registry import ScenarioType
+
+    custom = {"base": {"yr1_noi_bump": 0.09}}
+    rows = {r.key: r for r in A.collect(scenarios=custom)}
+    row = rows["SCENARIO_DEFAULTS.base.yr1_noi_bump"]
+    assert row.value == 0.09 and row.provenance == A.DEAL
+    assert row.was == cfg.SCENARIO_DEFAULTS[ScenarioType.BASE]["yr1_noi_bump"]
+    # A parameter the analyst did not touch stays the model's.
+    assert rows["SCENARIO_DEFAULTS.base.exp_growth"].provenance == A.CONFIG
+
+
+# ── The register's own contract ─────────────────────────────────────
+
+def test_the_provenance_vocabulary_cannot_drift_from_its_labels():
+    """`PROVENANCE_KEYS` is derived from `PROVENANCE_LABELS` for the same
+    reason `fills.SOURCE_KEYS` is: two structures listing one vocabulary
+    is the duplicated-constant defect, in the module that closes it."""
+    assert A.PROVENANCE_KEYS == tuple(A.PROVENANCE_LABELS)
+    assert set(A.CHOSEN) <= set(A.PROVENANCE_KEYS)
+    assert A.CONFIG not in A.CHOSEN and A.CIM not in A.CHOSEN
+
+
+def test_every_row_a_real_run_emits_carries_a_declared_provenance(
+        mock_cim_data):
+    rows = A.collect(cim_data=mock_cim_data)
+    assert rows
+    for row in rows:
+        assert row.provenance in A.PROVENANCE_KEYS, row.key
+        assert row.group in A.GROUP_ORDER, row.key
+        assert row.label, row.key
+
+
+def test_no_two_rows_claim_the_same_assumption(mock_cim_data):
+    keys = [r.key for r in A.collect(
+        cim_data=mock_cim_data,
+        market_cap={"market_cap": 0.06, "source": "table"},
+        deal_overrides={"hold_years": 7}, hold_years=7)]
+    assert len(keys) == len(set(keys))
+
+
+def test_the_register_round_trips_and_tolerates_a_row_from_an_older_run():
+    """Adding a column must not 500 the results page for every deal
+    already in the database — the contract `fills.from_dicts` holds, held
+    here for the same reason."""
+    rows = A.collect()
+    back = A.from_dicts(A.to_dicts(rows))
+    assert len(back) == len(rows)
+    assert back[0] == rows[0]
+
+    older = A.from_dicts([{"key": "GATES.min_irr_5yr", "provenance": "config",
+                           "value": 0.1}])
+    assert len(older) == 1 and older[0].label == "GATES.min_irr_5yr"
+    # A row with no provenance is not a row; it is a shape that happens
+    # to have keys.
+    assert A.from_dicts([{"key": "x"}]) == []
+
+
+def test_a_band_renders_as_one_value_not_two_columns():
+    band = A.Assumption(key="EXPENSE_BENCHMARKS.insurance", label="Insurance",
+                        group=A.G_EXPENSES, value=(0.12, 0.25),
+                        provenance=A.CONFIG, unit=A.UNIT_PSF_YR)
+    assert A.format_value(band) == "$0.12/SF/yr – $0.25/SF/yr"
+    # A stored band comes back from JSON as a list and must render the same.
+    assert A.format_value(A.from_dicts(A.to_dicts([band]))[0]) == \
+        "$0.12/SF/yr – $0.25/SF/yr"
+
+
+def test_the_summary_counts_every_provenance_including_the_empty_ones():
+    """A count silently absent reads as a count of none anyway, and only
+    one of those two is true on purpose."""
+    counts = A.summarize(A.collect(
+        config_deltas={"GATES.min_irr_5yr": 0.08},
+        config_defaults={"GATES.min_irr_5yr": 0.10}))
+    assert set(A.PROVENANCE_KEYS) <= set(counts)
+    assert counts[A.SETTINGS] == 1
+    assert counts[A.DEAL] == 0
+    assert counts["chosen"] == 1
+    assert counts["total"] == sum(counts[k] for k in A.PROVENANCE_KEYS)
+
+
+@pytest.mark.parametrize("value,unit,expected", [
+    (0.0625, A.UNIT_PCT, "6.25%"),      # a coupon `.1%` would round to 6.2%
+    (0.0025, A.UNIT_PCT, "0.25%"),      # a 25bp grid step, likewise
+    (0.75, A.UNIT_PCT, "75.0%"),        # unchanged from before this item
+    (0.06, A.UNIT_PCT, "6.0%"),         # the value Category 4's test pins
+])
+def test_the_percent_unit_stopped_restating_the_number_it_discloses(
+        value, unit, expected):
+    """A disclosure that rounds its own subject is not a disclosure. The
+    two unchanged cases are the point: precision was ADDED where `.1%`
+    lost information and nowhere else, so no existing surface moved."""
+    from analysis.fills import format_number
+    assert format_number(value, unit) == expected

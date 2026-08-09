@@ -339,8 +339,13 @@ def fake_run(monkeypatch):
               transaction_costs=None, capital_structure=None,
               market_cap_rate=None, market_cap=None,
               debt_terms=None, waterfall_terms=None, am_fee_pct=None,
-              mgmt_fee_target_pct=None):
+              mgmt_fee_target_pct=None, config_deltas=None,
+              config_defaults=None, deal_overrides=None, cim_snapshot=None):
         calls["cim_data"] = result.cim_data
+        calls["config_deltas"] = config_deltas
+        calls["config_defaults"] = config_defaults
+        calls["deal_overrides"] = deal_overrides
+        calls["cim_snapshot"] = cim_snapshot
         calls["output_dir"] = output_dir
         calls["custom_scenarios"] = custom_scenarios
         calls["custom_va_scenarios"] = custom_va_scenarios

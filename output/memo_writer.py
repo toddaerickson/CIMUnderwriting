@@ -27,6 +27,7 @@ def generate_memo(property_name: str, cim_data, gate_results: list,
                   levered: dict = None, debt: dict = None,
                   levered_max_offer: dict = None,
                   assumption_fill_log: list = None,
+                  assumption_register: list = None,
                   output_dir: str = ".") -> str:
     """
     Generate the SS Investment Memo .docx.
@@ -86,6 +87,17 @@ def generate_memo(property_name: str, cim_data, gate_results: list,
     # navigate by number. Section 1 carries the count so a reader knows
     # to turn here (item T Category 4).
     _add_assumptions_appendix(doc, assumption_fill_log)
+
+    # ── Appendix B: Assumption Register ─────────────────────────
+    # Item T Category 6, and the item's acceptance criterion: every number
+    # that moved an output, with the provenance that produced it, in one
+    # auditable place. It CONTAINS Appendix A's rows — an invented value
+    # appears here as one `fallback` row among the rest — so an auditor
+    # who reads only this has still seen everything. A stays because
+    # "what did the model invent?" is a sharper question than "what did
+    # the model use?", and nine invented numbers inside a hundred and
+    # forty do not read as an answer to it.
+    _add_assumption_register(doc, assumption_register)
 
     doc.save(filepath)
     return filepath
@@ -317,6 +329,97 @@ def _add_assumptions_appendix(doc, assumption_fill_log):
         row[1].text = format_value(fill)
         row[2].text = fill.source_label
         row[3].text = fill.label
+
+
+def _add_assumption_register(doc, assumption_register):
+    """Appendix B — every number that moved an output, and who chose it.
+
+    Two tables, because they answer to two readers. The first lists only
+    the rows something other than the shipped model produced — a deal
+    entry, a dated settings row, a fallback — which is what is unusual
+    about THIS run and is typically ten to twenty lines. The second is the
+    whole register, grouped by subject, for the auditor.
+
+    Neither table omits anything. A "defaults suppressed for brevity"
+    register asks the reader to trust that absence means default, which is
+    the same act of faith item T exists to end — so the bulk goes to the
+    back of the document rather than out of it.
+    """
+    if not assumption_register:
+        return
+
+    from analysis.assumptions import (CHOSEN, PROVENANCE_LABELS, format_value,
+                                      from_dicts, summarize)
+
+    rows = from_dicts(assumption_register)
+    counts = summarize(rows)
+
+    doc.add_page_break()
+    doc.add_heading("Appendix B. Assumption Register", level=1)
+    doc.add_paragraph(
+        f"Every number this analysis used, with its source. Of "
+        f"{counts['total']} assumptions, {counts['chosen']} came from "
+        f"something other than the model's shipped defaults: "
+        f"{counts['deal']} entered for this deal, {counts['settings']} from "
+        f"a dated settings override, {counts['fallback']} filled in because "
+        f"the CIM did not state them. Those are listed first. The full "
+        f"register follows — nothing is omitted from it, so an assumption "
+        f"absent below is an assumption this run did not use."
+    )
+
+    chosen = [r for r in rows if r.provenance in CHOSEN]
+    doc.add_heading("B.1 Assumptions not taken from the model defaults",
+                    level=2)
+    if not chosen:
+        doc.add_paragraph(
+            "None. Every number below is the model's shipped default, and "
+            "every input came from the CIM as stated.")
+    else:
+        table = doc.add_table(rows=1, cols=4)
+        table.style = "Light Grid Accent 1"
+        hdr = table.rows[0].cells
+        hdr[0].text = "Assumption"
+        hdr[1].text = "Value Used"
+        hdr[2].text = "Source"
+        hdr[3].text = "Replaced"
+        for row in chosen:
+            cells = table.add_row().cells
+            cells[0].text = row.label
+            cells[1].text = format_value(row)
+            cells[2].text = PROVENANCE_LABELS.get(row.provenance,
+                                                  row.provenance)
+            cells[3].text = (_register_prior(row) if row.was is not None
+                             else (row.detail or "—"))
+
+    doc.add_heading("B.2 Full register", level=2)
+    table = doc.add_table(rows=1, cols=4)
+    table.style = "Light Grid Accent 1"
+    hdr = table.rows[0].cells
+    hdr[0].text = "Group"
+    hdr[1].text = "Assumption"
+    hdr[2].text = "Value Used"
+    hdr[3].text = "Source"
+    for row in rows:
+        cells = table.add_row().cells
+        cells[0].text = row.group
+        cells[1].text = row.label
+        cells[2].text = format_value(row)
+        cells[3].text = PROVENANCE_LABELS.get(row.provenance, row.provenance)
+
+
+def _register_prior(row):
+    """What the winning value displaced, rendered in its own units.
+
+    Built by swapping the value on a copy rather than by a second
+    formatter: `was` is the same quantity in the same unit as `value`, and
+    a separate rendering path is how one of them ends up printing 0.8
+    where the other prints 80%.
+    """
+    import dataclasses
+
+    from analysis.assumptions import format_value
+
+    return format_value(dataclasses.replace(row, value=row.was))
 
 
 def _add_occupancy_spread_note(doc, cim_data):

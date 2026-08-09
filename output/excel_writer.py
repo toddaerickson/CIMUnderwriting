@@ -52,6 +52,7 @@ def generate_excel(property_name: str, cim_data, financial_analysis: dict,
                    sources_uses: dict = None, levered: dict = None,
                    debt: dict = None, levered_max_offer: dict = None,
                    assumption_fill_log: list = None,
+                   assumption_register: list = None,
                    output_dir: str = ".") -> str:
     """
     Generate the SS Returns Model .xlsx.
@@ -63,7 +64,8 @@ def generate_excel(property_name: str, cim_data, financial_analysis: dict,
 
     # Tab 1: Inputs
     _build_inputs_tab(wb.active, cim_data, financial_analysis,
-                      scenario_results, assumption_fill_log)
+                      scenario_results, assumption_fill_log,
+                      assumption_register)
     wb.active.title = "Inputs"
 
     # Tabs 2-4: Scenario cases (static)
@@ -159,7 +161,7 @@ def _exit_cap_rows(scen: dict) -> list:
 
 
 def _build_inputs_tab(ws, cim_data, fin, scenario_results=None,
-                      assumption_fill_log=None):
+                      assumption_fill_log=None, assumption_register=None):
     """Build the Inputs tab with editable assumption cells."""
     ws.column_dimensions["A"].width = 30
     ws.column_dimensions["B"].width = 20
@@ -223,6 +225,7 @@ def _build_inputs_tab(ws, cim_data, fin, scenario_results=None,
 
     row = _write_exit_cap_derivation(ws, row, scenario_results)
     row = _write_assumption_fills(ws, row, assumption_fill_log)
+    row = _write_assumption_register(ws, row, assumption_register)
 
 
 def _write_assumption_fills(ws, row, assumption_fill_log):
@@ -257,6 +260,49 @@ def _write_assumption_fills(ws, row, assumption_fill_log):
         # numbers behind the sentence — and a `detail` no surface renders
         # would be precisely the unread stamp this item exists to kill.
         ws.cell(row=row, column=4, value=format_detail(fill)).font = VALUE_FONT
+        row += 1
+    return row
+
+
+def _write_assumption_register(ws, row, assumption_register):
+    """The whole assumption register on the analyst's audit artifact
+    (item T Category 6).
+
+    The workbook gets every row, unlike the memo's two-table split: a
+    spreadsheet is filtered and sorted by the person reading it, so the
+    grouping the document has to decide up front is the reader's choice
+    here. The `Replaced` column carries what a deal or settings entry
+    displaced, which is the column that turns "6.5% cap" into an audit.
+
+    Not editable-yellow, for the same reason the fill block above is not:
+    editing the record of an input does not change the input.
+    """
+    if not assumption_register:
+        return row
+
+    from analysis.assumptions import (PROVENANCE_LABELS, format_value,
+                                      from_dicts)
+
+    rows = from_dicts(assumption_register)
+    row += 1
+    row = _write_section_header(ws, row, "Assumption Register", cols=5)
+    for col, head in enumerate(("Group", "Assumption", "Value Used",
+                                "Source", "Replaced"), start=1):
+        ws.cell(row=row, column=col, value=head).font = LABEL_FONT
+    row += 1
+    for entry in rows:
+        ws.cell(row=row, column=1, value=entry.group).font = VALUE_FONT
+        ws.cell(row=row, column=2, value=entry.label).font = LABEL_FONT
+        ws.cell(row=row, column=3, value=format_value(entry)).font = VALUE_FONT
+        ws.cell(row=row, column=4,
+                value=PROVENANCE_LABELS.get(entry.provenance,
+                                            entry.provenance)).font = VALUE_FONT
+        if entry.was is not None:
+            import dataclasses
+            ws.cell(row=row, column=5, value=format_value(
+                dataclasses.replace(entry, value=entry.was))).font = VALUE_FONT
+        elif entry.detail:
+            ws.cell(row=row, column=5, value=entry.detail).font = VALUE_FONT
         row += 1
     return row
 

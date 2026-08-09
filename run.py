@@ -285,6 +285,22 @@ def stage_gates_and_risks(ctx: AnalysisContext):
         va_results=ctx.va_results,
         expense_ratio=ctx.expense_ratio))
 
+    # The assumption register (item T Category 6), assembled the same way
+    # and for the same reason. No `config_deltas`, `deal_overrides` or
+    # `cim_snapshot` are passed because a CLI run HAS none — there is no
+    # settings table and no assumptions page here — so every number
+    # resolves to the model default, the CIM, or a logged fallback. That
+    # is the honest answer for this entry point, and
+    # `test_a_cli_register_never_claims_a_settings_or_deal_override`
+    # pins it so a later edit cannot quietly invent a provenance the CLI
+    # cannot have.
+    from analysis import assumptions as model_assumptions
+    ctx.assumption_register = model_assumptions.to_dicts(
+        model_assumptions.collect(
+            cim_data=ctx.cim_data,
+            fill_log=ctx.assumption_fill_log,
+            market_cap=ctx.market_cap))
+
 
 def stage_output(ctx: AnalysisContext, comp_db):
     """[6/7] Generate output files and save to comp database."""
@@ -308,6 +324,7 @@ def stage_output(ctx: AnalysisContext, comp_db):
         va_max_offer=ctx.va_max_offer,
         sources_uses=ctx.sources_uses,
         assumption_fill_log=ctx.assumption_fill_log,
+        assumption_register=ctx.assumption_register,
         output_dir=ctx.output_dir,
     )
     logger.info("  Memo: %s", ctx.memo_path)
@@ -349,6 +366,7 @@ def stage_output(ctx: AnalysisContext, comp_db):
         va_max_offer=ctx.va_max_offer,
         sources_uses=ctx.sources_uses,
         assumption_fill_log=ctx.assumption_fill_log,
+        assumption_register=ctx.assumption_register,
         output_dir=ctx.output_dir,
     )
     logger.info("  Model: %s", ctx.excel_path)

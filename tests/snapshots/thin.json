@@ -1152,30 +1152,330 @@
         "A10": {
           "v": "CC %"
         },
+        "A100": {
+          "v": "Investment Gates"
+        },
+        "A101": {
+          "v": "Investment Gates"
+        },
+        "A102": {
+          "v": "Investment Gates"
+        },
+        "A103": {
+          "v": "Investment Gates"
+        },
+        "A104": {
+          "v": "Investment Gates"
+        },
+        "A105": {
+          "v": "Investment Gates"
+        },
+        "A106": {
+          "v": "Investment Gates"
+        },
+        "A107": {
+          "v": "Investment Gates"
+        },
+        "A108": {
+          "v": "Investment Gates"
+        },
+        "A109": {
+          "v": "Investment Gates"
+        },
         "A11": {
           "v": "Year Built"
         },
+        "A110": {
+          "v": "Return Targets"
+        },
+        "A111": {
+          "v": "Return Targets"
+        },
+        "A112": {
+          "v": "Return Targets"
+        },
+        "A113": {
+          "v": "Hold & Transaction Costs"
+        },
+        "A114": {
+          "v": "Hold & Transaction Costs"
+        },
+        "A115": {
+          "v": "Hold & Transaction Costs"
+        },
+        "A116": {
+          "v": "Exit Cap"
+        },
+        "A117": {
+          "v": "Exit Cap"
+        },
+        "A118": {
+          "v": "Exit Cap"
+        },
+        "A119": {
+          "v": "Scenarios"
+        },
         "A12": {
           "v": "Price / SF"
+        },
+        "A120": {
+          "v": "Scenarios"
+        },
+        "A121": {
+          "v": "Scenarios"
+        },
+        "A122": {
+          "v": "Scenarios"
+        },
+        "A123": {
+          "v": "Scenarios"
+        },
+        "A124": {
+          "v": "Scenarios"
+        },
+        "A125": {
+          "v": "Scenarios"
+        },
+        "A126": {
+          "v": "Scenarios"
+        },
+        "A127": {
+          "v": "Scenarios"
+        },
+        "A128": {
+          "v": "Scenarios"
+        },
+        "A129": {
+          "v": "Scenarios"
+        },
+        "A130": {
+          "v": "Scenarios"
+        },
+        "A131": {
+          "v": "Scenarios"
+        },
+        "A132": {
+          "v": "Scenarios"
+        },
+        "A133": {
+          "v": "Scenarios"
+        },
+        "A134": {
+          "v": "Value-Add Scenarios"
+        },
+        "A135": {
+          "v": "Value-Add Scenarios"
+        },
+        "A136": {
+          "v": "Value-Add Scenarios"
+        },
+        "A137": {
+          "v": "Value-Add Scenarios"
+        },
+        "A138": {
+          "v": "Value-Add Scenarios"
+        },
+        "A139": {
+          "v": "Value-Add Scenarios"
         },
         "A14": {
           "fill": "00003366",
           "v": "Financial Summary"
         },
+        "A140": {
+          "v": "Value-Add Scenarios"
+        },
+        "A141": {
+          "v": "Value-Add Scenarios"
+        },
+        "A142": {
+          "v": "Value-Add Scenarios"
+        },
+        "A143": {
+          "v": "Value-Add Scenarios"
+        },
+        "A144": {
+          "v": "Value-Add Scenarios"
+        },
+        "A145": {
+          "v": "Value-Add Scenarios"
+        },
+        "A146": {
+          "v": "Value-Add Scenarios"
+        },
+        "A147": {
+          "v": "Value-Add Scenarios"
+        },
+        "A148": {
+          "v": "Value-Add Scenarios"
+        },
+        "A149": {
+          "v": "Value-Add Opportunity"
+        },
         "A15": {
           "v": "TTM NOI (CIM)"
+        },
+        "A150": {
+          "v": "Value-Add Opportunity"
+        },
+        "A151": {
+          "v": "Value-Add Opportunity"
+        },
+        "A152": {
+          "v": "Value-Add Opportunity"
+        },
+        "A153": {
+          "v": "Value-Add Opportunity"
+        },
+        "A154": {
+          "v": "Value-Add Opportunity"
+        },
+        "A155": {
+          "v": "Value-Add Opportunity"
+        },
+        "A156": {
+          "v": "Value-Add Opportunity"
+        },
+        "A157": {
+          "v": "Value-Add Opportunity"
+        },
+        "A158": {
+          "v": "Value-Add Opportunity"
+        },
+        "A159": {
+          "v": "Value-Add Opportunity"
         },
         "A16": {
           "v": "Analyst-Adjusted TTM NOI"
         },
+        "A160": {
+          "v": "Expense Benchmarks"
+        },
+        "A161": {
+          "v": "Expense Benchmarks"
+        },
+        "A162": {
+          "v": "Expense Benchmarks"
+        },
+        "A163": {
+          "v": "Expense Benchmarks"
+        },
+        "A164": {
+          "v": "Expense Benchmarks"
+        },
+        "A165": {
+          "v": "Expense Benchmarks"
+        },
+        "A166": {
+          "v": "Expense Benchmarks"
+        },
+        "A167": {
+          "v": "Expense Benchmarks"
+        },
+        "A168": {
+          "v": "Expense Benchmarks"
+        },
+        "A169": {
+          "v": "Expense Benchmarks"
+        },
         "A17": {
           "v": "TTM Total Revenue"
+        },
+        "A170": {
+          "v": "Expense Benchmarks"
+        },
+        "A171": {
+          "v": "Expense Benchmarks"
+        },
+        "A172": {
+          "v": "Expense Benchmarks"
+        },
+        "A173": {
+          "v": "Expense Benchmarks"
+        },
+        "A174": {
+          "v": "Replacement Cost"
+        },
+        "A175": {
+          "v": "Replacement Cost"
+        },
+        "A176": {
+          "v": "Replacement Cost"
+        },
+        "A177": {
+          "v": "Replacement Cost"
+        },
+        "A178": {
+          "v": "Replacement Cost"
+        },
+        "A179": {
+          "v": "Replacement Cost"
         },
         "A18": {
           "v": "TTM Total Expenses"
         },
+        "A180": {
+          "v": "Replacement Cost"
+        },
+        "A181": {
+          "v": "Replacement Cost"
+        },
+        "A182": {
+          "v": "Replacement Cost"
+        },
+        "A183": {
+          "v": "Replacement Cost"
+        },
+        "A184": {
+          "v": "Replacement Cost"
+        },
+        "A185": {
+          "v": "Replacement Cost"
+        },
+        "A186": {
+          "v": "Capital Structure"
+        },
+        "A187": {
+          "v": "Capital Structure"
+        },
+        "A188": {
+          "v": "Capital Structure"
+        },
+        "A189": {
+          "v": "Capital Structure"
+        },
         "A19": {
           "v": "TTM GPR"
+        },
+        "A190": {
+          "v": "Debt & Waterfall"
+        },
+        "A191": {
+          "v": "Debt & Waterfall"
+        },
+        "A192": {
+          "v": "Debt & Waterfall"
+        },
+        "A193": {
+          "v": "Debt & Waterfall"
+        },
+        "A194": {
+          "v": "Debt & Waterfall"
+        },
+        "A195": {
+          "v": "Debt & Waterfall"
+        },
+        "A196": {
+          "v": "Debt & Waterfall"
+        },
+        "A197": {
+          "v": "Debt & Waterfall"
+        },
+        "A198": {
+          "v": "Debt & Waterfall"
+        },
+        "A199": {
+          "v": "Debt & Waterfall"
         },
         "A2": {
           "v": "Property Name"
@@ -1183,8 +1483,80 @@
         "A20": {
           "v": "TTM EGR"
         },
+        "A200": {
+          "v": "Debt & Waterfall"
+        },
+        "A201": {
+          "v": "Debt & Waterfall"
+        },
+        "A202": {
+          "v": "Debt & Waterfall"
+        },
+        "A203": {
+          "v": "Debt & Waterfall"
+        },
+        "A204": {
+          "v": "Debt & Waterfall"
+        },
+        "A205": {
+          "v": "Debt & Waterfall"
+        },
+        "A206": {
+          "v": "Debt & Waterfall"
+        },
+        "A207": {
+          "v": "Debt & Waterfall"
+        },
+        "A208": {
+          "v": "Debt & Waterfall"
+        },
+        "A209": {
+          "v": "Debt & Waterfall"
+        },
         "A21": {
           "v": "Other Income"
+        },
+        "A210": {
+          "v": "Debt & Waterfall"
+        },
+        "A211": {
+          "v": "Narrative Tiers"
+        },
+        "A212": {
+          "v": "Narrative Tiers"
+        },
+        "A213": {
+          "v": "Narrative Tiers"
+        },
+        "A214": {
+          "v": "Narrative Tiers"
+        },
+        "A215": {
+          "v": "Narrative Tiers"
+        },
+        "A216": {
+          "v": "Solver Mechanics"
+        },
+        "A217": {
+          "v": "Solver Mechanics"
+        },
+        "A218": {
+          "v": "Solver Mechanics"
+        },
+        "A219": {
+          "v": "Solver Mechanics"
+        },
+        "A220": {
+          "v": "Solver Mechanics"
+        },
+        "A221": {
+          "v": "Solver Mechanics"
+        },
+        "A222": {
+          "v": "Solver Mechanics"
+        },
+        "A223": {
+          "v": "Solver Mechanics"
         },
         "A23": {
           "fill": "00003366",
@@ -1357,32 +1729,465 @@
         "A8": {
           "v": "Physical Occupancy"
         },
+        "A80": {
+          "fill": "00003366",
+          "v": "Assumption Register"
+        },
+        "A81": {
+          "v": "Group"
+        },
+        "A82": {
+          "v": "Deal Inputs"
+        },
+        "A83": {
+          "v": "Deal Inputs"
+        },
+        "A84": {
+          "v": "Deal Inputs"
+        },
+        "A85": {
+          "v": "Deal Inputs"
+        },
+        "A86": {
+          "v": "Deal Inputs"
+        },
+        "A87": {
+          "v": "Deal Inputs"
+        },
+        "A88": {
+          "v": "Deal Inputs"
+        },
+        "A89": {
+          "v": "Deal Inputs"
+        },
         "A9": {
           "v": "Economic Occupancy"
+        },
+        "A90": {
+          "v": "Deal Inputs"
+        },
+        "A91": {
+          "v": "Deal Inputs"
+        },
+        "A92": {
+          "v": "Deal Inputs"
+        },
+        "A93": {
+          "v": "Deal Inputs"
+        },
+        "A94": {
+          "v": "Deal Inputs"
+        },
+        "A95": {
+          "v": "Deal Inputs"
+        },
+        "A96": {
+          "v": "Deal Inputs"
+        },
+        "A97": {
+          "v": "Deal Inputs"
+        },
+        "A98": {
+          "v": "Deal Inputs"
+        },
+        "A99": {
+          "v": "Deal Inputs"
+        },
+        "B100": {
+          "v": "Minimum 3-Mile Population"
+        },
+        "B101": {
+          "v": "Minimum Physical Occupancy"
+        },
+        "B102": {
+          "v": "Stabilized Occupancy (vintage test)"
+        },
+        "B103": {
+          "v": "Unproven-Vintage Cutoff"
+        },
+        "B104": {
+          "v": "Econ/Physical Spread Flag"
+        },
+        "B105": {
+          "v": "Rate-Bridge Gap Threshold"
+        },
+        "B106": {
+          "v": "Maximum CIM NOI Step-Up"
+        },
+        "B107": {
+          "v": "Minimum Unlevered IRR"
+        },
+        "B108": {
+          "v": "Minimum Yield on Cost"
+        },
+        "B109": {
+          "v": "Maximum SF per Capita"
         },
         "B11": {
           "fill": "00FFFFCC",
           "v": 1998
         },
+        "B110": {
+          "v": "Max-Offer Target (unlevered)"
+        },
+        "B111": {
+          "v": "Max-Offer Target (LP net)"
+        },
+        "B112": {
+          "v": "Strong-Return Threshold"
+        },
+        "B113": {
+          "v": "Hold Period"
+        },
+        "B114": {
+          "v": "Acquisition Closing Costs"
+        },
+        "B115": {
+          "v": "Disposition Costs"
+        },
+        "B116": {
+          "v": "Market Cap Rate (anchor)"
+        },
+        "B117": {
+          "v": "Exit Cap Drift (base, per year)"
+        },
+        "B118": {
+          "v": "Exit Cap Scenario Spread (base)"
+        },
+        "B119": {
+          "v": "Bear \u2014 Year-1 NOI Bump"
+        },
         "B12": {
           "fill": "00FFFFCC",
           "v": 105
         },
+        "B120": {
+          "v": "Bear \u2014 Stabilized Occupancy"
+        },
+        "B121": {
+          "v": "Bear \u2014 Revenue CAGR, Years 1-3"
+        },
+        "B122": {
+          "v": "Bear \u2014 Revenue CAGR, Years 4-5"
+        },
+        "B123": {
+          "v": "Bear \u2014 Expense Growth"
+        },
+        "B124": {
+          "v": "Base \u2014 Year-1 NOI Bump"
+        },
+        "B125": {
+          "v": "Base \u2014 Stabilized Occupancy"
+        },
+        "B126": {
+          "v": "Base \u2014 Revenue CAGR, Years 1-3"
+        },
+        "B127": {
+          "v": "Base \u2014 Revenue CAGR, Years 4-5"
+        },
+        "B128": {
+          "v": "Base \u2014 Expense Growth"
+        },
+        "B129": {
+          "v": "Bull \u2014 Year-1 NOI Bump"
+        },
+        "B130": {
+          "v": "Bull \u2014 Stabilized Occupancy"
+        },
+        "B131": {
+          "v": "Bull \u2014 Revenue CAGR, Years 1-3"
+        },
+        "B132": {
+          "v": "Bull \u2014 Revenue CAGR, Years 4-5"
+        },
+        "B133": {
+          "v": "Bull \u2014 Expense Growth"
+        },
+        "B134": {
+          "v": "Bear \u2014 Target Occupancy"
+        },
+        "B135": {
+          "v": "Bear \u2014 Months to Stabilize"
+        },
+        "B136": {
+          "v": "Bear \u2014 Rent Growth to Market"
+        },
+        "B137": {
+          "v": "Bear \u2014 Post-Stabilization Revenue Growth"
+        },
+        "B138": {
+          "v": "Bear \u2014 Expense Growth"
+        },
+        "B139": {
+          "v": "Base \u2014 Target Occupancy"
+        },
+        "B140": {
+          "v": "Base \u2014 Months to Stabilize"
+        },
+        "B141": {
+          "v": "Base \u2014 Rent Growth to Market"
+        },
+        "B142": {
+          "v": "Base \u2014 Post-Stabilization Revenue Growth"
+        },
+        "B143": {
+          "v": "Base \u2014 Expense Growth"
+        },
+        "B144": {
+          "v": "Bull \u2014 Target Occupancy"
+        },
+        "B145": {
+          "v": "Bull \u2014 Months to Stabilize"
+        },
+        "B146": {
+          "v": "Bull \u2014 Rent Growth to Market"
+        },
+        "B147": {
+          "v": "Bull \u2014 Post-Stabilization Revenue Growth"
+        },
+        "B148": {
+          "v": "Bull \u2014 Expense Growth"
+        },
+        "B149": {
+          "v": "Value-Add Trigger: Occupancy Below"
+        },
         "B15": {
           "v": 272000
+        },
+        "B150": {
+          "v": "Value-Add Trigger: Rent Gap Above"
+        },
+        "B151": {
+          "v": "Occupancy Target"
+        },
+        "B152": {
+          "v": "Econ/Physical Spread Recovery"
+        },
+        "B153": {
+          "v": "ECRI Minimum Occupancy"
+        },
+        "B154": {
+          "v": "ECRI EGR Uplift"
+        },
+        "B155": {
+          "v": "ECRI Increase Range"
+        },
+        "B156": {
+          "v": "ECRI Tenant Tenure"
+        },
+        "B157": {
+          "v": "Ancillary Minimum Share"
+        },
+        "B158": {
+          "v": "Ancillary Target Share"
+        },
+        "B159": {
+          "v": "Ancillary Revenue Uplift"
         },
         "B16": {
           "v": 382795.428571
         },
+        "B160": {
+          "v": "Property Taxes"
+        },
+        "B161": {
+          "v": "Insurance"
+        },
+        "B162": {
+          "v": "Utilities"
+        },
+        "B163": {
+          "v": "Repairs & Maintenance"
+        },
+        "B164": {
+          "v": "Advertising"
+        },
+        "B165": {
+          "v": "Payroll"
+        },
+        "B166": {
+          "v": "General & Administrative"
+        },
+        "B167": {
+          "v": "Management Fee (band)"
+        },
+        "B168": {
+          "v": "Capital Reserve"
+        },
+        "B169": {
+          "v": "Total OpEx"
+        },
         "B17": {
           "v": 486000
+        },
+        "B170": {
+          "v": "OpEx / Revenue Ratio"
+        },
+        "B171": {
+          "v": "Pro-Forma Management Fee"
+        },
+        "B172": {
+          "v": "Assumed OpEx / Revenue"
+        },
+        "B173": {
+          "v": "Clamp Tolerance"
+        },
+        "B174": {
+          "v": "Self-Storage Drive-Up \u2014 hard cost"
+        },
+        "B175": {
+          "v": "Self-Storage Drive-Up \u2014 site work"
+        },
+        "B176": {
+          "v": "Self-Storage Enclosed \u2014 hard cost"
+        },
+        "B177": {
+          "v": "Self-Storage Enclosed \u2014 site work"
+        },
+        "B178": {
+          "v": "Boat/RV Enclosed \u2014 hard cost"
+        },
+        "B179": {
+          "v": "Boat/RV Enclosed \u2014 site work"
         },
         "B18": {
           "v": 214000
         },
+        "B180": {
+          "v": "Boat/RV Covered \u2014 hard cost"
+        },
+        "B181": {
+          "v": "Boat/RV Covered \u2014 site work"
+        },
+        "B182": {
+          "v": "Boat/RV Open Parking \u2014 hard cost"
+        },
+        "B183": {
+          "v": "Boat/RV Open Parking \u2014 site work"
+        },
+        "B184": {
+          "v": "Soft Costs"
+        },
+        "B185": {
+          "v": "Developer Profit"
+        },
+        "B186": {
+          "v": "CapEx Basis"
+        },
+        "B187": {
+          "v": "Operating Reserve"
+        },
+        "B188": {
+          "v": "Operating Reserve Basis"
+        },
+        "B189": {
+          "v": "GP Co-Invest"
+        },
+        "B190": {
+          "v": "Interest Rate"
+        },
+        "B191": {
+          "v": "Index Rate"
+        },
+        "B192": {
+          "v": "Spread"
+        },
+        "B193": {
+          "v": "Amortization"
+        },
+        "B194": {
+          "v": "Interest-Only Period"
+        },
+        "B195": {
+          "v": "Loan Term"
+        },
+        "B196": {
+          "v": "Maximum LTV"
+        },
+        "B197": {
+          "v": "Minimum DSCR"
+        },
+        "B198": {
+          "v": "Minimum Debt Yield"
+        },
+        "B199": {
+          "v": "Origination Fee"
+        },
         "B2": {
           "fill": "00FFFFCC",
           "v": "Characterization Thin"
+        },
+        "B200": {
+          "v": "Exit Fee"
+        },
+        "B201": {
+          "v": "Loan Type"
+        },
+        "B202": {
+          "v": "Preferred Return"
+        },
+        "B203": {
+          "v": "Pref Compounding"
+        },
+        "B204": {
+          "v": "Distribution Ordering"
+        },
+        "B205": {
+          "v": "Promote"
+        },
+        "B206": {
+          "v": "Pref Accrual Base"
+        },
+        "B207": {
+          "v": "AM Fee Treatment"
+        },
+        "B208": {
+          "v": "GP Catch-Up"
+        },
+        "B209": {
+          "v": "Asset Management Fee"
+        },
+        "B210": {
+          "v": "AM Fee Base"
+        },
+        "B211": {
+          "v": "Preferred 3-Mile Density"
+        },
+        "B212": {
+          "v": "Strong 3-Mile Density"
+        },
+        "B213": {
+          "v": "Over-Occupied Threshold"
+        },
+        "B214": {
+          "v": "Strong Occupancy"
+        },
+        "B215": {
+          "v": "Healthy Occupancy"
+        },
+        "B216": {
+          "v": "Bracket: Cheap Entry Cap"
+        },
+        "B217": {
+          "v": "Bracket: Dear Entry Cap"
+        },
+        "B218": {
+          "v": "Bracket: Zero-NOI Low Price"
+        },
+        "B219": {
+          "v": "Bracket: Zero-NOI High Price"
+        },
+        "B220": {
+          "v": "Sensitivity: Price Span"
+        },
+        "B221": {
+          "v": "Sensitivity: Price Step"
+        },
+        "B222": {
+          "v": "Sensitivity: Exit Cap Span"
+        },
+        "B223": {
+          "v": "Sensitivity: Exit Cap Step"
         },
         "B25": {
           "fill": "00FFFFCC",
@@ -1552,6 +2357,435 @@
           "fill": "00FFFFCC",
           "v": 0.88
         },
+        "B81": {
+          "v": "Assumption"
+        },
+        "B82": {
+          "v": "Rentable Square Feet"
+        },
+        "B83": {
+          "v": "Unit Count"
+        },
+        "B84": {
+          "v": "Year Built"
+        },
+        "B85": {
+          "v": "Asking Price"
+        },
+        "B86": {
+          "v": "Physical Occupancy"
+        },
+        "B87": {
+          "v": "TTM Total Revenue"
+        },
+        "B88": {
+          "v": "TTM Total Expenses"
+        },
+        "B89": {
+          "v": "TTM NOI"
+        },
+        "B90": {
+          "v": "Asset Class"
+        },
+        "B91": {
+          "v": "Cc Pct"
+        },
+        "B92": {
+          "v": "Property Taxes"
+        },
+        "B93": {
+          "v": "Advertising"
+        },
+        "B94": {
+          "v": "Capital Reserve"
+        },
+        "B95": {
+          "v": "General & Administrative"
+        },
+        "B96": {
+          "v": "Insurance"
+        },
+        "B97": {
+          "v": "Payroll"
+        },
+        "B98": {
+          "v": "Repairs & Maintenance"
+        },
+        "B99": {
+          "v": "Utilities"
+        },
+        "C100": {
+          "v": "50,000"
+        },
+        "C101": {
+          "v": "75.0%"
+        },
+        "C102": {
+          "v": "85.0%"
+        },
+        "C103": {
+          "v": "2,021"
+        },
+        "C104": {
+          "v": "10.0%"
+        },
+        "C105": {
+          "v": "10.0%"
+        },
+        "C106": {
+          "v": "15.0%"
+        },
+        "C107": {
+          "v": "10.0%"
+        },
+        "C108": {
+          "v": "8.0%"
+        },
+        "C109": {
+          "v": "10"
+        },
+        "C110": {
+          "v": "10.0%"
+        },
+        "C111": {
+          "v": "15.0%"
+        },
+        "C112": {
+          "v": "12.0%"
+        },
+        "C113": {
+          "v": "5 yr"
+        },
+        "C114": {
+          "v": "1.0%"
+        },
+        "C115": {
+          "v": "1.5%"
+        },
+        "C116": {
+          "v": "6.75%"
+        },
+        "C117": {
+          "v": "7.5 bps"
+        },
+        "C118": {
+          "v": "0 bps"
+        },
+        "C119": {
+          "v": "0.0%"
+        },
+        "C120": {
+          "v": "82.0%"
+        },
+        "C121": {
+          "v": "1.5%"
+        },
+        "C122": {
+          "v": "1.5%"
+        },
+        "C123": {
+          "v": "3.0%"
+        },
+        "C124": {
+          "v": "5.0%"
+        },
+        "C125": {
+          "v": "88.0%"
+        },
+        "C126": {
+          "v": "2.5%"
+        },
+        "C127": {
+          "v": "2.5%"
+        },
+        "C128": {
+          "v": "3.0%"
+        },
+        "C129": {
+          "v": "10.0%"
+        },
+        "C130": {
+          "v": "93.0%"
+        },
+        "C131": {
+          "v": "4.0%"
+        },
+        "C132": {
+          "v": "3.5%"
+        },
+        "C133": {
+          "v": "3.0%"
+        },
+        "C134": {
+          "v": "85.0%"
+        },
+        "C135": {
+          "v": "30 mo"
+        },
+        "C136": {
+          "v": "85.0%"
+        },
+        "C137": {
+          "v": "2.0%"
+        },
+        "C138": {
+          "v": "3.0%"
+        },
+        "C139": {
+          "v": "88.0%"
+        },
+        "C140": {
+          "v": "24 mo"
+        },
+        "C141": {
+          "v": "100.0%"
+        },
+        "C142": {
+          "v": "3.0%"
+        },
+        "C143": {
+          "v": "3.0%"
+        },
+        "C144": {
+          "v": "92.0%"
+        },
+        "C145": {
+          "v": "18 mo"
+        },
+        "C146": {
+          "v": "100.0%"
+        },
+        "C147": {
+          "v": "4.0%"
+        },
+        "C148": {
+          "v": "2.5%"
+        },
+        "C149": {
+          "v": "85.0%"
+        },
+        "C150": {
+          "v": "10.0%"
+        },
+        "C151": {
+          "v": "93.0%"
+        },
+        "C152": {
+          "v": "50.0%"
+        },
+        "C153": {
+          "v": "88.0%"
+        },
+        "C154": {
+          "v": "3.0%"
+        },
+        "C155": {
+          "v": "8.0% \u2013 10.0%"
+        },
+        "C156": {
+          "v": "6 mo"
+        },
+        "C157": {
+          "v": "5.0%"
+        },
+        "C158": {
+          "v": "5.0% \u2013 8.0%"
+        },
+        "C159": {
+          "v": "3.0%"
+        },
+        "C160": {
+          "v": "$1.20/SF/yr \u2013 $2.50/SF/yr"
+        },
+        "C161": {
+          "v": "$0.18/SF/yr \u2013 $0.38/SF/yr"
+        },
+        "C162": {
+          "v": "$0.10/SF/yr \u2013 $0.22/SF/yr"
+        },
+        "C163": {
+          "v": "$0.18/SF/yr \u2013 $0.36/SF/yr"
+        },
+        "C164": {
+          "v": "$0.06/SF/yr \u2013 $0.17/SF/yr"
+        },
+        "C165": {
+          "v": "$0.26/SF/yr \u2013 $0.51/SF/yr"
+        },
+        "C166": {
+          "v": "$0.09/SF/yr \u2013 $0.18/SF/yr"
+        },
+        "C167": {
+          "v": "3.0% \u2013 6.0%"
+        },
+        "C168": {
+          "v": "$0.15/SF/yr \u2013 $0.25/SF/yr"
+        },
+        "C169": {
+          "v": "$2.22/SF/yr \u2013 $4.57/SF/yr"
+        },
+        "C170": {
+          "v": "35.0% \u2013 55.0%"
+        },
+        "C171": {
+          "v": "6.0%"
+        },
+        "C172": {
+          "v": "40.0%"
+        },
+        "C173": {
+          "v": "10.0%"
+        },
+        "C174": {
+          "v": "$55.00/SF \u2013 $85.00/SF"
+        },
+        "C175": {
+          "v": "$5.00/SF \u2013 $12.00/SF"
+        },
+        "C176": {
+          "v": "$90.00/SF \u2013 $130.00/SF"
+        },
+        "C177": {
+          "v": "$5.00/SF \u2013 $12.00/SF"
+        },
+        "C178": {
+          "v": "$45.00/SF \u2013 $70.00/SF"
+        },
+        "C179": {
+          "v": "$8.00/SF \u2013 $15.00/SF"
+        },
+        "C180": {
+          "v": "$15.00/SF \u2013 $30.00/SF"
+        },
+        "C181": {
+          "v": "$6.00/SF \u2013 $12.00/SF"
+        },
+        "C182": {
+          "v": "$4.00/SF \u2013 $10.00/SF"
+        },
+        "C183": {
+          "v": "$0.00/SF \u2013 $0.00/SF"
+        },
+        "C184": {
+          "v": "8.0% \u2013 12.0%"
+        },
+        "C185": {
+          "v": "10.0% \u2013 15.0%"
+        },
+        "C186": {
+          "v": "amount"
+        },
+        "C187": {
+          "v": "0"
+        },
+        "C188": {
+          "v": "amount"
+        },
+        "C189": {
+          "v": "10.0%"
+        },
+        "C190": {
+          "v": "6.25%"
+        },
+        "C191": {
+          "v": "\u2014"
+        },
+        "C192": {
+          "v": "\u2014"
+        },
+        "C193": {
+          "v": "25 yr"
+        },
+        "C194": {
+          "v": "0 mo"
+        },
+        "C195": {
+          "v": "10 yr"
+        },
+        "C196": {
+          "v": "65.0%"
+        },
+        "C197": {
+          "v": "1.25"
+        },
+        "C198": {
+          "v": "10.0%"
+        },
+        "C199": {
+          "v": "1.0%"
+        },
+        "C200": {
+          "v": "0.0%"
+        },
+        "C201": {
+          "v": "senior_fixed"
+        },
+        "C202": {
+          "v": "8.0%"
+        },
+        "C203": {
+          "v": "annual"
+        },
+        "C204": {
+          "v": "roc_first"
+        },
+        "C205": {
+          "v": "20.0%"
+        },
+        "C206": {
+          "v": "contributed"
+        },
+        "C207": {
+          "v": "above_waterfall"
+        },
+        "C208": {
+          "v": "False"
+        },
+        "C209": {
+          "v": "1.0%"
+        },
+        "C210": {
+          "v": "invested_equity"
+        },
+        "C211": {
+          "v": "75,000"
+        },
+        "C212": {
+          "v": "100,000"
+        },
+        "C213": {
+          "v": "95.0%"
+        },
+        "C214": {
+          "v": "90.0%"
+        },
+        "C215": {
+          "v": "85.0%"
+        },
+        "C216": {
+          "v": "20.0%"
+        },
+        "C217": {
+          "v": "2.0%"
+        },
+        "C218": {
+          "v": "$100,000"
+        },
+        "C219": {
+          "v": "$50,000,000"
+        },
+        "C220": {
+          "v": "10.0%"
+        },
+        "C221": {
+          "v": "2.5%"
+        },
+        "C222": {
+          "v": "1.0%"
+        },
+        "C223": {
+          "v": "0.25%"
+        },
         "C68": {
           "v": "Source"
         },
@@ -1585,6 +2819,435 @@
         "C78": {
           "v": "benchmark floor x NRSF"
         },
+        "C81": {
+          "v": "Value Used"
+        },
+        "C82": {
+          "v": "40,000 SF"
+        },
+        "C83": {
+          "v": "320"
+        },
+        "C84": {
+          "v": "1,998"
+        },
+        "C85": {
+          "v": "$4,200,000"
+        },
+        "C86": {
+          "v": "88.0%"
+        },
+        "C87": {
+          "v": "$486,000"
+        },
+        "C88": {
+          "v": "$214,000"
+        },
+        "C89": {
+          "v": "$272,000"
+        },
+        "C90": {
+          "v": "Self Storage"
+        },
+        "C91": {
+          "v": "0.0%"
+        },
+        "C92": {
+          "v": "$62,405"
+        },
+        "C93": {
+          "v": "$2,400"
+        },
+        "C94": {
+          "v": "$6,000"
+        },
+        "C95": {
+          "v": "$3,600"
+        },
+        "C96": {
+          "v": "$7,200"
+        },
+        "C97": {
+          "v": "$10,400"
+        },
+        "C98": {
+          "v": "$7,200"
+        },
+        "C99": {
+          "v": "$4,000"
+        },
+        "D100": {
+          "v": "model default"
+        },
+        "D101": {
+          "v": "model default"
+        },
+        "D102": {
+          "v": "model default"
+        },
+        "D103": {
+          "v": "model default"
+        },
+        "D104": {
+          "v": "model default"
+        },
+        "D105": {
+          "v": "model default"
+        },
+        "D106": {
+          "v": "model default"
+        },
+        "D107": {
+          "v": "model default"
+        },
+        "D108": {
+          "v": "model default"
+        },
+        "D109": {
+          "v": "model default"
+        },
+        "D110": {
+          "v": "model default"
+        },
+        "D111": {
+          "v": "model default"
+        },
+        "D112": {
+          "v": "model default"
+        },
+        "D113": {
+          "v": "model default"
+        },
+        "D114": {
+          "v": "model default"
+        },
+        "D115": {
+          "v": "model default"
+        },
+        "D116": {
+          "v": "model default"
+        },
+        "D117": {
+          "v": "model default"
+        },
+        "D118": {
+          "v": "model default"
+        },
+        "D119": {
+          "v": "model default"
+        },
+        "D120": {
+          "v": "model default"
+        },
+        "D121": {
+          "v": "model default"
+        },
+        "D122": {
+          "v": "model default"
+        },
+        "D123": {
+          "v": "model default"
+        },
+        "D124": {
+          "v": "model default"
+        },
+        "D125": {
+          "v": "model default"
+        },
+        "D126": {
+          "v": "model default"
+        },
+        "D127": {
+          "v": "model default"
+        },
+        "D128": {
+          "v": "model default"
+        },
+        "D129": {
+          "v": "model default"
+        },
+        "D130": {
+          "v": "model default"
+        },
+        "D131": {
+          "v": "model default"
+        },
+        "D132": {
+          "v": "model default"
+        },
+        "D133": {
+          "v": "model default"
+        },
+        "D134": {
+          "v": "model default"
+        },
+        "D135": {
+          "v": "model default"
+        },
+        "D136": {
+          "v": "model default"
+        },
+        "D137": {
+          "v": "model default"
+        },
+        "D138": {
+          "v": "model default"
+        },
+        "D139": {
+          "v": "model default"
+        },
+        "D140": {
+          "v": "model default"
+        },
+        "D141": {
+          "v": "model default"
+        },
+        "D142": {
+          "v": "model default"
+        },
+        "D143": {
+          "v": "model default"
+        },
+        "D144": {
+          "v": "model default"
+        },
+        "D145": {
+          "v": "model default"
+        },
+        "D146": {
+          "v": "model default"
+        },
+        "D147": {
+          "v": "model default"
+        },
+        "D148": {
+          "v": "model default"
+        },
+        "D149": {
+          "v": "model default"
+        },
+        "D150": {
+          "v": "model default"
+        },
+        "D151": {
+          "v": "model default"
+        },
+        "D152": {
+          "v": "model default"
+        },
+        "D153": {
+          "v": "model default"
+        },
+        "D154": {
+          "v": "model default"
+        },
+        "D155": {
+          "v": "model default"
+        },
+        "D156": {
+          "v": "model default"
+        },
+        "D157": {
+          "v": "model default"
+        },
+        "D158": {
+          "v": "model default"
+        },
+        "D159": {
+          "v": "model default"
+        },
+        "D160": {
+          "v": "model default"
+        },
+        "D161": {
+          "v": "model default"
+        },
+        "D162": {
+          "v": "model default"
+        },
+        "D163": {
+          "v": "model default"
+        },
+        "D164": {
+          "v": "model default"
+        },
+        "D165": {
+          "v": "model default"
+        },
+        "D166": {
+          "v": "model default"
+        },
+        "D167": {
+          "v": "model default"
+        },
+        "D168": {
+          "v": "model default"
+        },
+        "D169": {
+          "v": "model default"
+        },
+        "D170": {
+          "v": "model default"
+        },
+        "D171": {
+          "v": "model default"
+        },
+        "D172": {
+          "v": "model default"
+        },
+        "D173": {
+          "v": "model default"
+        },
+        "D174": {
+          "v": "model default"
+        },
+        "D175": {
+          "v": "model default"
+        },
+        "D176": {
+          "v": "model default"
+        },
+        "D177": {
+          "v": "model default"
+        },
+        "D178": {
+          "v": "model default"
+        },
+        "D179": {
+          "v": "model default"
+        },
+        "D180": {
+          "v": "model default"
+        },
+        "D181": {
+          "v": "model default"
+        },
+        "D182": {
+          "v": "model default"
+        },
+        "D183": {
+          "v": "model default"
+        },
+        "D184": {
+          "v": "model default"
+        },
+        "D185": {
+          "v": "model default"
+        },
+        "D186": {
+          "v": "model default"
+        },
+        "D187": {
+          "v": "model default"
+        },
+        "D188": {
+          "v": "model default"
+        },
+        "D189": {
+          "v": "model default"
+        },
+        "D190": {
+          "v": "model default"
+        },
+        "D191": {
+          "v": "model default"
+        },
+        "D192": {
+          "v": "model default"
+        },
+        "D193": {
+          "v": "model default"
+        },
+        "D194": {
+          "v": "model default"
+        },
+        "D195": {
+          "v": "model default"
+        },
+        "D196": {
+          "v": "model default"
+        },
+        "D197": {
+          "v": "model default"
+        },
+        "D198": {
+          "v": "model default"
+        },
+        "D199": {
+          "v": "model default"
+        },
+        "D200": {
+          "v": "model default"
+        },
+        "D201": {
+          "v": "model default"
+        },
+        "D202": {
+          "v": "model default"
+        },
+        "D203": {
+          "v": "model default"
+        },
+        "D204": {
+          "v": "model default"
+        },
+        "D205": {
+          "v": "model default"
+        },
+        "D206": {
+          "v": "model default"
+        },
+        "D207": {
+          "v": "model default"
+        },
+        "D208": {
+          "v": "model default"
+        },
+        "D209": {
+          "v": "model default"
+        },
+        "D210": {
+          "v": "model default"
+        },
+        "D211": {
+          "v": "model default"
+        },
+        "D212": {
+          "v": "model default"
+        },
+        "D213": {
+          "v": "model default"
+        },
+        "D214": {
+          "v": "model default"
+        },
+        "D215": {
+          "v": "model default"
+        },
+        "D216": {
+          "v": "model default"
+        },
+        "D217": {
+          "v": "model default"
+        },
+        "D218": {
+          "v": "model default"
+        },
+        "D219": {
+          "v": "model default"
+        },
+        "D220": {
+          "v": "model default"
+        },
+        "D221": {
+          "v": "model default"
+        },
+        "D222": {
+          "v": "model default"
+        },
+        "D223": {
+          "v": "model default"
+        },
         "D68": {
           "v": "Derived From"
         },
@@ -1617,6 +3280,123 @@
         },
         "D78": {
           "v": "benchmark_low=0.1; benchmark_high=0.22; nrsf=40000; benchmark_source=regional (TX)"
+        },
+        "D81": {
+          "v": "Source"
+        },
+        "D82": {
+          "v": "stated in the CIM"
+        },
+        "D83": {
+          "v": "stated in the CIM"
+        },
+        "D84": {
+          "v": "stated in the CIM"
+        },
+        "D85": {
+          "v": "stated in the CIM"
+        },
+        "D86": {
+          "v": "stated in the CIM"
+        },
+        "D87": {
+          "v": "stated in the CIM"
+        },
+        "D88": {
+          "v": "stated in the CIM"
+        },
+        "D89": {
+          "v": "stated in the CIM"
+        },
+        "D90": {
+          "v": "filled from a default"
+        },
+        "D91": {
+          "v": "filled from a default"
+        },
+        "D92": {
+          "v": "filled from a default"
+        },
+        "D93": {
+          "v": "filled from a default"
+        },
+        "D94": {
+          "v": "filled from a default"
+        },
+        "D95": {
+          "v": "filled from a default"
+        },
+        "D96": {
+          "v": "filled from a default"
+        },
+        "D97": {
+          "v": "filled from a default"
+        },
+        "D98": {
+          "v": "filled from a default"
+        },
+        "D99": {
+          "v": "filled from a default"
+        },
+        "E116": {
+          "v": "Self Storage / aging"
+        },
+        "E161": {
+          "v": "regionally adjusted for TX"
+        },
+        "E162": {
+          "v": "regionally adjusted for TX"
+        },
+        "E163": {
+          "v": "regionally adjusted for TX"
+        },
+        "E164": {
+          "v": "regionally adjusted for TX"
+        },
+        "E165": {
+          "v": "regionally adjusted for TX"
+        },
+        "E166": {
+          "v": "regionally adjusted for TX"
+        },
+        "E168": {
+          "v": "regionally adjusted for TX"
+        },
+        "E169": {
+          "v": "regionally adjusted for TX"
+        },
+        "E81": {
+          "v": "Replaced"
+        },
+        "E90": {
+          "v": "Nothing in the CIM identifies the class \u2014 no boat/RV square footage, no climate-controlled share \u2014 so the exit cap came from the default row of the table."
+        },
+        "E91": {
+          "v": "No facility-type SF either, so the whole building is costed as drive-up. CC space costs more to build, so replacement cost \u2014 what the asking price is screened against \u2014 is understated if any exists."
+        },
+        "E92": {
+          "v": "Estimated from this deal's own NOI: NOI / 7% cap x 73% assessed x 2.2% TX rate. Not the assessor's number, and not a reassessment at your basis."
+        },
+        "E93": {
+          "v": "Booked at $0.06/SF \u2014 the LOW end of the $0.06-$0.17/SF benchmark range, so the true expense is likelier higher."
+        },
+        "E94": {
+          "v": "Booked at $0.15/SF \u2014 the LOW end of the $0.15-$0.25/SF benchmark range, so the true expense is likelier higher."
+        },
+        "E95": {
+          "v": "Booked at $0.09/SF \u2014 the LOW end of the $0.09-$0.18/SF benchmark range, so the true expense is likelier higher."
+        },
+        "E96": {
+          "v": "Booked at $0.18/SF \u2014 the LOW end of the $0.18-$0.38/SF benchmark range, so the true expense is likelier higher."
+        },
+        "E97": {
+          "v": "Booked at $0.26/SF \u2014 the LOW end of the $0.26-$0.51/SF benchmark range, so the true expense is likelier higher."
+        },
+        "E98": {
+          "v": "Booked at $0.18/SF \u2014 the LOW end of the $0.18-$0.36/SF benchmark range, so the true expense is likelier higher."
+        },
+        "E99": {
+          "v": "Booked at $0.10/SF \u2014 the LOW end of the $0.10-$0.22/SF benchmark range, so the true expense is likelier higher."
         }
       },
       "Levered Returns": {
@@ -3032,7 +4812,11 @@
         "Maximum Offer: $5,143,814 (-22.5% discount to asking price of $4,200,000)",
         "Note: This analysis is based on CIM-provided data supplemented by benchmark assumptions. All figures should be verified during due diligence.",
         "Appendix A. Assumptions Filled From Defaults",
-        "The CIM did not state the inputs below. The model used the value in the second column, from the source in the third \u2014 not a figure from this deal. Each one moves the returns in section 6, so an assumption an IC reader disagrees with is an assumption to change on the assumptions page and re-run, not a number to discount by eye."
+        "The CIM did not state the inputs below. The model used the value in the second column, from the source in the third \u2014 not a figure from this deal. Each one moves the returns in section 6, so an assumption an IC reader disagrees with is an assumption to change on the assumptions page and re-run, not a number to discount by eye.",
+        "Appendix B. Assumption Register",
+        "Every number this analysis used, with its source. Of 142 assumptions, 10 came from something other than the model's shipped defaults: 0 entered for this deal, 0 from a dated settings override, 10 filled in because the CIM did not state them. Those are listed first. The full register follows \u2014 nothing is omitted from it, so an assumption absent below is an assumption this run did not use.",
+        "B.1 Assumptions not taken from the model defaults",
+        "B.2 Full register"
       ],
       "tables": [
         [
@@ -3596,6 +5380,934 @@
             "$4,000",
             "benchmark floor x NRSF",
             "Booked at $0.10/SF \u2014 the LOW end of the $0.10-$0.22/SF benchmark range, so the true expense is likelier higher."
+          ]
+        ],
+        [
+          [
+            "Assumption",
+            "Value Used",
+            "Source",
+            "Replaced"
+          ],
+          [
+            "Asset Class",
+            "Self Storage",
+            "filled from a default",
+            "Nothing in the CIM identifies the class \u2014 no boat/RV square footage, no climate-controlled share \u2014 so the exit cap came from the default row of the table."
+          ],
+          [
+            "Cc Pct",
+            "0.0%",
+            "filled from a default",
+            "No facility-type SF either, so the whole building is costed as drive-up. CC space costs more to build, so replacement cost \u2014 what the asking price is screened against \u2014 is understated if any exists."
+          ],
+          [
+            "Property Taxes",
+            "$62,405",
+            "filled from a default",
+            "Estimated from this deal's own NOI: NOI / 7% cap x 73% assessed x 2.2% TX rate. Not the assessor's number, and not a reassessment at your basis."
+          ],
+          [
+            "Advertising",
+            "$2,400",
+            "filled from a default",
+            "Booked at $0.06/SF \u2014 the LOW end of the $0.06-$0.17/SF benchmark range, so the true expense is likelier higher."
+          ],
+          [
+            "Capital Reserve",
+            "$6,000",
+            "filled from a default",
+            "Booked at $0.15/SF \u2014 the LOW end of the $0.15-$0.25/SF benchmark range, so the true expense is likelier higher."
+          ],
+          [
+            "General & Administrative",
+            "$3,600",
+            "filled from a default",
+            "Booked at $0.09/SF \u2014 the LOW end of the $0.09-$0.18/SF benchmark range, so the true expense is likelier higher."
+          ],
+          [
+            "Insurance",
+            "$7,200",
+            "filled from a default",
+            "Booked at $0.18/SF \u2014 the LOW end of the $0.18-$0.38/SF benchmark range, so the true expense is likelier higher."
+          ],
+          [
+            "Payroll",
+            "$10,400",
+            "filled from a default",
+            "Booked at $0.26/SF \u2014 the LOW end of the $0.26-$0.51/SF benchmark range, so the true expense is likelier higher."
+          ],
+          [
+            "Repairs & Maintenance",
+            "$7,200",
+            "filled from a default",
+            "Booked at $0.18/SF \u2014 the LOW end of the $0.18-$0.36/SF benchmark range, so the true expense is likelier higher."
+          ],
+          [
+            "Utilities",
+            "$4,000",
+            "filled from a default",
+            "Booked at $0.10/SF \u2014 the LOW end of the $0.10-$0.22/SF benchmark range, so the true expense is likelier higher."
+          ]
+        ],
+        [
+          [
+            "Group",
+            "Assumption",
+            "Value Used",
+            "Source"
+          ],
+          [
+            "Deal Inputs",
+            "Rentable Square Feet",
+            "40,000 SF",
+            "stated in the CIM"
+          ],
+          [
+            "Deal Inputs",
+            "Unit Count",
+            "320",
+            "stated in the CIM"
+          ],
+          [
+            "Deal Inputs",
+            "Year Built",
+            "1,998",
+            "stated in the CIM"
+          ],
+          [
+            "Deal Inputs",
+            "Asking Price",
+            "$4,200,000",
+            "stated in the CIM"
+          ],
+          [
+            "Deal Inputs",
+            "Physical Occupancy",
+            "88.0%",
+            "stated in the CIM"
+          ],
+          [
+            "Deal Inputs",
+            "TTM Total Revenue",
+            "$486,000",
+            "stated in the CIM"
+          ],
+          [
+            "Deal Inputs",
+            "TTM Total Expenses",
+            "$214,000",
+            "stated in the CIM"
+          ],
+          [
+            "Deal Inputs",
+            "TTM NOI",
+            "$272,000",
+            "stated in the CIM"
+          ],
+          [
+            "Deal Inputs",
+            "Asset Class",
+            "Self Storage",
+            "filled from a default"
+          ],
+          [
+            "Deal Inputs",
+            "Cc Pct",
+            "0.0%",
+            "filled from a default"
+          ],
+          [
+            "Deal Inputs",
+            "Property Taxes",
+            "$62,405",
+            "filled from a default"
+          ],
+          [
+            "Deal Inputs",
+            "Advertising",
+            "$2,400",
+            "filled from a default"
+          ],
+          [
+            "Deal Inputs",
+            "Capital Reserve",
+            "$6,000",
+            "filled from a default"
+          ],
+          [
+            "Deal Inputs",
+            "General & Administrative",
+            "$3,600",
+            "filled from a default"
+          ],
+          [
+            "Deal Inputs",
+            "Insurance",
+            "$7,200",
+            "filled from a default"
+          ],
+          [
+            "Deal Inputs",
+            "Payroll",
+            "$10,400",
+            "filled from a default"
+          ],
+          [
+            "Deal Inputs",
+            "Repairs & Maintenance",
+            "$7,200",
+            "filled from a default"
+          ],
+          [
+            "Deal Inputs",
+            "Utilities",
+            "$4,000",
+            "filled from a default"
+          ],
+          [
+            "Investment Gates",
+            "Minimum 3-Mile Population",
+            "50,000",
+            "model default"
+          ],
+          [
+            "Investment Gates",
+            "Minimum Physical Occupancy",
+            "75.0%",
+            "model default"
+          ],
+          [
+            "Investment Gates",
+            "Stabilized Occupancy (vintage test)",
+            "85.0%",
+            "model default"
+          ],
+          [
+            "Investment Gates",
+            "Unproven-Vintage Cutoff",
+            "2,021",
+            "model default"
+          ],
+          [
+            "Investment Gates",
+            "Econ/Physical Spread Flag",
+            "10.0%",
+            "model default"
+          ],
+          [
+            "Investment Gates",
+            "Rate-Bridge Gap Threshold",
+            "10.0%",
+            "model default"
+          ],
+          [
+            "Investment Gates",
+            "Maximum CIM NOI Step-Up",
+            "15.0%",
+            "model default"
+          ],
+          [
+            "Investment Gates",
+            "Minimum Unlevered IRR",
+            "10.0%",
+            "model default"
+          ],
+          [
+            "Investment Gates",
+            "Minimum Yield on Cost",
+            "8.0%",
+            "model default"
+          ],
+          [
+            "Investment Gates",
+            "Maximum SF per Capita",
+            "10",
+            "model default"
+          ],
+          [
+            "Return Targets",
+            "Max-Offer Target (unlevered)",
+            "10.0%",
+            "model default"
+          ],
+          [
+            "Return Targets",
+            "Max-Offer Target (LP net)",
+            "15.0%",
+            "model default"
+          ],
+          [
+            "Return Targets",
+            "Strong-Return Threshold",
+            "12.0%",
+            "model default"
+          ],
+          [
+            "Hold & Transaction Costs",
+            "Hold Period",
+            "5 yr",
+            "model default"
+          ],
+          [
+            "Hold & Transaction Costs",
+            "Acquisition Closing Costs",
+            "1.0%",
+            "model default"
+          ],
+          [
+            "Hold & Transaction Costs",
+            "Disposition Costs",
+            "1.5%",
+            "model default"
+          ],
+          [
+            "Exit Cap",
+            "Market Cap Rate (anchor)",
+            "6.75%",
+            "model default"
+          ],
+          [
+            "Exit Cap",
+            "Exit Cap Drift (base, per year)",
+            "7.5 bps",
+            "model default"
+          ],
+          [
+            "Exit Cap",
+            "Exit Cap Scenario Spread (base)",
+            "0 bps",
+            "model default"
+          ],
+          [
+            "Scenarios",
+            "Bear \u2014 Year-1 NOI Bump",
+            "0.0%",
+            "model default"
+          ],
+          [
+            "Scenarios",
+            "Bear \u2014 Stabilized Occupancy",
+            "82.0%",
+            "model default"
+          ],
+          [
+            "Scenarios",
+            "Bear \u2014 Revenue CAGR, Years 1-3",
+            "1.5%",
+            "model default"
+          ],
+          [
+            "Scenarios",
+            "Bear \u2014 Revenue CAGR, Years 4-5",
+            "1.5%",
+            "model default"
+          ],
+          [
+            "Scenarios",
+            "Bear \u2014 Expense Growth",
+            "3.0%",
+            "model default"
+          ],
+          [
+            "Scenarios",
+            "Base \u2014 Year-1 NOI Bump",
+            "5.0%",
+            "model default"
+          ],
+          [
+            "Scenarios",
+            "Base \u2014 Stabilized Occupancy",
+            "88.0%",
+            "model default"
+          ],
+          [
+            "Scenarios",
+            "Base \u2014 Revenue CAGR, Years 1-3",
+            "2.5%",
+            "model default"
+          ],
+          [
+            "Scenarios",
+            "Base \u2014 Revenue CAGR, Years 4-5",
+            "2.5%",
+            "model default"
+          ],
+          [
+            "Scenarios",
+            "Base \u2014 Expense Growth",
+            "3.0%",
+            "model default"
+          ],
+          [
+            "Scenarios",
+            "Bull \u2014 Year-1 NOI Bump",
+            "10.0%",
+            "model default"
+          ],
+          [
+            "Scenarios",
+            "Bull \u2014 Stabilized Occupancy",
+            "93.0%",
+            "model default"
+          ],
+          [
+            "Scenarios",
+            "Bull \u2014 Revenue CAGR, Years 1-3",
+            "4.0%",
+            "model default"
+          ],
+          [
+            "Scenarios",
+            "Bull \u2014 Revenue CAGR, Years 4-5",
+            "3.5%",
+            "model default"
+          ],
+          [
+            "Scenarios",
+            "Bull \u2014 Expense Growth",
+            "3.0%",
+            "model default"
+          ],
+          [
+            "Value-Add Scenarios",
+            "Bear \u2014 Target Occupancy",
+            "85.0%",
+            "model default"
+          ],
+          [
+            "Value-Add Scenarios",
+            "Bear \u2014 Months to Stabilize",
+            "30 mo",
+            "model default"
+          ],
+          [
+            "Value-Add Scenarios",
+            "Bear \u2014 Rent Growth to Market",
+            "85.0%",
+            "model default"
+          ],
+          [
+            "Value-Add Scenarios",
+            "Bear \u2014 Post-Stabilization Revenue Growth",
+            "2.0%",
+            "model default"
+          ],
+          [
+            "Value-Add Scenarios",
+            "Bear \u2014 Expense Growth",
+            "3.0%",
+            "model default"
+          ],
+          [
+            "Value-Add Scenarios",
+            "Base \u2014 Target Occupancy",
+            "88.0%",
+            "model default"
+          ],
+          [
+            "Value-Add Scenarios",
+            "Base \u2014 Months to Stabilize",
+            "24 mo",
+            "model default"
+          ],
+          [
+            "Value-Add Scenarios",
+            "Base \u2014 Rent Growth to Market",
+            "100.0%",
+            "model default"
+          ],
+          [
+            "Value-Add Scenarios",
+            "Base \u2014 Post-Stabilization Revenue Growth",
+            "3.0%",
+            "model default"
+          ],
+          [
+            "Value-Add Scenarios",
+            "Base \u2014 Expense Growth",
+            "3.0%",
+            "model default"
+          ],
+          [
+            "Value-Add Scenarios",
+            "Bull \u2014 Target Occupancy",
+            "92.0%",
+            "model default"
+          ],
+          [
+            "Value-Add Scenarios",
+            "Bull \u2014 Months to Stabilize",
+            "18 mo",
+            "model default"
+          ],
+          [
+            "Value-Add Scenarios",
+            "Bull \u2014 Rent Growth to Market",
+            "100.0%",
+            "model default"
+          ],
+          [
+            "Value-Add Scenarios",
+            "Bull \u2014 Post-Stabilization Revenue Growth",
+            "4.0%",
+            "model default"
+          ],
+          [
+            "Value-Add Scenarios",
+            "Bull \u2014 Expense Growth",
+            "2.5%",
+            "model default"
+          ],
+          [
+            "Value-Add Opportunity",
+            "Value-Add Trigger: Occupancy Below",
+            "85.0%",
+            "model default"
+          ],
+          [
+            "Value-Add Opportunity",
+            "Value-Add Trigger: Rent Gap Above",
+            "10.0%",
+            "model default"
+          ],
+          [
+            "Value-Add Opportunity",
+            "Occupancy Target",
+            "93.0%",
+            "model default"
+          ],
+          [
+            "Value-Add Opportunity",
+            "Econ/Physical Spread Recovery",
+            "50.0%",
+            "model default"
+          ],
+          [
+            "Value-Add Opportunity",
+            "ECRI Minimum Occupancy",
+            "88.0%",
+            "model default"
+          ],
+          [
+            "Value-Add Opportunity",
+            "ECRI EGR Uplift",
+            "3.0%",
+            "model default"
+          ],
+          [
+            "Value-Add Opportunity",
+            "ECRI Increase Range",
+            "8.0% \u2013 10.0%",
+            "model default"
+          ],
+          [
+            "Value-Add Opportunity",
+            "ECRI Tenant Tenure",
+            "6 mo",
+            "model default"
+          ],
+          [
+            "Value-Add Opportunity",
+            "Ancillary Minimum Share",
+            "5.0%",
+            "model default"
+          ],
+          [
+            "Value-Add Opportunity",
+            "Ancillary Target Share",
+            "5.0% \u2013 8.0%",
+            "model default"
+          ],
+          [
+            "Value-Add Opportunity",
+            "Ancillary Revenue Uplift",
+            "3.0%",
+            "model default"
+          ],
+          [
+            "Expense Benchmarks",
+            "Property Taxes",
+            "$1.20/SF/yr \u2013 $2.50/SF/yr",
+            "model default"
+          ],
+          [
+            "Expense Benchmarks",
+            "Insurance",
+            "$0.18/SF/yr \u2013 $0.38/SF/yr",
+            "model default"
+          ],
+          [
+            "Expense Benchmarks",
+            "Utilities",
+            "$0.10/SF/yr \u2013 $0.22/SF/yr",
+            "model default"
+          ],
+          [
+            "Expense Benchmarks",
+            "Repairs & Maintenance",
+            "$0.18/SF/yr \u2013 $0.36/SF/yr",
+            "model default"
+          ],
+          [
+            "Expense Benchmarks",
+            "Advertising",
+            "$0.06/SF/yr \u2013 $0.17/SF/yr",
+            "model default"
+          ],
+          [
+            "Expense Benchmarks",
+            "Payroll",
+            "$0.26/SF/yr \u2013 $0.51/SF/yr",
+            "model default"
+          ],
+          [
+            "Expense Benchmarks",
+            "General & Administrative",
+            "$0.09/SF/yr \u2013 $0.18/SF/yr",
+            "model default"
+          ],
+          [
+            "Expense Benchmarks",
+            "Management Fee (band)",
+            "3.0% \u2013 6.0%",
+            "model default"
+          ],
+          [
+            "Expense Benchmarks",
+            "Capital Reserve",
+            "$0.15/SF/yr \u2013 $0.25/SF/yr",
+            "model default"
+          ],
+          [
+            "Expense Benchmarks",
+            "Total OpEx",
+            "$2.22/SF/yr \u2013 $4.57/SF/yr",
+            "model default"
+          ],
+          [
+            "Expense Benchmarks",
+            "OpEx / Revenue Ratio",
+            "35.0% \u2013 55.0%",
+            "model default"
+          ],
+          [
+            "Expense Benchmarks",
+            "Pro-Forma Management Fee",
+            "6.0%",
+            "model default"
+          ],
+          [
+            "Expense Benchmarks",
+            "Assumed OpEx / Revenue",
+            "40.0%",
+            "model default"
+          ],
+          [
+            "Expense Benchmarks",
+            "Clamp Tolerance",
+            "10.0%",
+            "model default"
+          ],
+          [
+            "Replacement Cost",
+            "Self-Storage Drive-Up \u2014 hard cost",
+            "$55.00/SF \u2013 $85.00/SF",
+            "model default"
+          ],
+          [
+            "Replacement Cost",
+            "Self-Storage Drive-Up \u2014 site work",
+            "$5.00/SF \u2013 $12.00/SF",
+            "model default"
+          ],
+          [
+            "Replacement Cost",
+            "Self-Storage Enclosed \u2014 hard cost",
+            "$90.00/SF \u2013 $130.00/SF",
+            "model default"
+          ],
+          [
+            "Replacement Cost",
+            "Self-Storage Enclosed \u2014 site work",
+            "$5.00/SF \u2013 $12.00/SF",
+            "model default"
+          ],
+          [
+            "Replacement Cost",
+            "Boat/RV Enclosed \u2014 hard cost",
+            "$45.00/SF \u2013 $70.00/SF",
+            "model default"
+          ],
+          [
+            "Replacement Cost",
+            "Boat/RV Enclosed \u2014 site work",
+            "$8.00/SF \u2013 $15.00/SF",
+            "model default"
+          ],
+          [
+            "Replacement Cost",
+            "Boat/RV Covered \u2014 hard cost",
+            "$15.00/SF \u2013 $30.00/SF",
+            "model default"
+          ],
+          [
+            "Replacement Cost",
+            "Boat/RV Covered \u2014 site work",
+            "$6.00/SF \u2013 $12.00/SF",
+            "model default"
+          ],
+          [
+            "Replacement Cost",
+            "Boat/RV Open Parking \u2014 hard cost",
+            "$4.00/SF \u2013 $10.00/SF",
+            "model default"
+          ],
+          [
+            "Replacement Cost",
+            "Boat/RV Open Parking \u2014 site work",
+            "$0.00/SF \u2013 $0.00/SF",
+            "model default"
+          ],
+          [
+            "Replacement Cost",
+            "Soft Costs",
+            "8.0% \u2013 12.0%",
+            "model default"
+          ],
+          [
+            "Replacement Cost",
+            "Developer Profit",
+            "10.0% \u2013 15.0%",
+            "model default"
+          ],
+          [
+            "Capital Structure",
+            "CapEx Basis",
+            "amount",
+            "model default"
+          ],
+          [
+            "Capital Structure",
+            "Operating Reserve",
+            "0",
+            "model default"
+          ],
+          [
+            "Capital Structure",
+            "Operating Reserve Basis",
+            "amount",
+            "model default"
+          ],
+          [
+            "Capital Structure",
+            "GP Co-Invest",
+            "10.0%",
+            "model default"
+          ],
+          [
+            "Debt & Waterfall",
+            "Interest Rate",
+            "6.25%",
+            "model default"
+          ],
+          [
+            "Debt & Waterfall",
+            "Index Rate",
+            "\u2014",
+            "model default"
+          ],
+          [
+            "Debt & Waterfall",
+            "Spread",
+            "\u2014",
+            "model default"
+          ],
+          [
+            "Debt & Waterfall",
+            "Amortization",
+            "25 yr",
+            "model default"
+          ],
+          [
+            "Debt & Waterfall",
+            "Interest-Only Period",
+            "0 mo",
+            "model default"
+          ],
+          [
+            "Debt & Waterfall",
+            "Loan Term",
+            "10 yr",
+            "model default"
+          ],
+          [
+            "Debt & Waterfall",
+            "Maximum LTV",
+            "65.0%",
+            "model default"
+          ],
+          [
+            "Debt & Waterfall",
+            "Minimum DSCR",
+            "1.25",
+            "model default"
+          ],
+          [
+            "Debt & Waterfall",
+            "Minimum Debt Yield",
+            "10.0%",
+            "model default"
+          ],
+          [
+            "Debt & Waterfall",
+            "Origination Fee",
+            "1.0%",
+            "model default"
+          ],
+          [
+            "Debt & Waterfall",
+            "Exit Fee",
+            "0.0%",
+            "model default"
+          ],
+          [
+            "Debt & Waterfall",
+            "Loan Type",
+            "senior_fixed",
+            "model default"
+          ],
+          [
+            "Debt & Waterfall",
+            "Preferred Return",
+            "8.0%",
+            "model default"
+          ],
+          [
+            "Debt & Waterfall",
+            "Pref Compounding",
+            "annual",
+            "model default"
+          ],
+          [
+            "Debt & Waterfall",
+            "Distribution Ordering",
+            "roc_first",
+            "model default"
+          ],
+          [
+            "Debt & Waterfall",
+            "Promote",
+            "20.0%",
+            "model default"
+          ],
+          [
+            "Debt & Waterfall",
+            "Pref Accrual Base",
+            "contributed",
+            "model default"
+          ],
+          [
+            "Debt & Waterfall",
+            "AM Fee Treatment",
+            "above_waterfall",
+            "model default"
+          ],
+          [
+            "Debt & Waterfall",
+            "GP Catch-Up",
+            "False",
+            "model default"
+          ],
+          [
+            "Debt & Waterfall",
+            "Asset Management Fee",
+            "1.0%",
+            "model default"
+          ],
+          [
+            "Debt & Waterfall",
+            "AM Fee Base",
+            "invested_equity",
+            "model default"
+          ],
+          [
+            "Narrative Tiers",
+            "Preferred 3-Mile Density",
+            "75,000",
+            "model default"
+          ],
+          [
+            "Narrative Tiers",
+            "Strong 3-Mile Density",
+            "100,000",
+            "model default"
+          ],
+          [
+            "Narrative Tiers",
+            "Over-Occupied Threshold",
+            "95.0%",
+            "model default"
+          ],
+          [
+            "Narrative Tiers",
+            "Strong Occupancy",
+            "90.0%",
+            "model default"
+          ],
+          [
+            "Narrative Tiers",
+            "Healthy Occupancy",
+            "85.0%",
+            "model default"
+          ],
+          [
+            "Solver Mechanics",
+            "Bracket: Cheap Entry Cap",
+            "20.0%",
+            "model default"
+          ],
+          [
+            "Solver Mechanics",
+            "Bracket: Dear Entry Cap",
+            "2.0%",
+            "model default"
+          ],
+          [
+            "Solver Mechanics",
+            "Bracket: Zero-NOI Low Price",
+            "$100,000",
+            "model default"
+          ],
+          [
+            "Solver Mechanics",
+            "Bracket: Zero-NOI High Price",
+            "$50,000,000",
+            "model default"
+          ],
+          [
+            "Solver Mechanics",
+            "Sensitivity: Price Span",
+            "10.0%",
+            "model default"
+          ],
+          [
+            "Solver Mechanics",
+            "Sensitivity: Price Step",
+            "2.5%",
+            "model default"
+          ],
+          [
+            "Solver Mechanics",
+            "Sensitivity: Exit Cap Span",
+            "1.0%",
+            "model default"
+          ],
+          [
+            "Solver Mechanics",
+            "Sensitivity: Exit Cap Step",
+            "0.25%",
+            "model default"
           ]
         ]
       ]

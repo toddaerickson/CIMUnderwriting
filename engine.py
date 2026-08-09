@@ -67,6 +67,15 @@ class AnalysisResult:
     # from `checks` because it has no pass/fail axis, and from `errors`
     # because a flat list of strings cannot carry (field, value, source).
     assumption_fill_log: list = field(default_factory=list)
+    # Assumption register (analysis/assumptions.py), JSON-safe rows — item
+    # T Category 6. Every number that moved an output, with the provenance
+    # that produced it. A superset of the fill log by construction: an
+    # invented value appears here too, as one `fallback` row among the
+    # config defaults, settings overrides, deal overrides and CIM data
+    # around it. The two stay separate registers because "what did the
+    # model invent?" and "what did the model use, and who chose it?" have
+    # different answers and different failure axes.
+    assumption_register: list = field(default_factory=list)
     # Outputs
     memo_path: str = ""
     excel_path: str = ""
@@ -165,7 +174,11 @@ def run_analysis(result: AnalysisResult, progress: Callable = None,
                   debt_terms: dict = None,
                   waterfall_terms: dict = None,
                   am_fee_pct: float = None,
-                  mgmt_fee_target_pct: float = None) -> AnalysisResult:
+                  mgmt_fee_target_pct: float = None,
+                  config_deltas: dict = None,
+                  config_defaults: dict = None,
+                  deal_overrides: dict = None,
+                  cim_snapshot: dict = None) -> AnalysisResult:
     """
     Run full analysis pipeline on an already-extracted CIMData.
 
@@ -230,6 +243,22 @@ def run_analysis(result: AnalysisResult, progress: Callable = None,
         am_fee_pct: per-analysis annual management fee rate; None keeps
             config.AM_FEE_PCT. Charged above the waterfall, on invested
             equity measured at the start of each period.
+        config_deltas: {dotted_key: value} of the ConfigOverride rows in
+            force for this run, and `config_defaults` the shipped value
+            each one displaced. PROVENANCE ONLY (item T Category 6) —
+            they change no arithmetic, because the deltas are already
+            applied to the live config dicts by `_patched_config` before
+            the engine is entered. They exist so the register can say
+            "settings override, was 10%" instead of printing 8% with
+            nothing beside it. The CLI passes neither because it has no
+            ConfigOverride table, and its register is honest about that.
+        deal_overrides: the deal's raw `assumption_overrides`, deltas by
+            construction. Also provenance only: the RESOLVED values are
+            already in the parameters above, and a resolved value cannot
+            say whether a human chose it — `hold_years=5` is both the
+            default and a deliberate entry.
+        cim_snapshot: the pristine pre-analyst extraction (`Deal.cim_json`),
+            so a corrected input can report what the CIM itself said.
 
     Returns:
         Updated AnalysisResult with all analysis fields populated
@@ -542,6 +571,39 @@ def run_analysis(result: AnalysisResult, progress: Callable = None,
         va_results=result.va_results,
         expense_ratio=result.expense_ratio))
 
+    # Assumption register (item T Category 6) — assembled here, after the
+    # fill log it contains, for the same reason and with the same
+    # discipline: ONE assembly handed to every surface. It reads the fill
+    # log rather than re-deriving it, so the memo's Appendix A and
+    # Appendix B can never disagree about what was invented.
+    #
+    # Every value below is one this call already resolved or was handed.
+    # Nothing here re-resolves: `market_cap` is the anchor the exit was
+    # priced off, `hold_years`/`transaction_costs`/`debt_terms` are the
+    # dicts the model ran on, and the config-shaped values are read live,
+    # which inside `_patched_config` IS the effective value.
+    from analysis import assumptions as model_assumptions
+    result.assumption_register = model_assumptions.to_dicts(
+        model_assumptions.collect(
+            cim_data=cim_data,
+            cim_snapshot=cim_snapshot,
+            config_deltas=config_deltas,
+            config_defaults=config_defaults,
+            deal_overrides=deal_overrides,
+            fill_log=result.assumption_fill_log,
+            scenarios=custom_scenarios,
+            va_scenarios=custom_va_scenarios,
+            expense_line_overrides=expense_line_overrides,
+            hold_years=hold_years,
+            transaction_costs=transaction_costs,
+            market_cap=result.market_cap,
+            capital_structure=capital_structure,
+            debt_terms=debt_terms,
+            waterfall_terms=waterfall_terms,
+            am_fee_pct=am_fee_pct,
+            mgmt_fee_target_pct=mgmt_fee_target_pct,
+            solver_target_irr=solver_target_irr))
+
     # Step 9: Generate output files
     _progress(9, 9, "Generating memo & model...")
     if not output_dir:
@@ -567,6 +629,7 @@ def run_analysis(result: AnalysisResult, progress: Callable = None,
         va_max_offer=result.va_max_offer,
         checks=result.checks,
         assumption_fill_log=result.assumption_fill_log,
+        assumption_register=result.assumption_register,
         sources_uses=result.sources_uses,
         # The levered lens (item E3b). Both writers degrade cleanly when
         # these are empty — a deal with no NOI or no asking price prices
@@ -618,6 +681,7 @@ def run_analysis(result: AnalysisResult, progress: Callable = None,
         va_max_offer=result.va_max_offer,
         checks=result.checks,
         assumption_fill_log=result.assumption_fill_log,
+        assumption_register=result.assumption_register,
         sources_uses=result.sources_uses,
         levered=result.levered,
         debt=result.debt,
