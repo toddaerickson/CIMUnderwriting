@@ -111,13 +111,29 @@ SOURCE_LABELS = {
 SOURCE_KEYS = tuple(SOURCE_LABELS)
 
 # ── Units ───────────────────────────────────────────────────────────
-# `format_value` is the ONE formatter. The memo, the workbook and the
-# results page all call it, so a fill cannot print as "0.8" in one place
-# and "80%" in another.
+# `format_number` is the ONE scalar formatter. The memo, the workbook and
+# the results page all reach it, so a value cannot print as "0.8" in one
+# place and "80%" in another.
+#
+# The vocabulary is DELIBERATELY wider than the fill log itself uses: item
+# T Category 6's assumption register shares it, and the two registers
+# describe overlapping numbers — the same expense line is a `Fill` when it
+# was substituted and an `Assumption` when it was not. Two unit tables
+# would let one register print $/SF/yr where the other printed $/SF/mo
+# for one number, which is the divergence this item exists to close. A
+# unit no `Fill` currently carries is not dead code here; it is the shared
+# vocabulary's other half.
 
 UNIT_DOLLARS = "$"
+UNIT_PSF = "$/SF"
 UNIT_PSF_MO = "$/SF/mo"
+UNIT_PSF_YR = "$/SF/yr"
 UNIT_PCT = "%"
+UNIT_SF = "SF"
+UNIT_YEARS = "yr"
+UNIT_MONTHS = "mo"
+UNIT_BPS = "bps"
+UNIT_COUNT = "#"
 UNIT_TEXT = ""
 
 
@@ -208,15 +224,15 @@ def require_underwritable(cim_data) -> None:
         f"and re-run.")
 
 
-def format_value(fill: "Fill") -> str:
-    """The one rendering of a fill's value, unit included.
+def format_number(value, unit: str) -> str:
+    """The one rendering of a number in either register, unit included.
 
-    Takes a `Fill`, never a stored dict: every surface already calls
-    `from_dicts` first because it needs `source_label` too, so a dict
-    branch here would be an unexercised path that silently formats
-    something else the day one is passed. Handed a dict, this raises.
+    Shared with `analysis.assumptions` (item T Category 6) rather than
+    reimplemented there — see the note above the unit table. A non-numeric
+    value renders as itself, which is how an enum-valued assumption
+    (`loan_type`, `accrual_base`) and a text-valued fill both survive a
+    formatter written for magnitudes.
     """
-    value, unit = fill.value_used, fill.unit
     if value is None:
         return "—"
     if not isinstance(value, (int, float)) or isinstance(value, bool):
@@ -225,9 +241,43 @@ def format_value(fill: "Fill") -> str:
         return f"${value:,.0f}"
     if unit == UNIT_PSF_MO:
         return f"${value:,.2f}/SF/mo"
+    if unit == UNIT_PSF:
+        return f"${value:,.2f}/SF"
+    if unit == UNIT_PSF_YR:
+        return f"${value:,.2f}/SF/yr"
     if unit == UNIT_PCT:
-        return f"{value:.1%}"
+        # One decimal, EXCEPT where one decimal would round information
+        # away. A 6.25% coupon and a 25bp sensitivity step both live in
+        # this unit alongside a 75% occupancy, and `.1%` prints them
+        # "6.2%" and "0.2%" — a disclosure that quietly restates the
+        # number it is disclosing. Every value that survives `.1%`
+        # unharmed still renders exactly as it did before, so no existing
+        # surface moves.
+        pct = value * 100
+        return (f"{pct:.1f}%" if round(pct, 1) == round(pct, 6)
+                else f"{pct:g}%")
+    if unit == UNIT_SF:
+        return f"{value:,.0f} SF"
+    if unit == UNIT_YEARS:
+        return f"{value:g} yr"
+    if unit == UNIT_MONTHS:
+        return f"{value:g} mo"
+    if unit == UNIT_BPS:
+        return f"{value:g} bps"
+    if unit == UNIT_COUNT:
+        return f"{value:,.0f}"
     return f"{value:,.4g}"
+
+
+def format_value(fill: "Fill") -> str:
+    """The one rendering of a fill's value, unit included.
+
+    Takes a `Fill`, never a stored dict: every surface already calls
+    `from_dicts` first because it needs `source_label` too, so a dict
+    branch here would be an unexercised path that silently formats
+    something else the day one is passed. Handed a dict, this raises.
+    """
+    return format_number(fill.value_used, fill.unit)
 
 
 def to_dicts(fills) -> list[dict]:
