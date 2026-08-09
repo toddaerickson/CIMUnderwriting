@@ -489,6 +489,10 @@ def deal_detail(request, pk):
             # fill log says which of them the CIM never supplied (item T
             # Category 4).
             ctx.update(results_ctx.fill_log_context(r))
+            # ...and the register says where every OTHER number came
+            # from, which is the question the two above leave open (item
+            # T Category 6).
+            ctx.update(results_ctx.register_context(r))
             ctx.update(results_ctx.capital_context(r))
         elif tab == "returns":
             ctx.update(results_ctx.returns_context(r))

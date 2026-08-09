@@ -592,3 +592,65 @@ def test_the_register_changes_no_number_it_reports(tmp_path):
     assert plain.gate_results == stamped.gate_results
     assert plain.max_offer == stamped.max_offer
     assert plain.sensitivity == stamped.sensitivity
+
+
+@pytest.mark.django_db
+def test_the_register_reaches_the_results_page(tmp_path, client,
+                                               django_user_model, monkeypatch):
+    """MUTATION: remove `ctx.update(results_ctx.register_context(r))` from
+    `webapp/views.py` and this goes red while every other tab assertion in
+    the suite still passes.
+
+    The panel is closed by default, which is a rendering decision, not a
+    disclosure one — the rows are in the DOM either way, and that is what
+    this asserts.
+    """
+    from webapp.models import AnalysisRun, Deal
+
+    django_user_model.objects.create_user(username="u", password="p")
+    client.login(username="u", password="p")
+
+    monkeypatch.setitem(cfg.GATES, "min_irr_5yr", 0.08)
+    result = _run(stabilized_deal(), tmp_path,
+                  config_deltas={"GATES.min_irr_5yr": 0.08},
+                  config_defaults={"GATES.min_irr_5yr": 0.10})
+    deal = Deal.objects.create(deal_id="register", property_name="Register")
+    AnalysisRun.objects.create(
+        deal=deal, status="done",
+        result_json={"assumption_register": result.assumption_register,
+                     "assumption_fill_log": [], "checks": [],
+                     "check_summary": {}})
+
+    # Unescaped, because a label like "Repairs & Maintenance" reaches the
+    # DOM as `&amp;` — asserting against the raw body would test Django's
+    # autoescaping rather than whether the row rendered.
+    import html
+
+    body = html.unescape(
+        client.get(f"/deals/{deal.pk}/?tab=summary").content.decode())
+    assert "Assumption Register" in body
+    assert "settings override" in body
+    for row in A.from_dicts(result.assumption_register):
+        assert row.label in body, f"{row.key} registered but not on the page"
+
+
+@pytest.mark.django_db
+def test_the_results_page_marks_the_rows_a_human_chose(tmp_path, monkeypatch):
+    """The register's whole value on screen is telling the two apart. A
+    panel that renders 130 rows identically has disclosed the numbers and
+    hidden the finding."""
+    from webapp.results import register_context
+
+    monkeypatch.setitem(cfg.GATES, "min_irr_5yr", 0.08)
+    result = _run(stabilized_deal(), tmp_path,
+                  config_deltas={"GATES.min_irr_5yr": 0.08},
+                  config_defaults={"GATES.min_irr_5yr": 0.10})
+    ctx = register_context({"assumption_register": result.assumption_register})
+    assert ctx["register_counts"]["settings"] == 1
+    assert [r["label"] for r in ctx["register_chosen"]], "no chosen rows split out"
+    assert all(r["chosen"] for r in ctx["register_chosen"])
+    # The displaced value renders through the SAME formatter as the value,
+    # so a percent cannot print as 0.1 in one column and 10% in the other.
+    gate = next(r for r in ctx["register_chosen"]
+                if r["key"] == "GATES.min_irr_5yr")
+    assert gate["value"] == "8.0%" and gate["was"] == "10.0%"
