@@ -15,6 +15,9 @@ import pytest
 
 import config as cfg
 from analysis import assumptions as A
+from engine import AnalysisResult, run_analysis
+from tests.test_characterization import stabilized_deal
+from tests.test_config_single_source import _memo_text, _run
 
 
 # ── Completeness guards ─────────────────────────────────────────────
@@ -360,3 +363,232 @@ def test_the_percent_unit_stopped_restating_the_number_it_discloses(
     lost information and nowhere else, so no existing surface moved."""
     from analysis.fills import format_number
     assert format_number(value, unit) == expected
+
+
+# ── The wires: a register that renders nowhere is not the item ──────
+
+def test_the_register_reaches_the_memo_appendix(tmp_path):
+    """MUTATION: drop `assumption_register=` from `generate_memo`'s call
+    site in `engine.py` and Appendix B vanishes while every number in the
+    document stays identical.
+
+    This is Category 4's lesson restated: the feature IS a report, so a
+    register that records perfectly and renders nowhere reproduces the
+    whole pipeline and delivers none of the item. Every assertion here is
+    about the DOCUMENT.
+    """
+    result = _run(stabilized_deal(), tmp_path)
+
+    assert result.assumption_register, "the engine assembled no register"
+    text = _memo_text(result.memo_path)
+    assert "Appendix B. Assumption Register" in text
+    assert "B.1 Assumptions not taken from the model defaults" in text
+    assert "B.2 Full register" in text
+    # Not a sample of it — the whole register, which is the claim the
+    # appendix makes in its own opening sentence.
+    for row in A.from_dicts(result.assumption_register):
+        assert row.label in text, f"{row.key} registered but never rendered"
+
+
+def test_a_settings_override_reaches_the_appendix_with_what_it_displaced(
+        tmp_path, monkeypatch):
+    """The end-to-end version of this category's opening defect: an
+    overridden gate used to render as a bare number.
+
+    The delta is passed the way the worker passes it, so this exercises
+    the engine parameter and the appendix together. MUTATION: drop
+    `config_deltas`/`config_defaults` from either the engine signature or
+    the `collect()` call and the row silently reverts to "model default".
+    """
+    monkeypatch.setitem(cfg.GATES, "min_irr_5yr", 0.08)
+    result = _run(stabilized_deal(), tmp_path,
+                  config_deltas={"GATES.min_irr_5yr": 0.08},
+                  config_defaults={"GATES.min_irr_5yr": 0.10})
+
+    row = next(r for r in A.from_dicts(result.assumption_register)
+               if r.key == "GATES.min_irr_5yr")
+    assert row.provenance == A.SETTINGS and row.was == 0.10
+
+    text = _memo_text(result.memo_path)
+    assert "settings override" in text
+    # B.1 exists to make this readable without scanning 140 rows: the
+    # value used, and the shipped value it replaced, on one line.
+    assert "8.0%" in text and "10.0%" in text
+
+
+def test_the_register_reaches_the_workbook_inputs_tab(tmp_path):
+    """MUTATION: drop `assumption_register=` from `generate_excel`'s call
+    site, or the `_write_assumption_register` line in `_build_inputs_tab`."""
+    from openpyxl import load_workbook
+
+    result = _run(stabilized_deal(), tmp_path)
+    ws = load_workbook(result.excel_path)["Inputs"]
+    cells = {c.value for row in ws.iter_rows() for c in row if c.value}
+
+    assert "Assumption Register" in cells
+    rows = A.from_dicts(result.assumption_register)
+    for row in rows:
+        assert row.label in cells, f"{row.key} missing from the workbook"
+    # The provenance column is the point of the block; a register of
+    # values without it is the Inputs tab it already had.
+    assert A.PROVENANCE_LABELS[A.CONFIG] in cells
+
+
+def test_a_cli_register_never_claims_a_settings_or_deal_override(tmp_path):
+    """The CLI has no ConfigOverride table and no assumptions page, so
+    those two provenances are unreachable there — and the register must
+    say so rather than mislabel a default.
+
+    Also the Category 4 audit finding in its own right: the CLI is a
+    SEPARATE orchestration, so every wire runs twice or one entry point
+    ships a document that hides what the other discloses. That defect
+    shipped once already, with the fill log.
+
+    MUTATION: drop `assumption_register=ctx.assumption_register` from
+    either writer call in `run.stage_output`.
+    """
+    import run as cli
+    from context import AnalysisContext
+
+    class _NoComps:
+        def query_expense_benchmarks(self, **kw):
+            return None
+
+        def query_rent_comps(self, **kw):
+            return None
+
+        def save_analysis(self, **kw):
+            return None
+
+    ctx = AnalysisContext(pdf_path=str(tmp_path / "deal.pdf"))
+    ctx.cim_data = stabilized_deal()
+    comp_db = _NoComps()
+    cli.stage_analyze(ctx, comp_db)
+    cli.stage_valuate(ctx)
+    cli.stage_gates_and_risks(ctx)
+
+    assert ctx.assumption_register, "the CLI never assembled a register"
+    rows = A.from_dicts(ctx.assumption_register)
+    claimed = {r.provenance for r in rows}
+    assert A.SETTINGS not in claimed and A.DEAL not in claimed
+    assert {A.CONFIG, A.CIM} <= claimed
+
+    cli.stage_output(ctx, comp_db)
+    text = _memo_text(ctx.memo_path)
+    assert "Appendix B. Assumption Register" in text
+    for row in rows:
+        assert row.label in text
+
+
+@pytest.mark.django_db
+def test_the_worker_actually_persists_the_register(tmp_path):
+    """The one wire from `run_analysis` to the database.
+
+    Written the way Category 4's equivalent had to be rewritten after an
+    audit: a test that hand-builds `result_json` passes against a worker
+    that drops the key on the floor, and that is not hypothetical — item
+    E3a shipped exactly that defect with the levered lens. So this runs
+    the REAL worker and reads the REAL row.
+
+    MUTATION: delete `"assumption_register": result.assumption_register`
+    from the payload in `webapp/services.py`.
+    """
+    from webapp.models import AnalysisRun, Deal
+    from webapp.services import _analysis_worker, cim_to_dict
+
+    deal = Deal.objects.create(
+        deal_id="persist-register", property_name="Persist Register",
+        deal_dir=str(tmp_path), cim_json=cim_to_dict(stabilized_deal()))
+    run = AnalysisRun.objects.create(deal=deal, status="running")
+    _analysis_worker(run.pk)
+
+    run.refresh_from_db()
+    assert run.status == "done", run.error
+    stored = (run.result_json or {}).get("assumption_register")
+    assert stored, "the run recorded no register — the key never landed"
+    assert all(isinstance(row, dict) for row in stored)
+    rows = A.from_dicts(stored)
+    assert len(rows) == len(stored), "a stored row failed to round-trip"
+    assert {r.provenance for r in rows} <= set(A.PROVENANCE_KEYS)
+
+
+@pytest.mark.django_db
+def test_a_stored_settings_row_is_labelled_settings_by_the_real_worker(
+        tmp_path):
+    """The provenance wire end to end, through the code that resolves it.
+
+    `config_defaults` has to be captured BEFORE `_patched_config` mutates
+    the dicts — inside the lock the live value IS the override, so a
+    register that asked config what it used to be would report
+    "settings override, was 8%, now 8%". This is the test that fails if
+    that capture moves.
+    """
+    import datetime as dt
+
+    from webapp.models import AnalysisRun, ConfigOverride, Deal
+    from webapp.services import _analysis_worker, cim_to_dict
+
+    ConfigOverride.objects.create(key="GATES.min_irr_5yr", value=0.08,
+                                 effective_date=dt.date(2026, 1, 1))
+    deal = Deal.objects.create(
+        deal_id="settings-provenance", property_name="Settings Provenance",
+        deal_dir=str(tmp_path), cim_json=cim_to_dict(stabilized_deal()))
+    run = AnalysisRun.objects.create(deal=deal, status="running")
+    _analysis_worker(run.pk)
+
+    run.refresh_from_db()
+    assert run.status == "done", run.error
+    row = next(r for r in A.from_dicts(run.result_json["assumption_register"])
+               if r.key == "GATES.min_irr_5yr")
+    assert row.provenance == A.SETTINGS
+    assert row.value == 0.08
+    assert row.was == 0.10, "the displaced value was read after the patch"
+
+
+@pytest.mark.django_db
+def test_an_analyst_edit_is_labelled_deal_by_the_real_worker(tmp_path):
+    """The other provenance the CLI cannot produce, through the real
+    worker: `Deal.cim_json` is the pristine extraction and the override
+    is applied on top of it, so the register can report both."""
+    from webapp.models import AnalysisRun, Deal
+    from webapp.services import _analysis_worker, cim_to_dict
+
+    cim = stabilized_deal()
+    pristine = cim_to_dict(cim)
+    deal = Deal.objects.create(
+        deal_id="deal-provenance", property_name="Deal Provenance",
+        deal_dir=str(tmp_path), cim_json=pristine,
+        assumption_overrides={"cim_overrides": {"asking_price": 4_250_000}})
+    run = AnalysisRun.objects.create(deal=deal, status="running")
+    _analysis_worker(run.pk)
+
+    run.refresh_from_db()
+    assert run.status == "done", run.error
+    row = next(r for r in A.from_dicts(run.result_json["assumption_register"])
+               if r.key == "cim.asking_price")
+    assert row.provenance == A.DEAL
+    assert row.value == 4_250_000
+    assert row.was == pristine["asking_price"]
+
+
+def test_the_register_changes_no_number_it_reports(tmp_path):
+    """The claim a reporting layer has to make, tested rather than
+    asserted in a commit message: the same deal run with and without any
+    provenance produces identical returns, gates and offers.
+
+    The characterization snapshots make the same point across the whole
+    pipeline; this makes it locally, so a future edit that lets the
+    register reach into a resolver fails HERE, next to the code.
+    """
+    a, b = tmp_path / "a", tmp_path / "b"
+    a.mkdir()
+    b.mkdir()
+    plain = _run(stabilized_deal(), a)
+    stamped = _run(stabilized_deal(), b,
+                   config_deltas={}, config_defaults={},
+                   deal_overrides={}, cim_snapshot={})
+
+    assert plain.scenario_results == stamped.scenario_results
+    assert plain.gate_results == stamped.gate_results
+    assert plain.max_offer == stamped.max_offer
+    assert plain.sensitivity == stamped.sensitivity
