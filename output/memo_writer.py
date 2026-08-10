@@ -1217,6 +1217,27 @@ _IS_PUNCT = {"’": "'", "‘": "'", "“": '"', "”": '"',
              "—": "-", "–": "-", "…": "...", "·": "-",
              "→": "->", "×": "x", " ": " ", "•": "*"}
 
+#: Shown while `config.INVESTOR_SUMMARY_GC_CLEARED` is False, on the
+#: document's own first line. It is NOT a substitute for
+#: `_SUMMARY_LEGEND`, which is permanent and states what the document is;
+#: this states that nobody has yet cleared it to leave the firm.
+#:
+#: On the page rather than only on screen because the failure this guards
+#: is a file already detached from the app — attached to an email, in a
+#: data room. A caveat that lives beside the download button is invisible
+#: the moment the .docx moves, which is precisely when it matters.
+#:
+#: ASCII only, deliberately. `_is_para` folds typographic punctuation to
+#: ASCII so `page_budget` can measure it, so an em dash here would make
+#: the constant differ from the rendered text — and a test asserting
+#: `_GC_PENDING_NOTICE in body` would fail while the notice was on the
+#: page. `_SUMMARY_LEGEND` is ASCII for the same reason.
+_GC_PENDING_NOTICE = (
+    "INTERNAL DRAFT - NOT CLEARED FOR EXTERNAL DISTRIBUTION. This summary "
+    "has not been reviewed by counsel. Do not send it to any prospective "
+    "investor or third party."
+)
+
 _SUMMARY_LEGEND = (
     "Prepared by CIM Analyst from the seller's Confidential Information "
     "Memorandum supplemented by benchmark assumptions. Figures are "
@@ -1309,6 +1330,7 @@ def _is_build(property_name, cim_data, market_analysis, physical_analysis,
     page1 = PageBudget("Page 1")
     page2 = PageBudget("Page 2")
 
+    _is_gc_notice(doc, page1)
     _is_header(doc, page1, cim_data, profile, property_name)
     _is_target_return(doc, page1, scenario_results, levered)
     _is_assumption_stamp(doc, page1, lev_base)
@@ -1434,6 +1456,23 @@ def _truncate(text, limit: int) -> str:
 
 
 # ── Page 1 — "What you make" ─────────────────────────────────────────
+
+def _is_gc_notice(doc, budget):
+    """The distribution gate, on the first line of page 1 (item G).
+
+    Read at CALL time via `cfg.` rather than imported by name, so
+    flipping the flag takes effect without a reimport — the scalar rule
+    recorded in CLAUDE.md's config-reads note.
+
+    Charged to the page budget like every other block, because it is
+    real content: a notice that renders without being measured is how a
+    document that fits in the tests overflows in Word.
+    """
+    if cfg.INVESTOR_SUMMARY_GC_CLEARED:
+        return
+    _is_para(doc, budget, "gc/pending", _GC_PENDING_NOTICE,
+             style="LPMicro", bold=True)
+
 
 def _is_header(doc, budget, cim_data, profile, property_name):
     name = _truncate(property_name or profile.get("property_name")

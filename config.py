@@ -985,6 +985,33 @@ AM_FEE_BASE = "invested_equity"     # the only base implemented; others raise
 GP_ENTITY_NAME = os.environ.get("GP_NAME", "Marathon CRE")
 LP_ENTITY_NAME = "LP Group"
 
+# ── General Counsel gate on the investor summary (item G) ───────────
+# The LP-facing summary is the one document this pipeline produces that
+# is written FOR someone outside the firm, which edges it toward
+# securities marketing. Item G recorded that the build is not blocked but
+# the DISTRIBUTION is, behind the operator's General Counsel — and then
+# left that gate living in a backlog paragraph and a code comment, which
+# are the two places the analyst clicking "Investor Summary (.docx)"
+# will never look.
+#
+# This flag is that gate, as state rather than prose. While it is False
+# the document carries a notice on its own first line and the download
+# button carries a caveat; flipping it to True removes both and leaves
+# `_SUMMARY_LEGEND`, which is permanent and unconditional either way.
+#
+# **Flip this only on a real sign-off**, and record who cleared what and
+# when in `docs/gc-review-investor-summary.md` — a boolean with no
+# audit trail behind it is worth less than the comment it replaced. The
+# wording GC reviews is `_SUMMARY_LEGEND` plus the section headings
+# enumerated in that document; changing either after clearance puts the
+# document back in front of counsel.
+#
+# Deliberately NOT settings-page editable and NOT a _PATCHED_DICTS entry:
+# a legal clearance is not a per-deal underwriting assumption, and an
+# analyst must not be able to clear it from the same screen that edits
+# cap rates.
+INVESTOR_SUMMARY_GC_CLEARED = False
+
 # ── XLSM Underwriting Template Inputs (item E3b) ────────────────────
 # Assumptions the .xlsm underwriting template asks for that the Python
 # model has no equivalent of. They are here, and not literals inside

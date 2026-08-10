@@ -460,6 +460,21 @@ two disagree, the built document wins. What changed:
   a Calibri width model that raises `InvestorSummaryOverflow` rather than
   shrinking anything. An opt-in `soffice` test re-validates the calibration.
   Read that module's docstring for the conditions under which it is wrong.
+  **CLOSED 2026-08-09.** "Opt-in" meant "never ran": the test skips when
+  LibreOffice is absent, installing LibreOffice needs root, and the dev box
+  has no passwordless sudo. A CI runner does, so the calibration now runs in
+  a dedicated `page-budget` job (`libreoffice-writer` + `poppler-utils` +
+  Carlito, the metric-compatible Calibri clone) with `CIM_REQUIRE_SOFFICE=1`
+  turning the skip into a FAILURE — without that, an apt-get that installed
+  nothing would leave the job green having validated nothing.
+  **The never-run test was also broken**, which is the point of the
+  exercise: `raw.count(b"/Type /Page")` also matches `/Type /Pages`, the
+  page-tree root, so it returned N+1 and could only ever have passed on a
+  one-page document. It is now `pdf_page_count` with a negative lookahead,
+  `pdfinfo` is preferred over it wherever poppler exists, and four
+  parametrized cases unit-test the counter directly — those run everywhere,
+  so the half most likely to be wrong is covered even where the renderer
+  cannot be.
 
 The download button IS wired (migration `0006`, `DOWNLOAD_KINDS` entry,
 conditional button), so the deferral recorded here on 2026-08-02 is closed.
@@ -501,29 +516,55 @@ prospect-discussion document with a plain "not an offer to sell securities"
 legend, and route the final wording past GC before any external distribution.
 The build is not blocked; the distribution is.
 
-**Status 2026-08-09 — still gated, and two of the three preconditions are
-now met.** The legend ships (`output/memo_writer.py:1123`) and the
-assumption stamp now distinguishes what the LPA actually says from what the
-build assumed (see E4 below). **GC sign-off has not been sought and remains
-the open precondition** — it is an operator action, not a code change, and
-no amount of further building discharges it.
+**Status 2026-08-09 — the engineering side is CLOSED; the legal sign-off is
+the operator's and remains OPEN.** Two preconditions were already met before
+this change: the legend ships, and the assumption stamp now distinguishes what
+the LPA actually says from what the build assumed (see E4 below). **GC sign-off
+has not been sought** — it is an operator action, not a code change, and no
+amount of further building discharges it.
 
-One thing to hand GC along with the document: the caveat sentence beneath
-the LP net figures is now conditional, not fixed. It reads "proposed terms,
-subject to the final partnership agreement" only for conventions still
-unconfirmed, and says so by count when the stamp is mixed. That wording is
-exactly the kind of thing GC will want to set, so route the three variants
-in `memo_writer._is_assumption_stamp`, not just the document.
+What changed is that the gate stopped being prose. It lived in this paragraph
+and in a comment above `_SUMMARY_LEGEND` — the two places the analyst clicking
+"Investor Summary (.docx)" will never look. It is now state:
 
-**Also still open: the 2-page guarantee is unvalidated in this
-environment.** `tests/test_investor_summary.py:530` re-calibrates the
-Calibri width model by rendering through `soffice` and counting pages, and
-it skips whenever LibreOffice is absent — which it is here (no package, and
-installing it needs root this environment does not have). The content budget
-still fails loudly on overflow, so the guarantee is not unenforced; but the
-CALIBRATION behind it — the mapping from characters to lines — has not been
-re-checked on this machine. Run it once on a box with LibreOffice before any
-external distribution.
+- `config.INVESTOR_SUMMARY_GC_CLEARED` (False). Deliberately NOT
+  settings-page editable — a legal clearance is not a per-deal underwriting
+  assumption, and an analyst must not be able to clear it from the screen
+  that edits cap rates. A test asserts it never enters the override
+  registry, which is derived live from config and could otherwise sweep it
+  in.
+- While False, `_GC_PENDING_NOTICE` renders on the document's own first
+  line, charged to the page budget like every other block. **On the page,
+  not only on screen**: the failure this guards is a file already detached
+  from the app — attached to an email, sitting in a data room — and a
+  caveat beside the download button is invisible the moment the .docx
+  moves.
+- The download button turns amber and carries the caveat, pointing at the
+  review packet.
+- `docs/gc-review-investor-summary.md` is that packet: what the document is,
+  why it needs counsel, the exact wording proposed for clearance, the
+  specific questions, a sign-off table to fill in, and the re-review
+  triggers that put it back in front of counsel.
+
+Flipping the flag to True removes the notice and the caveat and leaves
+`_SUMMARY_LEGEND`, which is permanent and unconditional in both states.
+**Nothing here is legal advice or a substitute for the sign-off** — it makes
+the gate enforceable and the review cheap, and the review itself is still
+counsel's to do.
+
+One thing to hand GC along with the document, carried over from the LPA-stamp
+work: the caveat sentence beneath the LP net figures is now conditional, not
+fixed. It reads "proposed terms, subject to the final partnership agreement"
+only for conventions still unconfirmed, and says so by count when the stamp is
+mixed. That wording is exactly the kind of thing GC will want to set, so route
+the three variants in `memo_writer._is_assumption_stamp`, not just the
+document. It is question 7 in the review packet.
+
+**The 2-page guarantee is no longer unvalidated.** This paragraph used to
+record that `soffice` was absent here and the Calibri calibration had never
+been re-checked. It now runs in CI's `page-budget` job — see the note under
+"Replaced: assert the page count" above — and its first real execution
+confirmed the document renders to exactly 2 pages.
 
 **Acceptance.** Renders to exactly 2 pages with the longest realistic deal
 (longest property name, all three scenarios populated, 3 risks at maximum
