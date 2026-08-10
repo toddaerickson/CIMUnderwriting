@@ -159,6 +159,7 @@ CIM_FIELDS = (
     ("ttm_total_revenue", "TTM Total Revenue", UNIT_DOLLARS),
     ("ttm_total_expenses", "TTM Total Expenses", UNIT_DOLLARS),
     ("ttm_noi", "TTM NOI", UNIT_DOLLARS),
+    ("ttm_months", "TTM Months of Actuals", UNIT_MONTHS),
     ("cim_yr1_noi", "CIM Year-1 NOI", UNIT_DOLLARS),
     ("t3_annualized_revenue", "T3 Annualized Revenue", UNIT_DOLLARS),
     ("in_place_avg_rent_psf", "In-Place Rent", UNIT_PSF_MO),

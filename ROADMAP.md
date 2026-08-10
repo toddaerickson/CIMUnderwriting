@@ -66,8 +66,11 @@ numeric modeling literals outside `config.py`. Four targeted AST guards exist
 catches its own family, and nothing yet catches a fifth.
 
 - [x] **A.** Model error-check register (`analysis/checks.py`) — generalize the
-      lone Revenue−Expenses=NOI identity into 11 checks (unit-mix reconciliation,
-      occupancy sanity, expense-line floors, exit-vs-entry cap coercion surfaced)
+      lone Revenue−Expenses=NOI identity into a register of checks (unit-mix
+      reconciliation, occupancy sanity, expense-line floors, exit-vs-entry cap
+      coercion surfaced; 11 at ship, 14 today — `sources_uses_ties` and
+      `loan_matures_before_exit` joined with items D/E, `ttm_annualization`
+      when its `ttm_months` field finally existed)
 - [x] **B.** Transaction costs + variable hold period — closing/disposition costs
       are absent from the DCF and the 5-year hold is hardcoded in three duplicated
       projection loops; collapse to one and add both. Changes every published IRR.

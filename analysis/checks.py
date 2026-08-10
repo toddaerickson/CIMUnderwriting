@@ -52,6 +52,11 @@ UNIT_MIX_GPR_TOLERANCE = 0.03
 # occupied property with no concessions), so the band must not swallow more.
 EGR_GPR_TOLERANCE_ABS = 1.0
 
+# A trailing-twelve-month figure covers twelve months by definition; the
+# ttm_annualization check's boundary sits exactly there. A unit fact,
+# not a tolerance — there is nothing to tune.
+TTM_FULL_MONTHS = 12
+
 # Occupancy comparisons are on decimals entered to at most 4 places; this
 # absorbs float representation error and nothing an analyst could type.
 OCCUPANCY_EPSILON = 1e-9
@@ -113,6 +118,7 @@ class CheckInput:
     ttm_total_revenue: float | None = None
     ttm_total_expenses: float | None = None
     ttm_noi: float | None = None
+    ttm_months: int | None = None   # months of actuals behind the TTM figures
     # Size & occupancy
     nrsf: float | None = None
     unit_mix: tuple = ()            # dicts with count / sf / rate (monthly $)
@@ -681,6 +687,35 @@ def _price_vs_replacement(inp):
                      else "."), values)
 
 
+def _ttm_annualization(inp):
+    """Item A's deferred check, unblocked by the `ttm_months` field.
+
+    Advisory on purpose: a T-9 annualization is a disclosure problem,
+    not necessarily a wrong number — but self-storage revenue is
+    seasonal, so a partial year scaled up can overstate (summer-
+    weighted) or understate (winter-weighted) the true trailing year,
+    and the analyst deserves the flag before trusting GPR/EGR/NOI.
+    """
+    months = inp.ttm_months
+    values = {"ttm_months": months}
+    if months is None:
+        return (SKIPPED, "The CIM does not state how many months of "
+                         "actuals its TTM figures cover.", values)
+    if months == TTM_FULL_MONTHS:
+        return (PASS, "TTM figures cover a full twelve months of "
+                      "actuals — no annualization involved.", values)
+    if months > TTM_FULL_MONTHS:
+        return (FAIL, f"{months} months of actuals stated — more than a "
+                      f"trailing twelve-month period. Check the "
+                      f"reporting basis: a figure summed over more than "
+                      f"a year is not a TTM figure.", values)
+    return (FAIL, f"TTM figures annualized from {months} months of "
+                  f"actuals — a partial year scaled up. Self-storage "
+                  f"revenue is seasonal, so annualized GPR/EGR/NOI can "
+                  f"overstate (summer-weighted) or understate "
+                  f"(winter-weighted) the true trailing year.", values)
+
+
 # ── Registry ────────────────────────────────────────────────────────
 # Order is display order. The check list is code, reviewed like code —
 # deliberately not a configurable rules engine.
@@ -720,6 +755,8 @@ CHECKS = (
     CheckSpec("loan_matures_before_exit", "Loan term vs hold period",
               ADVISORY, "debt.terms.term_years, debt.annual_debt_service",
               _loan_matures_before_exit),
+    CheckSpec("ttm_annualization", "TTM annualization basis", ADVISORY,
+              "ttm_months", _ttm_annualization),
 )
 
 CHECK_IDS = tuple(spec.id for spec in CHECKS)
@@ -816,6 +853,7 @@ def input_from_cim(cim, financial_analysis=None, physical_analysis=None,
         ttm_total_revenue=cim.ttm_total_revenue,
         ttm_total_expenses=cim.ttm_total_expenses,
         ttm_noi=cim.ttm_noi,
+        ttm_months=cim.ttm_months,
         nrsf=cim.nrsf,
         unit_mix=_unit_mix_dicts(cim.unit_mix),
         physical_occupancy=cim.physical_occupancy,

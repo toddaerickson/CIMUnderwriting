@@ -98,8 +98,12 @@ Checks in scope (all computable from fields that exist today):
     `analysis/physical.py`. **advisory**
 11. Sources & Uses ties to DCF total basis — added with item D. **blocking**
 
-Deferred: TTM annualization sanity (needs a reporting-period field the parser
-does not extract yet).
+~~Deferred: TTM annualization sanity (needs a reporting-period field the
+parser does not extract yet).~~ Shipped: `ttm_months` is now a CIMData
+field (best-effort parse — "T-9 annualized", "9 months ending" — None
+when unstated, never assumed 12), an assumptions-page input bounded
+1–12, and the `ttm_annualization` advisory check, which fires when the
+stated basis is under twelve months. **advisory**
 
 **Out of scope.** Auto-repair of bad inputs. Checks that need data we do not
 have (permits, third-party comps). A configurable rules engine — the check list

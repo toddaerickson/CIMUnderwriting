@@ -83,6 +83,13 @@ class CIMData:
     ttm_total_revenue: Optional[float] = None
     ttm_total_expenses: Optional[float] = None
     ttm_noi: Optional[float] = None
+    # How many months of ACTUALS the TTM figures annualize from. 12 means
+    # a genuine trailing year; 9 means a partial year scaled up ("T-9
+    # annualized"), which the ttm_annualization check flags for
+    # seasonality risk. None means the CIM did not say — never assumed
+    # to be 12, per the occupancy lesson (decision 9): an invented 12
+    # is precisely the answer that silences the check that needs it.
+    ttm_months: Optional[int] = None
     cim_yr1_noi: Optional[float] = None
     other_income: Optional[float] = None
 
@@ -343,6 +350,28 @@ def _parse_financials(text: str, tables: list, data: CIMData):
         m = re.search(pat, text, re.IGNORECASE)
         if m:
             data.ttm_noi = _parse_number(m.group(1))
+            break
+
+    # TTM reporting period — how many months of actuals the trailing
+    # figures annualize from ("T-9 annualized", "9 months ending June
+    # 30", "trailing 9-month"). Best-effort per parser tolerance
+    # (decision 1): None when unstated, and never invented — an
+    # annualization check run against an assumed 12 would flag nothing,
+    # which is the one answer it must not fabricate. Values outside
+    # 1-12 are ignored rather than stored: "24 months ended" is not a
+    # trailing-twelve-month basis, so claiming a ttm_months from it
+    # would misdescribe the figure the field exists to qualify.
+    ttm_months_patterns = [
+        r"\bT-?(\d{1,2})\s+annualized\b",
+        r"\b(\d{1,2})\s+months?\s+(?:ending|ended|annualized)\b",
+        r"\btrailing\s+(\d{1,2})[-\s]month",
+    ]
+    for pat in ttm_months_patterns:
+        m = re.search(pat, text, re.IGNORECASE)
+        if m:
+            months = int(m.group(1))
+            if 1 <= months <= 12:
+                data.ttm_months = months
             break
 
     # GPR / Gross Potential Rent
