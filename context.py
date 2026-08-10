@@ -54,6 +54,20 @@ class AnalysisContext:
     max_offer: dict = field(default_factory=dict)
     va_max_offer: dict = field(default_factory=dict)
 
+    # ── Levered lens ──────────────────────────────────────────────
+    # `debt` is the one sized loan; `levered` carries the LP net IRR and
+    # the assumption stamp that licenses printing it. Both come straight
+    # off `build_returns_model`, which computes them on EVERY run — the
+    # CLI simply discarded them until now, which left the LP-facing
+    # investor summary quoting an unlevered IRR: the one number that
+    # document exists to replace (item G's "still open" note).
+    # `levered_max_offer` is item E4's second max price, solved to the
+    # fund's LP NET target rather than the unlevered one; it does not
+    # replace `max_offer`, which is what the primary gate is read against.
+    debt: dict = field(default_factory=dict)
+    levered: dict = field(default_factory=dict)
+    levered_max_offer: dict = field(default_factory=dict)
+
     # ── Gates ─────────────────────────────────────────────────────
     gate_results: list = field(default_factory=list)
     gate_summary: dict = field(default_factory=dict)

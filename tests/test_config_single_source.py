@@ -2706,6 +2706,74 @@ def test_the_cli_discloses_the_same_assumptions_the_web_app_does(tmp_path,
         assert row["field"] in text
 
 
+def test_the_cli_lp_summary_carries_an_lp_net_irr(tmp_path):
+    """The CLI's LP-facing document must not quote an unlevered IRR.
+
+    `build_returns_model` sizes the loan and runs the waterfall on every
+    call, but `run.stage_valuate` kept three of its six keys and dropped
+    `debt` and `levered` on the floor. Nothing raised: `_is_build` nulls
+    the levered payload when no assumption stamp reaches it, so the
+    summary rendered its whole "LP Net (after fees & promote)" column as
+    N/A and the leverage-effect sentence vanished. A document whose entire
+    reason for existing is the fund's 15% LP NET target was shipping the
+    property-level unlevered number instead — degrading safely, and to
+    exactly the wrong thing.
+
+    MUTATION: drop `levered=ctx.levered` from the
+    `generate_investor_summary` call in `run.stage_output`, or stop
+    capturing `model["levered"]` in `run.stage_valuate`.
+    """
+    import run as cli
+    from context import AnalysisContext
+
+    ctx = AnalysisContext(pdf_path=str(tmp_path / "deal.pdf"))
+    ctx.cim_data = stabilized_deal()
+
+    class _NoComps:
+        def query_expense_benchmarks(self, **kw):
+            return None
+
+        def query_rent_comps(self, **kw):
+            return None
+
+        def save_analysis(self, **kw):
+            return None
+
+    comp_db = _NoComps()
+    cli.stage_analyze(ctx, comp_db)
+    cli.stage_valuate(ctx)
+    cli.stage_gates_and_risks(ctx)
+
+    # The payload the CLI used to discard.
+    assert ctx.levered, "stage_valuate dropped model['levered']"
+    assert ctx.debt, "stage_valuate dropped model['debt']"
+    assert ctx.levered.get("base", {}).get("assumption_stamp"), (
+        "no stamp — every levered figure would be nulled downstream")
+    # Item E4's second max price, solved to the LP NET target rather than
+    # the unlevered one the primary gate reads.
+    assert ctx.levered_max_offer.get("max_price"), (
+        "the CLI never solved the levered max offer")
+
+    cli.stage_output(ctx, comp_db)
+
+    summary = _memo_text(ctx.investor_summary_path)
+    # The leverage-effect sentence is the tell: it is a DIFFERENCE between
+    # the unlevered and LP net figures, so it can only render when both
+    # exist. Its absence is what the unlevered-only document looked like.
+    assert "Leverage effect:" in summary
+    assert "LP Net (after fees & promote)" in summary
+    # And the stamp rides with it — decision 7's rule binds hardest on the
+    # one document that leaves the firm. Matched on the sentence rather
+    # than the row labels: `_is_assumption_stamp` joins them and runs the
+    # result through `_ascii`, so the labels do not survive verbatim.
+    assert "LP net returns are computed under:" in summary
+    assert "subject to the final partnership agreement" in summary
+
+    memo = _memo_text(ctx.memo_path)
+    assert "Levered Returns (LP Net)" in memo, (
+        "the IC memo half of the same gap is still open")
+
+
 @pytest.mark.django_db
 def test_the_worker_actually_persists_the_fill_log(tmp_path, monkeypatch):
     """The one wire from `run_analysis` to the database, and until now no
