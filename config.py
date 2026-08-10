@@ -45,6 +45,49 @@ POPULATION_TIERS = {
     "strong_density": 100_000,     # top narrative tier — "strong demand driver"
 }
 
+# ── Median-household-income narrative tiers ─────────────────────────
+#
+# The same lane as POPULATION_TIERS: these GRADE a trade area's income,
+# they do not pass or fail a deal. No gate reads them.
+#
+# They were four bare literals across two functions in `analysis/market.py`
+# and they did not agree with each other: the narrative graded at
+# 75k/50k while the positives/negatives list graded at 65k/45k, so the
+# same deal could read "middle-income, adequate purchasing power" in one
+# paragraph and "below-average household income" in the next. Naming them
+# does not reconcile that — `narrative_*` and `signal_*` stay separate
+# because a three-band prose grade and a two-sided positive/negative
+# signal are different questions — but it makes the disagreement visible
+# and overridable instead of buried.
+#
+# `adequate` (50_000) EQUALS `GATES["population_3mi"]` by coincidence of
+# value only. They are unrelated quantities and
+# `test_the_hhi_thresholds_are_not_the_population_gate` exists to keep a
+# later edit from "consolidating" them.
+HHI_TIERS = {
+    "narrative_affluent": 75_000,   # "supports premium pricing"
+    "narrative_adequate": 50_000,   # "adequate purchasing power"; also hhi_adequate
+    "signal_above_average": 65_000,  # risk-list positive
+    "signal_below_average": 45_000,  # risk-list negative
+}
+
+# ── Risk-register trigger thresholds ────────────────────────────────
+#
+# When `analysis/risks.py` RAISES a risk, and at what severity. Like the
+# tiers above these grade rather than gate — no deal passes or fails on
+# them — but they were bare literals inside three separate `if`
+# statements, which is the shape the 2026-08-01 audit was written about.
+#
+# `replacement_premium_high` (0.15) EQUALS `GATES["max_noi_step_up"]` by
+# coincidence of value only; they are unrelated quantities, and that
+# coincidence is precisely what made the pre-Category-1 duplicates
+# hazardous. Keep them apart.
+RISK_TRIGGERS_THRESHOLDS = {
+    "bear_irr_floor": 0.05,             # bear IRR below this raises a risk
+    "scenario_spread_wide": 0.08,       # base-minus-bear spread above this is "wide"
+    "replacement_premium_high": 0.15,   # premium to replacement cost: High vs Medium
+}
+
 # ── Occupancy narrative tiers ───────────────────────────────────────
 #
 # NARRATIVE tiers, not screens — the same lane as POPULATION_TIERS above.

@@ -7,7 +7,8 @@ CIM data and analysis outputs.
 
 from typing import Optional
 
-from config import GATES, OCCUPANCY_TIERS, POPULATION_TIERS, RISK_TRIGGERS
+from config import (GATES, OCCUPANCY_TIERS, POPULATION_TIERS, RISK_TRIGGERS,
+                    RISK_TRIGGERS_THRESHOLDS)
 from registry import ScenarioType, asset_age
 
 
@@ -343,7 +344,8 @@ def _valuation_risks(cim_data, scenario_results: dict) -> list:
 
     # Bear case IRR risk
     bear_irr = bear.get("irr")
-    if bear_irr is not None and bear_irr < 0.05:
+    if (bear_irr is not None
+            and bear_irr < RISK_TRIGGERS_THRESHOLDS["bear_irr_floor"]):
         risks.append({
             "category": "Valuation",
             "risk": "Weak bear-case returns",
@@ -356,7 +358,7 @@ def _valuation_risks(cim_data, scenario_results: dict) -> list:
     base_irr = base.get("irr")
     if base_irr and bear_irr:
         spread = base_irr - bear_irr
-        if spread > 0.08:
+        if spread > RISK_TRIGGERS_THRESHOLDS["scenario_spread_wide"]:
             risks.append({
                 "category": "Valuation",
                 "risk": "Wide scenario spread",
@@ -378,7 +380,9 @@ def _valuation_risks(cim_data, scenario_results: dict) -> list:
                     "risk": "Premium to replacement cost",
                     "description": f"Asking ${cim_data.price_per_sf:.0f}/SF vs "
                                    f"replacement ${repl_per_sf:.0f}/SF ({premium:.1%} premium).",
-                    "severity": "High" if premium > 0.15 else "Medium",
+                    "severity": ("High" if premium
+                                 > RISK_TRIGGERS_THRESHOLDS["replacement_premium_high"]
+                                 else "Medium"),
                     "mitigation": "Negotiate price below replacement cost or "
                                   "demonstrate irreplaceable location/market value.",
                 })
