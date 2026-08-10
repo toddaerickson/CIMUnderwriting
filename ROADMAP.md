@@ -49,20 +49,29 @@
 ### Model Integrity & Capital Structure
 
 Scoped in [docs/scoped-backlog.md](docs/scoped-backlog.md) — scope contract,
-acceptance criteria, and build order. Queued behind the dense-model-view build.
-Order is **A → B → D → E1 → E2 → E3 → E4 → G**; B extracts the shared cash-flow
-projection the rest depend on, and **G ships last, after E** — a 2-page LP
-summary built before the LP-net-IRR engine exists would hand an LP a
-property-level unlevered IRR, which is the one number that document exists to
-avoid.
+acceptance criteria, and build order. **All shipped**, in the order
+**A → B → D → E1 → E2 → E3 → E4 → G → T**; B extracted the shared cash-flow
+projection the rest depend on, and **G shipped last of the capital-structure
+items, after E** — a 2-page LP summary built before the LP-net-IRR engine
+existed would have handed an LP a property-level unlevered IRR, which is the
+one number that document exists to avoid.
 
-- [ ] **A.** Model error-check register (`analysis/checks.py`) — generalize the
+**T (transparency consolidation)** closed after G, across six categories: kill
+the duplicated constants (#40), the value-add assumptions layer (#46), the
+model-layer hard-codes (#47), loud fallbacks — the assumption fill log (#49),
+occupancy becomes a required input (#50), and the assumption register with its
+memo Appendix B. One acceptance criterion remains open: a general CI sweep for
+numeric modeling literals outside `config.py`. Four targeted AST guards exist
+(age ladders, occupancy levels, fabricated NOI, one-square-foot NRSF); each
+catches its own family, and nothing yet catches a fifth.
+
+- [x] **A.** Model error-check register (`analysis/checks.py`) — generalize the
       lone Revenue−Expenses=NOI identity into 11 checks (unit-mix reconciliation,
       occupancy sanity, expense-line floors, exit-vs-entry cap coercion surfaced)
-- [ ] **B.** Transaction costs + variable hold period — closing/disposition costs
+- [x] **B.** Transaction costs + variable hold period — closing/disposition costs
       are absent from the DCF and the 5-year hold is hardcoded in three duplicated
       projection loops; collapse to one and add both. Changes every published IRR.
-- [ ] **D.** Sources & Uses + capital stack — unlevered-safe now, debt-ready;
+- [x] **D.** Sources & Uses + capital stack — unlevered-safe now, debt-ready;
       must tie to DCF total basis (enforced by check 11)
 
 ### Levered Returns / LP Waterfall
@@ -71,11 +80,11 @@ Design + verified numeric oracles: [docs/levered-waterfall-design.md](docs/lever
 **Single tier only** (operator, 2026-07-29): GP management fee, GP co-invest
 upfront, x% promote above a y% pref. No catch-up, no clawback, no tier builder.
 
-- [ ] **E1.** Debt layer — `model/debt.py`, sizing as min(LTV, DSCR, debt-yield)
+- [x] **E1.** Debt layer — `model/debt.py`, sizing as min(LTV, DSCR, debt-yield)
       with the binding constraint reported; monthly amort roll-forward
-- [ ] **E2.** Single-hurdle waterfall — `model/waterfall.py`, deterministic
+- [x] **E2.** Single-hurdle waterfall — `model/waterfall.py`, deterministic
       forward loop; 5 LPA questions remain open and ship as named, stamped defaults
-- [ ] **E3.** Levered wiring — assumptions / results / memo / xlsx; unlevered
+- [x] **E3.** Levered wiring — assumptions / results / memo / xlsx; unlevered
       screen stays primary, levered is the second lens
 - [x] **E4.** Levered max offer — `solve_max_price_levered` targets a 15%
       LP net IRR. Shipped BESIDE the 10% unlevered max offer rather than
