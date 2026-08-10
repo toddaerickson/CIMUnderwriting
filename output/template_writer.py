@@ -29,27 +29,36 @@ test proving it fails when it should. Structural constants — a column
 index, an at-closing zero, the template's own year-1 convention — are
 named once below, which is what makes them reviewable.
 
-## What still does not reconcile, stated rather than hidden
+## What does not reconcile — SETTLED, and disclosed in the workbook
 
 The XLSM computes its own returns from these inputs, and two of its
 conventions are not ours. Neither is reachable from an input cell, so
-E3b stamps them here instead of papering over them:
+the writer stamps them into the workbook itself
+(`_write_divergence_disclosures`) as well as here:
 
 1. **The pref is an IRR hurdle** (H257 "IRR Hurdle"; H258 feeds tiers
    2-4 through `=+H258`). `model.waterfall` runs an ACCRUAL account on
    contributed/unreturned capital. Same 8%, different construction, so
    the promote dollars differ. Writing `pref_rate` into H258 makes the
-   two agree on the RATE, which is as far as an input cell reaches.
+   two agree on the RATE, which is as far as an input cell reaches. A
+   future edit of the TEMPLATE could swap the hurdle formula for an
+   accrual — that is an XLSM edit, not a writer change; until someone
+   makes it, the divergence is permanent and disclosed.
 2. **The AM fee is charged on LP equity** (H254 = `K60*G254/12`, and
    K60 is LP equity). `config.AM_FEE_BASE` is `invested_equity` —
    GP + LP — so at a 10% GP co-invest the workbook's fee runs ~10%
    light. The dropdown has no invested-equity option. Grossing the rate
    up to 1.11% would make the dollars tie while printing a fee rate the
    fund does not charge, so the true rate is written and the gap is
-   recorded here.
+   disclosed — REAFFIRMED by the operator 2026-08-10 when this residue
+   was settled. (The gross-up could not even tie in general: the model's
+   fee base rolls forward on a capital call — `model/levered.py` — where
+   the workbook's K60 is fixed at close, so a single compensated rate
+   reproduces the model's dollars only on deals that never call.)
 
-Both are item T's to reconcile. Do not "fix" either by editing a value
-into agreement — that trades a visible discrepancy for a hidden one.
+Settled 2026-08-10; until then both lines read "item T's to reconcile"
+and T closed without them. Do not "fix" either by editing a value into
+agreement — that trades a visible discrepancy for a hidden one.
 """
 
 import logging
@@ -188,6 +197,33 @@ _SUMMARY_NOTE_COL = 6              # F
 _SUMMARY_STRENGTH_ROWS = range(6, 11)
 _SUMMARY_WEAKNESS_ROWS = range(12, 17)
 
+# Divergence disclosures — two rows immediately below the waterfall
+# block (which ends at the tier rows, 259-261). These cells must be
+# BLANK in the shipped template: the writer cannot verify that here
+# (the workbook is proprietary, gitignored, absent in CI), so
+# `test_real_template_still_has_the_cells_the_stub_claims` asserts
+# their emptiness and FAILS on the first machine that has the real
+# file if the guess was wrong — a wrong cell would silently overwrite
+# a label or formula, which is exactly what that test exists to catch.
+_DISCLOSURE_PREF_CELL = "B263"
+_DISCLOSURE_AM_FEE_CELL = "B264"
+
+# The strings are static on purpose: interpolating the deal's own rates
+# would put values in prose where no test reconciles them. Direction and
+# mechanism are what the reader needs; the rates live in their cells.
+_PREF_DISCLOSURE = (
+    "Note: this workbook's pref (H257) is an IRR hurdle; the app's "
+    "waterfall accrues the pref on unreturned capital. Same rate (H258), "
+    "different construction, so promote dollars differ from the memo. "
+    "Not reachable from an input cell; disclosed here instead."
+)
+_AM_FEE_DISCLOSURE = (
+    "Note: H254 charges the AM fee on LP equity (K60); the app charges "
+    "invested equity (GP + LP), so this workbook's fee runs light by "
+    "roughly the GP co-invest share. G254 is the fund's true rate, not "
+    "a grossed-up one (operator decision 2026-08-10)."
+)
+
 # Benchmark bands are (low, high) tuples. `_BAND_HIGH` went with the
 # management-fee cell when it started reading `resolve_mgmt_fee_target`
 # instead of the band's top end.
@@ -294,6 +330,7 @@ def generate_template(
     _write_capex(ws)
     _write_reversion(ws, cim_data, financial_analysis, costs, scenario_results)
     _write_waterfall(ws, waterfall, am_fee)
+    _write_divergence_disclosures(ws)
     _write_summary_notes(ws_summary, cim_data)
 
     wb.save(out_path)
@@ -805,6 +842,19 @@ def _write_waterfall(ws, terms, am_fee_pct: float):
     # Promote tiers 2-4, all sitting at the single hurdle above.
     for row in _PROMOTE_TIER_ROWS:
         ws.cell(row=row, column=_COL_PROMOTE).value = terms.promote_split
+
+
+def _write_divergence_disclosures(ws):
+    """Stamp the two structural divergences INTO the workbook.
+
+    Until 2026-08-10 they were recorded only in this module's docstring —
+    the one place the analyst reading the workbook will never look. The
+    module docstring carries the full reasoning; these two lines carry
+    the direction and the mechanism to the reader who has only the file.
+    Text only — the AST gate is numeric and untouched by design.
+    """
+    ws[_DISCLOSURE_PREF_CELL] = _PREF_DISCLOSURE
+    ws[_DISCLOSURE_AM_FEE_CELL] = _AM_FEE_DISCLOSURE
 
 
 # ── Summary Sheet Notes ──────────────────────────────────────────────

@@ -467,6 +467,37 @@ def test_defaults_resolve_without_any_terms_passed(tmp_path, stub_template):
     assert cells["G254"] == cfg.AM_FEE_PCT
 
 
+# ── The divergence disclosures (settled 2026-08-10) ──────────────────
+
+def test_divergence_disclosures_land_in_the_workbook(tmp_path,
+                                                     stub_template):
+    """Both structural divergences are stamped INTO the workbook, not
+    only into the module docstring — the docstring is the one place the
+    analyst reading the .xlsm will never look."""
+    cells = _generate(tmp_path)
+    assert (cells[template_writer._DISCLOSURE_PREF_CELL]
+            == template_writer._PREF_DISCLOSURE)
+    assert (cells[template_writer._DISCLOSURE_AM_FEE_CELL]
+            == template_writer._AM_FEE_DISCLOSURE)
+    # And the TRUE rate stands beside the disclosure: the operator
+    # rejected the gross-up (2026-08-10), reaffirming the recorded
+    # stance — dollars that tie by printing a rate the fund does not
+    # charge trade a visible discrepancy for a hidden one.
+    assert cells["G254"] == cfg.AM_FEE_PCT
+
+
+def test_disclosures_state_mechanism_and_direction():
+    """The disclosure is only a disclosure while it names the mechanism
+    and the direction. A future rewording may shorten it; it may not
+    hollow it."""
+    pref = template_writer._PREF_DISCLOSURE
+    fee = template_writer._AM_FEE_DISCLOSURE
+    assert "IRR hurdle" in pref and "accru" in pref
+    assert "LP equity" in fee and "invested equity" in fee
+    assert "light" in fee            # the direction of the gap
+    assert "true rate" in fee        # what G254 actually carries
+
+
 # ── The real template, when it happens to be present ─────────────────
 
 REAL_TEMPLATE = Path(__file__).resolve().parents[1] / "template_uw.xlsm"
@@ -501,5 +532,13 @@ def test_real_template_still_has_the_cells_the_stub_claims(monkeypatch):
         assert ws["H254"].value == (
             '=IF(G253="% of EGR",G254*K148/12,K60*G254/12)')
         assert ws["K60"].value == "=($K$55-$K$66)*H60"
+        # The disclosure rows the writer claims (settled 2026-08-10)
+        # must be BLANK in the real workbook — the cell choice was made
+        # on a machine that has never seen the file, and a wrong guess
+        # silently overwrites a label or formula. This assertion is the
+        # designed tripwire: it fails HERE, on the first machine that
+        # has the template, before anyone relies on the workbook.
+        assert ws[template_writer._DISCLOSURE_PREF_CELL].value is None
+        assert ws[template_writer._DISCLOSURE_AM_FEE_CELL].value is None
     finally:
         wb.close()
