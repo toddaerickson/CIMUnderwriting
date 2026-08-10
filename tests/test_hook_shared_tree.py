@@ -510,3 +510,109 @@ def test_the_narrowed_forms_still_deny_a_real_tree_mutation(repo):
     assert run_guard(f"git -C {repo} checkout main", repo, repo) == "deny"
     assert run_guard(f"git -C {repo} reset --hard", repo, repo) == "deny"
     assert run_guard(f"git -C {repo} commit -m x", repo, repo) == "deny"
+
+
+# ── Carry-over across a context reset ────────────────────────────────
+#
+# The second pair on this shared module: PreCompact saves, SessionStart
+# restores. Same failure mode as the first pair and the same reason for the
+# tests — a writer and a reader that disagree about a path preserve nothing,
+# silently, and a preservation mechanism nobody can tell is broken is worse
+# than none.
+
+PRECOMPACT = os.path.join(HOOKS, "precompact-carryover.py")
+SESSION_START = os.path.join(HOOKS, "session-start-carryover.py")
+
+
+def run_hook(script, payload, project_dir):
+    """Run a carry-over hook; return its parsed additionalContext or ''."""
+    e = {**os.environ, "CLAUDE_PROJECT_DIR": str(project_dir)}
+    e.pop("CIM_SOLO", None)
+    p = subprocess.run([sys.executable, script], input=json.dumps(payload),
+                       capture_output=True, text=True, env=e, timeout=30)
+    assert p.returncode == 0, p.stderr
+    if not p.stdout.strip():
+        return ""
+    return json.loads(p.stdout)["hookSpecificOutput"]["additionalContext"]
+
+
+def test_the_notes_file_is_not_matched_as_a_snapshot():
+    """The two names must not share a prefix. They did in the first draft,
+    which made the notes file — the only part a machine cannot rebuild —
+    returnable as a snapshot and eventually deletable as a stale one."""
+    assert not shared.CARRYOVER_NOTES.startswith(shared.CARRYOVER_PREFIX)
+
+
+def test_precompact_saves_and_session_start_restores_it(repo):
+    """The round trip, through both real hooks and a real repo."""
+    (repo / "config.py").write_text("dirtied\n")
+    notes = os.path.join(str(repo / ".git"), shared.CARRYOVER_NOTES)
+    with open(notes, "w") as f:
+        f.write("## Phase 1 in flight\nNext: open the PR.\n")
+
+    assert run_hook(PRECOMPACT, {
+        "session_id": "sess-a", "cwd": str(repo),
+        "hook_event_name": "PreCompact", "trigger": "auto",
+        "message_count": 412}, repo) == ""      # saving is silent
+
+    assert os.path.exists(shared.carryover_path(str(repo / ".git"), "sess-a"))
+
+    out = run_hook(SESSION_START, {
+        "session_id": "sess-a", "cwd": str(repo),
+        "hook_event_name": "SessionStart", "source": "compact"}, repo)
+    assert "Phase 1 in flight" in out           # the hand-written part
+    assert "config.py" in out                   # the derived part
+    assert str(repo) in out
+
+
+def test_a_cleared_session_with_a_new_id_still_finds_the_snapshot(repo):
+    """`/clear` may mint a NEW session id, orphaning a snapshot keyed by the
+    old one. The bounded newest-snapshot fallback is what recovers it, and
+    without this test that path is never exercised."""
+    run_hook(PRECOMPACT, {"session_id": "before-clear", "cwd": str(repo),
+                          "hook_event_name": "PreCompact"}, repo)
+    out = run_hook(SESSION_START, {
+        "session_id": "after-clear-different", "cwd": str(repo),
+        "hook_event_name": "SessionStart", "source": "clear"}, repo)
+    assert "CARRIED-OVER CONTEXT" in out
+
+
+def test_only_the_sources_that_discard_context_restore(repo):
+    """`resume` already has the real transcript and `startup` is genuinely
+    new; re-injecting beside either is noise arguing with the record."""
+    run_hook(PRECOMPACT, {"session_id": "s", "cwd": str(repo),
+                          "hook_event_name": "PreCompact"}, repo)
+    for source in ("startup", "resume", "fork"):
+        assert run_hook(SESSION_START, {
+            "session_id": "s", "cwd": str(repo),
+            "hook_event_name": "SessionStart", "source": source}, repo) == "", source
+
+
+def test_carry_over_says_nothing_when_nothing_was_carried(repo):
+    """A hook that emits an empty banner trains the operator to skip it."""
+    assert run_hook(SESSION_START, {
+        "session_id": "never-saved", "cwd": str(repo),
+        "hook_event_name": "SessionStart", "source": "clear"}, repo) == ""
+
+
+def test_neither_carry_over_hook_fails_on_junk_input(repo):
+    """Same invariant the other two hooks hold: never fail the operation
+    being hooked. For PreCompact that is stronger than politeness — exit 2
+    on that event BLOCKS the compaction the operator asked for."""
+    for script in (PRECOMPACT, SESSION_START):
+        for payload in ("not json at all", "[]", "null", '{"cwd": 42}'):
+            p = subprocess.run([sys.executable, script], input=payload,
+                               capture_output=True, text=True, timeout=30,
+                               env={**os.environ, "CLAUDE_PROJECT_DIR": str(repo)})
+            assert p.returncode == 0, (script, payload, p.stderr)
+
+
+def test_both_carry_over_hooks_import_the_shared_paths(repo):
+    """The same structural assertion the first pair gets: no hand-copied
+    path constant, or the two halves can drift apart."""
+    for script in (PRECOMPACT, SESSION_START):
+        source = open(script).read()
+        assert "from _shared_tree import" in source, script
+        assert shared.CARRYOVER_PREFIX not in source, (
+            f"{os.path.basename(script)} hard-codes the snapshot prefix "
+            "instead of importing it")
