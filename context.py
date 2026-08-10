@@ -65,6 +65,15 @@ class AnalysisContext:
     # exists on only one of the two entry points is not a disclosure.
     assumption_fill_log: list = field(default_factory=list)
 
+    # Assumption register (item T Category 6) — every number that moved an
+    # output with the provenance that produced it. Carried here for the
+    # same reason the fill log above is: the CLI is a separate
+    # orchestration, and a disclosure present on only one of the two entry
+    # points is not a disclosure. A CLI run has no ConfigOverride table and
+    # no assumptions page, so its register is `config` / `cim` /
+    # `fallback` — the truth about a CLI run, not a degraded mode.
+    assumption_register: list = field(default_factory=list)
+
     # ── Outputs ───────────────────────────────────────────────────
     memo_path: str = ""
     excel_path: str = ""

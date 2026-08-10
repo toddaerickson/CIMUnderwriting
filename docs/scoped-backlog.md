@@ -4,10 +4,17 @@ Scoped 2026-07-29. Source: gap triage of the CIM Analyst pipeline against the
 Top Shelf Models "TSM Storage Development Model" ($1,325 Excel), plus defects
 found while reading the DCF code during that triage.
 
-**Status: scoped, not started.** Everything here queues behind the in-flight
-dense-model-view build (`.superpowers/sdd/2026-07-29-dense-model-view/`, T8–T9).
-Each item gets its own `docs/superpowers/plans/<date>-<slug>.md` when it reaches
-the front of the queue — this file is the scope contract, not the build plan.
+**Status (2026-08-09): A, B, D, E1–E4, G and T all shipped.** The header below
+said "scoped, not started" through the whole build; it is corrected here rather
+than deleted, because the build order underneath it is still the record of why
+the items shipped in the sequence they did. Each item got its own
+`docs/superpowers/plans/<date>-<slug>.md` as it reached the front of the queue —
+this file is the scope contract, not the build plan.
+
+Item T's six categories closed in PRs #40, #46, #47, #49, #50 and this one; the
+one acceptance criterion still OPEN across the whole file is the general
+numeric-literal sweep under item T (see its Acceptance list), which the four
+targeted AST guards approximate but do not discharge.
 
 Only the five items the operator selected are scoped here (a, b, d, e, g of the
 triage). Items c (property-tax millage), f (exit-cap comp panel) and h (CapEx
@@ -33,7 +40,7 @@ projection that D, E and G all read from.
 | E2 | Single-tier waterfall (`model/waterfall.py`) | E1 | Medium | **High-risk** |
 | E3 | Levered wiring — E3a seam ⚑ shipped; E3b surfaces ⚑ shipped; E3b XLSM de-literalization ⚑ shipped | E2, D | Medium-large | **High-risk** |
 | E4 | Solver retargeted to LP net IRR | E3 | Small | **High-risk** |
-| T | Transparency consolidation (audit remediation) | E4 | Large | **High-risk** (live literals) |
+| T | Transparency consolidation — Cat 1 ⚑ #40, Cat 2 ⚑ #46, Cat 3 ⚑ #47, Cat 4 ⚑ #49, Cat 5 ⚑ #50, Cat 6 ⚑ shipped | E4 | Large | **High-risk** (live literals) |
 
 Sequence: **A → B → D → E1 → E2 → E3 → E4 → G → T**. A goes first because it is the
 cheapest and because its checks guard B's arithmetic while B changes it. T
@@ -530,7 +537,18 @@ oracle" discipline applied to the whole pipeline.
    target-IRR setting was editable. Both unlevered solvers resolve through
    `model.solver.resolve_target_irr`; three truthiness guards (`engine.py`
    plus the resolution and the stamp-popping guard in `webapp/services.py`)
-   now key on `is None`. The rest of this category is untouched.
+   now key on `is None`.
+   The rest of this category is **DONE** too, in PR #47 — this sentence
+   used to read "the rest of this category is untouched" and was left
+   stale when that PR shipped. `SOLVER_BOUNDS` is now one bracket for all
+   three solvers (static and levered stopped at a 3% implied entry cap,
+   value-add at 2%, and nothing recorded that they differed; resolved at
+   the wider 2%); `SENSITIVITY_GRID` replaced the eighteen literal
+   offsets with span + step, byte-for-byte; and `registry`'s
+   `DEFAULT_EXPENSE_RATIO` / `EXPENSE_RATIO_CLAMP` became
+   `config.EXPENSE_RATIO`, with the clamp DERIVED from the
+   `opex_revenue_ratio` band widened by a named tolerance rather than
+   declared as a second pair.
 4. **Loud fallbacks.** One `assumption_fill_log`: any fallback that fires
    (~~occupancy,~~ market rent, mgmt fee, entry cap) records (field, value
    used, source key) and surfaces in the results UI and the memo appendix.
@@ -597,6 +615,31 @@ oracle" discipline applied to the whole pipeline.
    override / CIM datum / fallback + flag) rendered as a memo section —
    E2's assumption stamp extended to the whole model, and the transparency
    requirement made auditable in one place.
+   **DONE.** `analysis/assumptions.py` is the register; memo **Appendix
+   B** is the section, with the workbook's Inputs sheet and a collapsed
+   Summary-tab panel beside it. All five provenances in the clause above
+   are implemented as a closed vocabulary with the model's own
+   precedence, one row per assumption carrying the winner and `was`
+   carrying what it displaced.
+   Three things the clause did not anticipate:
+   - **It is Appendix B, not a rewrite of Appendix A.** B contains the
+     fill log's rows (as provenance `fallback`), so "auditable in one
+     place" holds — an auditor who reads only B has seen everything. A
+     stays because it answers a sharper question, and nine invented
+     numbers inside a hundred and forty do not read as an answer to it.
+   - **It is two tables, not one.** B.1 lists only what a human or a
+     fallback produced (typically 10-20 rows); B.2 is the full ~130-row
+     register. Neither omits anything: a "defaults suppressed for
+     brevity" appendix asks the reader to trust that absence means
+     default, which is the act of faith this item exists to end.
+   - **`MARKET_CAP_RATES` reports its resolved anchor, not its twelve
+     cells.** Eleven of them moved nothing, and "every number that moved
+     an output" excludes them by its own wording. It is the sole entry in
+     `NOT_IN_REGISTER`, and the exemption is only honest because the cell
+     that DID move is reported with the class and age band it was looked
+     up by.
+   Membership is CI-enforced rather than curated — see the acceptance
+   note below.
 
 **Out of scope.** `output/template_writer.py` (item E3b). The Python↔XLSM
 formula-parity harness (E3b stretch). Re-underwriting any default — this
@@ -627,6 +670,25 @@ threshold), tests.
   refuses the deal instead of producing a fill-log entry).
 - The memo appendix lists every assumption its own run used, with
   provenance — an IC reviewer can audit every number in one place.
+  **MET** (Category 6). Appendix B, ~130 rows, split into what a human
+  chose and the full register. What makes the completeness claim hold is
+  not the appendix but
+  `test_every_settings_editable_key_is_in_the_register_or_declared_out`:
+  it walks `override_key_registry()`, which is derived LIVE from
+  config.py, so a new editable constant appears there the moment it is
+  declared and FAILS until somebody registers it or writes down why it is
+  exempt. A second guard covers the levered constants
+  (`DEBT_TERMS`, `WATERFALL_TERMS`, `AM_FEE_PCT`, ...), which are per-deal
+  only and so absent from that registry — the first guard's silence about
+  a key is not permission to omit a number that moves every levered
+  figure in the memo. A third holds `CIM_FIELDS` against the assumptions
+  page's own input list, so a new box cannot appear on the form and
+  silently miss the appendix.
+  Both entry points disclose the same register: a CLI run has no
+  `ConfigOverride` table and no assumptions page, so its provenances are
+  `config` / `cim` / `fallback` only, and that is pinned by a test rather
+  than left to drift — Category 4 shipped exactly that asymmetry once,
+  with the fill log reaching none of the CLI's three writers.
 
 ---
 

@@ -138,6 +138,15 @@ analysis/
   valuation.py             # THE unlevered projection (project_cash_flows) + scenario NOI forecast, IRR/MOIC
   value_add.py             # Operational improvement identification
   risks.py                 # Risk identification
+  checks.py                # Model error-check register — is each input self-consistent?
+  fills.py                 # Assumption fill log — which inputs did the CIM never supply?
+                           #   Also `require_underwritable`, the three-input refusal
+  assumptions.py           # Assumption register — where did EVERY number come from?
+                           #   The three above are siblings by design: one assembly each,
+                           #   built ONCE at the engine and handed to every surface, so the
+                           #   memo, the workbook and the results page cannot disagree.
+                           #   They stay separate because a check has a pass/fail axis, a
+                           #   fill has none, and the register has a provenance axis instead
 model/
   returns_model.py         # Unlevered DCF wrapper + sensitivity grid: Bear/Base/Bull
                            #   + Sources & Uses; sizes the ONE loan off the base case
@@ -358,6 +367,48 @@ output/
       so a future Django flipping one fails CI instead of silently
       dropping the header. An audit calling them "missing" has read the
       settings file, not the response headers.
+11. **Every number discloses its provenance** (item T Category 6).
+    `analysis/assumptions.py` is the register: every value that moved an
+    output, with the one of five provenances that produced it — `deal`
+    (entered on the assumptions page), `settings` (a dated
+    `ConfigOverride` row), `fallback` (invented; the Category 4 fill log),
+    `cim` (stated in the CIM), `config` (the shipped default). Precedence
+    is the model's own and each assumption yields exactly ONE row carrying
+    the winner, with `was` holding what it displaced; printing both the
+    superseded and the applied value is how a reader ends up auditing a
+    number the engine never used.
+    **It resolves nothing.** Every value is read from live `config` —
+    patched in place for the duration of a run, so a live read IS the
+    effective value — or through THE resolver the model itself calls
+    (`resolve_hold_years`, `resolve_mgmt_fee_target`, `resolve_target_irr`,
+    `get_regional_benchmarks`). A second derivation would be item T's own
+    defect wearing its badge. The `config_deltas`/`config_defaults`/
+    `deal_overrides`/`cim_snapshot` parameters on `run_analysis` are
+    PROVENANCE ONLY and change no arithmetic; the delta dicts are read for
+    MEMBERSHIP, never for their values, so a delta that disagreed with
+    live config could not make the register print a number the run did not
+    use. `config_defaults` is captured in `webapp.services` BEFORE
+    `_patched_config` mutates anything — inside the lock the live value IS
+    the override, and a register asking config what it used to be would
+    report "settings override, was 8%, now 8%".
+    Surfaces: memo **Appendix B** (B.1 = only the rows a human or a
+    fallback produced, B.2 = the whole register), the workbook's Inputs
+    sheet, and a collapsed panel on the results Summary tab. Appendix A
+    stays beside B rather than folding into it: "what did the model
+    invent?" is a sharper question than "what did the model use?", and
+    nine invented numbers inside a hundred and forty do not read as an
+    answer to it. The LP investor summary is deliberately excluded — it is
+    two pages held by a content budget (item G) and already carries the
+    fill count.
+    **Membership is CI-enforced, not curated**:
+    `test_every_settings_editable_key_is_in_the_register_or_declared_out`
+    walks `override_key_registry()` (derived live from config.py) and
+    fails unless each key produces a row or appears in `NOT_IN_REGISTER`
+    with a stated reason. A new config key defaults to FAILING, because a
+    completeness claim maintained by memory stops being true the first
+    month nobody remembers it. `MARKET_CAP_RATES` is the sole exemption:
+    the table holds twelve cells, one of which priced this exit, and the
+    resolved anchor is reported instead.
 
 ## Manual steps flagged by the program
 - Population verification (if not in CIM)

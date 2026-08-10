@@ -88,6 +88,75 @@
   </details>
   {% endif %}
 
+  {% comment %} Assumption register (item T Category 6). Same furniture as
+     the two panels above so the tab stays one grid, with two deliberate
+     divergences. It is CLOSED by default, unlike the fill log: that panel
+     reports a finding and this one is reference material, ~130 rows of it,
+     and a summary tab that opens on a reference table has buried the
+     findings above it. And the chosen rows get their own table INSIDE the
+     disclosure rather than a filter control — a filter is state the reader
+     has to notice they are in, and "4 of 130" is the whole story here.
+     {% endcomment %}
+  {% if register_rows %}
+  <details>
+    <summary class="cursor-pointer select-none text-sm font-semibold mb-1.5">
+      Assumption Register —
+      <span class="text-slate-700">{{ register_counts.total }} assumption{{ register_counts.total|pluralize }}</span>
+      <span class="font-normal text-slate-500">
+        ({% if register_counts.chosen %}{{ register_counts.chosen }} not from the model defaults{% else %}all model defaults{% endif %})
+      </span>
+    </summary>
+
+    {% if register_chosen %}
+    <div class="bg-white border border-slate-200 rounded-lg overflow-x-auto mb-2">
+      <table class="w-full text-sm border-collapse">
+        <thead>
+          <tr class="text-left border-b border-slate-300 text-xs text-slate-600">
+            <th class="py-1.5 pl-3 pr-3">Assumption</th>
+            <th class="py-1.5 pr-3 text-right">Value Used</th>
+            <th class="py-1.5 pr-3">Source</th>
+            <th class="py-1.5 pr-3 text-right">Replaced</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for a in register_chosen %}
+          <tr class="border-b border-slate-100">
+            <td class="py-1.5 pl-3 pr-3 font-medium">{{ a.label }}</td>
+            <td class="py-1.5 pr-3 text-right tabular-nums">{{ a.value }}</td>
+            <td class="py-1.5 pr-3 text-slate-600">{{ a.source }}</td>
+            <td class="py-1.5 pr-3 text-right tabular-nums text-slate-500">{{ a.was|default:"—" }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% endif %}
+
+    <div class="bg-white border border-slate-200 rounded-lg overflow-x-auto">
+      <table class="w-full text-sm border-collapse">
+        <thead>
+          <tr class="text-left border-b border-slate-300 text-xs text-slate-600">
+            <th class="py-1.5 pl-3 pr-3">Group</th>
+            <th class="py-1.5 pr-3">Assumption</th>
+            <th class="py-1.5 pr-3 text-right">Value Used</th>
+            <th class="py-1.5 pr-3">Source</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for a in register_rows %}
+          <tr class="border-b border-slate-100{% if a.chosen %} bg-amber-50{% endif %}">
+            <td class="py-1.5 pl-3 pr-3 text-slate-500">{{ a.group }}</td>
+            <td class="py-1.5 pr-3 font-medium">{{ a.label }}</td>
+            <td class="py-1.5 pr-3 text-right tabular-nums">{{ a.value }}</td>
+            <td class="py-1.5 pr-3 text-slate-600">{{ a.source }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </details>
+  {% endif %}
+
   {% comment %} Capital — Sources and Uses read as one table, not two
      stacked ones: they are the same total counted two ways, and stacking
      spends a whole block of vertical space making that point. {% endcomment %}

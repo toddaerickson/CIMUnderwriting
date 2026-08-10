@@ -963,6 +963,26 @@ def _analysis_worker(run_pk):
                 {"config": applied, "config_skipped": skipped,
                  "assumptions": stamped}))
 
+        # What each applied delta DISPLACED, read off the pristine
+        # constants rather than the live module (item T Category 6). It
+        # has to be captured here, before `_patched_config` mutates those
+        # dicts: inside the lock the live value IS the override, so a
+        # register asking config "what did you used to be?" would get the
+        # new number back and print "settings override, was 8%, now 8%".
+        # `_ORIG_CONFIG` is the same pristine copy `effective_config`
+        # reads for the same reason.
+        from webapp.forms import dotted_get   # lazy: avoids a module cycle
+        config_defaults = {}
+        for key in applied:
+            try:
+                config_defaults[key] = dotted_get(_ORIG_CONFIG, key)
+            except (KeyError, AttributeError, TypeError):
+                # A key config.py no longer defines. It is already in
+                # `skipped` and never reached the engine, so the register
+                # simply has nothing to say about what it replaced —
+                # which must not cost the analyst the run.
+                continue
+
         with _ANALYSIS_LOCK:
             with _patched_config(patch):
                 result = run_analysis(
@@ -999,6 +1019,20 @@ def _analysis_worker(run_pk):
                     debt_terms=debt_terms,
                     waterfall_terms=waterfall_terms,
                     am_fee_pct=am_fee_pct,
+                    # Provenance for the assumption register (item T
+                    # Category 6). These change no arithmetic — the
+                    # deltas are already applied to the live dicts by
+                    # `_patched_config`, and every resolved value above
+                    # is already a parameter. They answer the one
+                    # question a resolved value cannot: whether a human
+                    # chose it. `applied`, not `config_deltas`, so the
+                    # register reports exactly the rows the engine saw —
+                    # a superseded or out-of-bounds row is not this
+                    # run's story, the same rule the stamp above follows.
+                    config_deltas=applied,
+                    config_defaults=config_defaults,
+                    deal_overrides=overrides,
+                    cim_snapshot=deal.cim_json,
                 )
 
         meta = build_deal_meta(cim, result, deal.deal_dir,
@@ -1040,6 +1074,13 @@ def _analysis_worker(run_pk):
             # it later would answer for whatever config says then, and
             # the returns on screen were computed on what it said now.
             "assumption_fill_log": result.assumption_fill_log,
+            # Assumption register (item T Category 6). Persisted for the
+            # same reason and one stronger: it records the PROVENANCE of
+            # every number, and provenance is the thing that most
+            # obviously rots. A settings row written next month would
+            # relabel a run made today as "settings override" against a
+            # value it never saw.
+            "assumption_register": result.assumption_register,
             # The levered lens (item E3a). Persisted HERE, with the run,
             # rather than recomputed later: the LP net IRR belongs to the
             # assumption set stamped above, and a figure re-derived next
