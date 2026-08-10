@@ -45,6 +45,46 @@ never remove, weaken, or bypass them:
   and "is solo mode on" — one definition, so they can never protect different
   trees. `tests/test_hook_shared_tree.py` is the CI gate on that.
 
+## Context resets (long unattended sessions)
+
+`autoCompactWindow` in `.claude/settings.json` is set to **300,000 tokens** —
+compaction fires there rather than at the model's default. No hook does this
+and none can: every hook event is documented as unable to trigger a compact or
+a clear, so the setting is the mechanism and the hooks below only preserve
+state across it.
+
+- **PreCompact** `.claude/hooks/precompact-carryover.py` — snapshots the
+  DERIVABLE state (which worktree, which branch, commits not yet on
+  origin/main, uncommitted paths, the worktree list) to
+  `<primary .git>/cim-carryover-<sessionhash>`. It never blocks: exit 2 on
+  this event blocks the compaction the operator asked for, so every path
+  exits 0.
+- **SessionStart** `.claude/hooks/session-start-carryover.py` — restores it,
+  but only when `source` is `clear` or `compact`. `resume` already has the
+  real transcript and `startup` is a genuinely new session; re-injecting
+  beside either is noise arguing with the record.
+- `<primary .git>/cim-session-notes.md` is the half that matters and the half
+  no hook writes. **Maintain it by hand during long runs** — which phase of a
+  plan is in flight, what was decided and why, what is next. The snapshot
+  covers what a machine can rebuild; the notes cover what it cannot. It is one
+  file per clone, not per session, deliberately: concurrent sessions sharing a
+  task board is a feature, and keying it by session would lose it at exactly
+  the moment `/clear` mints a new session id.
+- Both carry-over hooks read their paths from `_shared_tree.py` for the same
+  reason the guard pair does. The notes filename must never share
+  `CARRYOVER_PREFIX`, or the snapshot sweep deletes it;
+  `test_the_notes_file_is_not_matched_as_a_snapshot` pins that.
+
+# Compact instructions
+
+When compacting this session, preserve above all else: the absolute path of
+the worktree being committed into and its branch name; which phase of the
+in-flight plan is done versus pending; any deliberate deviation from a plan
+and the reason for it; test failures and their output; and decisions the
+operator made by hand (they cannot be re-derived from the code). Drop file
+listings, full test output for passing runs, and exploratory reads that led
+nowhere.
+
 **The mistake this catches, because it is easy to make:** `cd` does NOT
 persist between Bash calls. A relative path in a later command therefore
 resolves against the primary tree, not your worktree. Use absolute paths and

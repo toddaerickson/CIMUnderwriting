@@ -1,4 +1,6 @@
 {
+  "autoCompactEnabled": true,
+  "autoCompactWindow": 300000,
   "permissions": {
     "allow": [
       "WebFetch(domain:crdrealty.com)",
@@ -93,6 +95,22 @@
           {
             "type": "command",
             "command": "for W in /home/terickson/CIM_Analyst/.superpowers/sdd/*/progress.md; do [ -f \"$W\" ] || continue; echo \"IN-FLIGHT SDD BUILD LEDGER ($W) \u2014 an implementation plan is mid-execution. Resume it: invoke superpowers:subagent-driven-development, follow the ledger below (trust it and git log over recollection; tasks with a complete line are DONE):\"; tail -40 \"$W\"; done",
+            "timeout": 10
+          },
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PROJECT_DIR:-$(git rev-parse --show-toplevel 2>/dev/null || echo .)}/.claude/hooks/session-start-carryover.py\"",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "PreCompact": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PROJECT_DIR:-$(git rev-parse --show-toplevel 2>/dev/null || echo .)}/.claude/hooks/precompact-carryover.py\"",
             "timeout": 10
           }
         ]
