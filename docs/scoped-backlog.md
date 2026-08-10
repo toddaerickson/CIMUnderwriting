@@ -808,17 +808,24 @@ threshold), tests.
   moves; every later delta is enumerated and argued in its PR.
 - A grep/AST sweep finds no numeric modeling literals outside `config.py`
   and `registry.py`'s non-valuation constants — enforced by a CI test, not
-  by inspection. **STILL OPEN — the one acceptance criterion not met.**
-  What exists instead is five hand-written per-family AST guards in
-  `tests/test_config_single_source.py`: age (`:1264`), occupancy (`:2828`),
-  the solver bracket (`:1404`), a fabricated NOI (`:2288`) and a 1-SF
-  property (`:2314`). Each was added by the PR that created its family, and
-  together they meet the bar family-by-family — but **a literal family
-  nobody has thought of yet ships unguarded**, which is the property the
-  universal sweep was supposed to provide. Cap rates, growth rates and
-  transaction costs have no guard of their own today. Closing this means
-  one AST walk over `analysis/`, `model/` and `output/` with an allowlist
-  whose entries carry stated reasons, replacing the five.
+  by inspection. **DONE**, PR #59 — `tests/test_literal_sweep.py`.
+  ~~STILL OPEN — the one acceptance criterion not met.~~ That text was
+  written by PR #54 and closed by PR #59 two hours later; it is corrected
+  here rather than deleted, because "the doc claimed something the code
+  disproved" is the exact defect this whole item exists to remove, and it
+  is worth one line to record that the item's own paperwork was the last
+  place it happened.
+  The sweep exempts by KIND (unit conversions, `round()` args, subscript
+  indices, identifier-ish dict keys, and the RHS of any module-level
+  UPPER_SNAKE assignment) and falls back to an allowlist keyed by
+  `(module, value)` where every entry carries a reason. The five
+  per-family guards in `tests/test_config_single_source.py` deliberately
+  REMAIN: they name their family and fail with a message about it, where
+  the sweep can only say "line 180". Backstop, not replacement.
+  **One gap survives and is stated rather than implied:** the sweep
+  covers `analysis/` and `model/`, not `output/`, whose literals are
+  overwhelmingly layout. A NEW modeling literal appearing in
+  `memo_writer` or `excel_writer` is therefore still unguarded.
 - Override round-trip: for each formerly-duplicated key, a ConfigOverride
   delta changes every output the audit found divergent (step-up flag,
   population gate and labels, memo recommendation threshold, sensitivity
