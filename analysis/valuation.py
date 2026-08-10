@@ -17,6 +17,7 @@ reintroduce a second loop.
 import logging
 
 import numpy_financial as npf
+import config as cfg
 from config import (DEFAULT_HOLD_YEARS, EXIT_CAP_DRIFT_BPS,
                     EXIT_CAP_SCENARIO_SPREAD_BPS, HOLD_YEARS_RANGE,
                     MARKET_CAP_AS_OF, MARKET_CAP_RATES,
@@ -67,6 +68,33 @@ def resolve_hold_years(hold_years: int = None) -> int:
                        years, low, high, clamped)
         return clamped
     return years
+
+
+def resolve_exit_noi(trailing: float, forward: float) -> float:
+    """Pick the NOI the exit capitalizes, per config.EXIT_NOI_CONVENTION.
+
+    Both candidates are computed by the CALLER's own engine — the static
+    DCF's forward step and the VA model's forward year are different
+    arithmetic on purpose — so this helper only selects. Sharing the
+    selection is what keeps the two engines agreeing on what the
+    convention MEANS (decision 5, settled 2026-08-10: one config name
+    governs every exit capitalization in a run) while each keeps its own
+    projection.
+
+    Reads `cfg.EXIT_NOI_CONVENTION` at CALL time via the module
+    attribute — a scalar reached by `from config import ...` freezes at
+    import, the trap SOLVER_TARGET_IRR already documented. An unknown
+    value raises rather than defaulting: a misspelled convention
+    silently priced as trailing would be a wrong exit on every deal.
+    """
+    convention = cfg.EXIT_NOI_CONVENTION
+    if convention == "trailing":
+        return trailing
+    if convention == "forward":
+        return forward
+    raise ValueError(
+        f"config.EXIT_NOI_CONVENTION must be 'trailing' or 'forward', "
+        f"got {convention!r}")
 
 
 def resolve_market_cap(asset_type: str = None, year_built=None, *,
@@ -247,9 +275,14 @@ def project_cash_flows(ttm_noi: float, price: float, capex: float,
     rev_growth_4_5 = params["rev_cagr_yr4_5"]
     exp_growth = params["exp_growth"]
 
+    def rev_growth_for(yr: int) -> float:
+        """The band rate for year `yr` — ONE rule, used by the hold-year
+        loop and the forward exit step below, so the forward year cannot
+        drift onto its own banding."""
+        return rev_growth_1_3 if yr <= 3 else rev_growth_4_5
+
     for yr in range(2, hold_years + 1):
-        rev_growth = rev_growth_1_3 if yr <= 3 else rev_growth_4_5
-        new_rev = rev_series[-1] * (1 + rev_growth)
+        new_rev = rev_series[-1] * (1 + rev_growth_for(yr))
         new_exp = exp_series[-1] * (1 + exp_growth)
         rev_series.append(new_rev)
         exp_series.append(new_exp)
@@ -265,7 +298,18 @@ def project_cash_flows(ttm_noi: float, price: float, capex: float,
                          "resolve_exit_cap) or exit_cap_override")
     requested_exit_cap = exit_cap
     entry_cap = ttm_noi / price if price > 0 else 0
-    exit_noi = noi_series[-1]
+
+    # Exit NOI per config.EXIT_NOI_CONVENTION (decision 5, settled
+    # 2026-08-10). Forward is one more step of the SAME two series —
+    # year N+1 revenue at the band rate for year N+1, minus year N+1
+    # expenses at exp_growth. NOT noi * (1 + g): the series grow at
+    # different rates and NOI is their difference, so a single-rate step
+    # overstates forward NOI whenever expense growth outruns revenue
+    # growth (the bear case). Computed unconditionally so the branch on
+    # the convention lives in ONE place, resolve_exit_noi.
+    forward_noi = (rev_series[-1] * (1 + rev_growth_for(hold_years + 1))
+                   - exp_series[-1] * (1 + exp_growth))
+    exit_noi = resolve_exit_noi(noi_series[-1], forward_noi)
 
     # The coercion is RECORDED, not just applied: a run that swapped the
     # analyst's entered cap for a different one has to say so

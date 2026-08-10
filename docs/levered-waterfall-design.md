@@ -1,5 +1,13 @@
 # Levered returns + preferred-return waterfall — research & design
 
+> **Exit-NOI note (2026-08-10):** this document's oracles capitalize
+> YEAR 6 — the forward convention. The shipped default is
+> `config.EXIT_NOI_CONVENTION = "trailing"` (the terminal hold year's
+> own NOI), and the implemented forward branch steps revenue and
+> expenses at their separate rates, so it is the same convention as
+> these oracles but not the same arithmetic. See CLAUDE.md design
+> decision 5.
+
 Research date: 2026-07-28 (web sources; fixture arithmetic verified in Python).
 Status: DESIGN INPUT — not yet built. Scoped for build as item E in
 [scoped-backlog.md](scoped-backlog.md) (E1 debt → E2 waterfall → E3 wiring →

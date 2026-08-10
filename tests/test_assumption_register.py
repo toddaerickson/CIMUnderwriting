@@ -93,6 +93,19 @@ def test_the_levered_constants_are_registered_though_no_guard_demands_them():
             assert f"{name}.{key}" in have, f"{name}.{key}"
 
 
+def test_the_exit_noi_convention_is_registered_though_no_guard_demands_it():
+    """`EXIT_NOI_CONVENTION` is a top-level constant and deliberately not
+    settings-editable, so `override_key_registry()` never lists it and
+    the membership guard above is silent about it. Same rule as the
+    levered constants: silence is not permission to omit the convention
+    that prices every exit in the run — static DCF and value-add both."""
+    rows = {row.key: row for row in A.collect()}
+    assert "EXIT_NOI_CONVENTION" in rows
+    row = rows["EXIT_NOI_CONVENTION"]
+    assert row.value == cfg.EXIT_NOI_CONVENTION == "trailing"
+    assert row.provenance == A.CONFIG
+
+
 def test_every_numeric_cim_form_field_is_registered():
     """A new box on the assumptions page moves an output the moment an
     analyst types in it. If `CIM_FIELDS` does not know about it, the

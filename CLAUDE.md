@@ -236,18 +236,31 @@ output/
    scenario engine, the sensitivity grid and both solvers call it, and a
    second copy of that loop is how they drifted last time.
 4. **Exit cap ≥ entry cap** in base and bear cases.
-5. **Exit NOI is TRAILING, not forward**: `project_cash_flows`
-   capitalizes the terminal hold year's OWN NOI (`noi_series[-1]`; year 5
-   on a 5-year hold). `docs/levered-waterfall-design.md` and its
-   reproduction in `tests/test_debt.py` (oracle 5) capitalize **year 6**,
-   which is about 3% higher. Both are deliberate and both are tested —
-   the debt module is exercised in isolation and never calls the
-   canonical projection, while `tests/test_levered.py` pins the trailing
-   convention the wiring actually uses. **If a levered figure looks ~3%
-   off against the design doc, this is why, and it is not a bug in the
-   debt math.** The underwriting judgment — a buyer at the end of year 5
-   prices on year 6's NOI, which is the institutional norm — is deferred,
-   not settled. Do not switch it silently.
+5. **Exit NOI is a named convention, default TRAILING** (settled
+   2026-08-10; it was "deferred, not settled" until then).
+   `config.EXIT_NOI_CONVENTION` (`"trailing"` | `"forward"`) governs
+   BOTH exit engines — `project_cash_flows` and the value-add model's
+   own exit — through the one selector
+   `analysis.valuation.resolve_exit_noi`, read at CALL time (a scalar
+   reached by `from config import` freezes at import). Trailing
+   capitalizes the terminal hold year's OWN NOI (`noi_series[-1]`);
+   forward is one more step of the SAME rev/exp series at the rates in
+   force for year N+1 — NOT NOI×(1+g), because the two series grow at
+   different rates (base differential ≈ +2.2% exit NOI, bear ≈ +0.5%).
+   The default is trailing so no published number moved when the name
+   arrived; flipping it is a deliberate operator act whose delta must be
+   enumerated (item T's snapshot discipline), and the convention is a
+   register row so every run discloses which one priced its exit. It is
+   deliberately NOT settings-editable or per-deal — comparability across
+   the pipeline. `docs/levered-waterfall-design.md` and its reproduction
+   in `tests/test_debt.py` (oracle 5) capitalize **year 6** — the
+   forward convention in a SINGLE-RATE fixture, about 3% higher there;
+   same convention, different arithmetic from the implemented forward
+   branch, so do not expect them to tie to the cent. **If a levered
+   figure looks ~3% off against the design doc, this is why, and it is
+   not a bug in the debt math.** `tests/test_levered.py` pins the
+   trailing default; `tests/test_exit_noi_convention.py` pins the
+   forward branch in both engines.
 6. **Levered returns are a second lens, on by default**: every deal is
    sized at `config.DEBT_TERMS` and carries an LP net IRR, but the
    unlevered screen above is unaffected by it. The loan is sized ONCE off

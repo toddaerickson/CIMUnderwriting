@@ -325,6 +325,31 @@ EXIT_CAP_SCENARIO_SPREAD_BPS = {
     ScenarioType.BULL: -100.0,
 }
 
+# Which year's NOI the exit capitalizes — in BOTH exit engines: the
+# static DCF (`analysis.valuation.project_cash_flows`) and the value-add
+# model (`model.value_add_model`). They flip together (operator,
+# 2026-08-10): one run must never price its static exit on one
+# convention and its VA exit on another.
+#
+#   "trailing": the terminal hold year's OWN NOI. Today's tested
+#       behavior; every published number to date was produced under it.
+#   "forward": one more step of the projection past the hold — a buyer
+#       at the end of year N prices on year N+1's NOI, which is the
+#       institutional norm. In the static DCF that is one more
+#       revenue/expense step at the rates in force for year N+1 (NOT
+#       NOI x (1+g): the two series grow at different rates and NOI is
+#       their difference); in the VA engine it is the next twelve
+#       months of the same monthly projection.
+#
+# Deliberately NOT settings-page editable and NOT a per-deal field: a
+# convention this deep changes comparability across the whole pipeline,
+# so flipping the default is a deliberate operator act whose output
+# delta must be enumerated (item T's snapshot discipline), not a knob.
+# Read at CALL time through `analysis.valuation.resolve_exit_noi` — a
+# scalar reached by `from config import ...` would freeze at import,
+# the same trap SOLVER_TARGET_IRR already documented.
+EXIT_NOI_CONVENTION = "trailing"   # "trailing" | "forward"
+
 # Fallback when the vintage is unknown. The oldest band is deliberate:
 # an unknown-age asset should not be priced as if it were new.
 MARKET_CAP_UNKNOWN_AGE_BAND = "old"

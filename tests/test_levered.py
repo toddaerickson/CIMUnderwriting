@@ -25,12 +25,14 @@ Three oracles, each exercising a path the others do not:
   reserve is drawn to zero, then capital is CALLED, and no period ever
   carries a negative distribution.
 
-THE EXIT-NOI CONVENTION. `analysis.valuation.project_cash_flows`
-capitalizes the terminal hold year's OWN NOI (trailing). The design doc
-— and therefore `tests/test_debt.py`'s oracle 5 — capitalizes year 6
-(forward), about 3% higher. Both are deliberate; see CLAUDE.md's
-design-decisions block. These oracles are computed on the TRAILING
-convention, because that is the projection the wiring actually consumes.
+THE EXIT-NOI CONVENTION — now a config name, `EXIT_NOI_CONVENTION`
+(decision 5, settled 2026-08-10), default "trailing": the projection
+capitalizes the terminal hold year's OWN NOI. The design doc — and
+therefore `tests/test_debt.py`'s oracle 5 — capitalizes year 6, which is
+the FORWARD convention in a single-rate fixture, about 3% higher there.
+Both remain deliberate; see CLAUDE.md's design-decisions block. These
+oracles are computed on the TRAILING default, because that is the
+projection the wiring actually consumes.
 """
 
 import pytest
@@ -363,10 +365,12 @@ def test_debt_does_not_touch_the_unlevered_projection():
 
 
 def test_the_exit_capitalizes_the_trailing_year_not_the_forward_year(oracle_a):
-    """The convention CLAUDE.md now records. Year 5's own NOI is
+    """The DEFAULT convention (`config.EXIT_NOI_CONVENTION =
+    "trailing"`, decision 5 — settled 2026-08-10). Year 5's own NOI is
     capitalized, NOT year 6 — the design doc and `tests/test_debt.py`'s
     oracle 5 use the forward convention and are about 3% higher. Neither
-    is a bug; they are different conventions and the repo states both."""
+    is a bug; they are different conventions, the config names them, and
+    `tests/test_exit_noi_convention.py` pins the forward branch."""
     projection, _, _, _ = oracle_a
     trailing = 600_000 * 1.03 ** 4
     assert projection["noi"][-1] == pytest.approx(trailing, abs=CENT)
