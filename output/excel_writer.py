@@ -280,6 +280,8 @@ def _write_assumption_register(ws, row, assumption_register):
     if not assumption_register:
         return row
 
+    import dataclasses
+
     from analysis.assumptions import (PROVENANCE_LABELS, format_value,
                                       from_dicts)
 
@@ -298,7 +300,6 @@ def _write_assumption_register(ws, row, assumption_register):
                 value=PROVENANCE_LABELS.get(entry.provenance,
                                             entry.provenance)).font = VALUE_FONT
         if entry.was is not None:
-            import dataclasses
             ws.cell(row=row, column=5, value=format_value(
                 dataclasses.replace(entry, value=entry.was))).font = VALUE_FONT
         elif entry.detail:

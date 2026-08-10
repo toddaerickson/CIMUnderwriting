@@ -15,7 +15,6 @@ import pytest
 
 import config as cfg
 from analysis import assumptions as A
-from engine import AnalysisResult, run_analysis
 from tests.test_characterization import stabilized_deal
 from tests.test_config_single_source import _memo_text, _run
 
