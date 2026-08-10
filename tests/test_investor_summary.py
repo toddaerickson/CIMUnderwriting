@@ -32,7 +32,7 @@ from docx.shared import Inches
 
 import config as cfg
 from output import MAX_FILENAME_STEM, safe_filename
-from output.memo_writer import (_IS_BODY_PT, _IS_HEAD_PT,
+from output.memo_writer import (_GC_PENDING_NOTICE, _IS_BODY_PT, _IS_HEAD_PT,
                                 _IS_MAX_MITIGANT_CHARS, _IS_MAX_NAME_CHARS,
                                 _IS_MICRO_PT, _SUMMARY_LEGEND, _derive_thesis,
                                 _is_build, generate_investor_summary)
@@ -713,3 +713,81 @@ def test_bear_bull_band_alone_cannot_print_without_a_stamp(tmp_path):
     body = _text(_generate(tmp_path, levered={"bear": {"lp_net_irr": 0.012},
                                               "bull": {"lp_net_irr": 0.2891}}))
     assert "1.2%" not in body and "28.9%" not in body
+
+
+# ── Item G: the distribution gate ────────────────────────────────────
+#
+# The gate used to live in a backlog paragraph and a code comment, which
+# are the two places the analyst clicking "Investor Summary (.docx)" will
+# never look. These tests hold it as behaviour instead.
+
+def test_an_uncleared_summary_says_so_on_its_own_first_line(tmp_path,
+                                                            monkeypatch):
+    """MUTATION: delete the `_is_gc_notice` call from `_is_build`.
+
+    On the PAGE, not only on screen: the failure this guards is a file
+    already detached from the app — attached to an email, sitting in a
+    data room — and a caveat beside the download button is invisible the
+    moment the .docx moves.
+    """
+    monkeypatch.setattr(cfg, "INVESTOR_SUMMARY_GC_CLEARED", False)
+    body = _text(_generate(tmp_path))
+    assert _GC_PENDING_NOTICE in body
+    assert body.strip().startswith("INTERNAL DRAFT")
+
+
+def test_clearing_the_gate_removes_the_notice_and_keeps_the_legend(
+        tmp_path, monkeypatch):
+    """The flag has to actually be a flag — a notice that cannot be
+    removed is one the operator will strip by editing the constant, and
+    the legend would go with it.
+
+    The legend is the half that must survive BOTH states: it says what
+    the document is, where the notice only says who has not yet read it.
+    """
+    monkeypatch.setattr(cfg, "INVESTOR_SUMMARY_GC_CLEARED", True)
+    body = _text(_generate(tmp_path))
+    assert _GC_PENDING_NOTICE not in body
+    assert _SUMMARY_LEGEND in body
+
+
+def test_the_notice_is_measured_not_just_written(tmp_path, monkeypatch):
+    """Every block on this document is charged to the page budget, and a
+    notice exempted from that is how a document that fits in the tests
+    overflows in Word.
+
+    Asserts the DIFFERENCE, so it fails if the notice renders free.
+    """
+    def _page1_pt(cleared):
+        monkeypatch.setattr(cfg, "INVESTOR_SUMMARY_GC_CLEARED", cleared)
+        _doc, page1, _page2 = _build()
+        return page1.total_pt
+
+    charged = _page1_pt(False) - _page1_pt(True)
+    assert charged > 0, "the notice rendered without being charged to the page"
+    # And it is charged as the block it is, not as a rounding wobble.
+    assert charged >= _IS_MICRO_PT
+
+
+def test_the_gc_flag_is_not_settings_page_editable():
+    """A legal clearance is not a per-deal underwriting assumption, and an
+    analyst must not be able to clear it from the screen that edits cap
+    rates. It is absent from the override registry by construction; this
+    says so out loud, because the registry is derived LIVE from config
+    and a future refactor could sweep it in."""
+    from webapp.forms import override_key_registry
+
+    keys = override_key_registry()
+    assert not [k for k in keys if "GC_CLEARED" in k.upper()]
+
+
+def test_the_notice_survives_the_punctuation_fold(tmp_path, monkeypatch):
+    """`_is_para` folds typographic punctuation to ASCII so the budget can
+    measure it, so a constant containing an em dash would differ from the
+    text on the page — and every assertion above would pass while the
+    notice was subtly not the constant. Caught in development, pinned
+    here."""
+    monkeypatch.setattr(cfg, "INVESTOR_SUMMARY_GC_CLEARED", False)
+    assert _GC_PENDING_NOTICE.isascii()
+    assert _SUMMARY_LEGEND.isascii()
+    assert _GC_PENDING_NOTICE in _text(_generate(tmp_path))

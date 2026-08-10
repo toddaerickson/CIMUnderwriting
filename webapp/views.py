@@ -446,6 +446,10 @@ def deal_detail(request, pk):
         "show_progress": state in ("running", "failed") and latest and
                          latest.pk != (done_run.pk if done_run else None),
         "run_failed": state == "failed",
+        # Item G's distribution gate. Read at request time via `cfg.` so
+        # flipping the flag takes effect on the next page load rather
+        # than on the next restart.
+        "gc_cleared": cfg.INVESTOR_SUMMARY_GC_CLEARED,
     }
     if done_run:
         r = done_run.result_json or {}

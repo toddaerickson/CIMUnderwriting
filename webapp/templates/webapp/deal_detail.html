@@ -77,9 +77,28 @@
     <a href="{% url 'deal-download' deal.pk 'template' %}" class="text-sm px-3 py-1.5 rounded border border-slate-300 text-slate-700 hover:bg-slate-50">UW Template (.xlsm)</a>
     {% endif %}
     {% if done_run.investor_summary_filename %}
-    <a href="{% url 'deal-download' deal.pk 'investor_summary' %}" class="text-sm px-3 py-1.5 rounded border border-slate-300 text-slate-700 hover:bg-slate-50">Investor Summary (.docx)</a>
+    {% comment %} The only output written FOR someone outside the firm, so
+       the only one whose button carries a condition. Amber, not the
+       neutral slate the other three use: this is the one click with a
+       consequence the app cannot undo. The document itself repeats the
+       notice on its first line — a caveat that lives only here is
+       invisible the moment the .docx is attached to an email, which is
+       exactly when it matters (item G, config.INVESTOR_SUMMARY_GC_CLEARED).
+       {% endcomment %}
+    <a href="{% url 'deal-download' deal.pk 'investor_summary' %}"
+       class="text-sm px-3 py-1.5 rounded border {% if gc_cleared %}border-slate-300 text-slate-700 hover:bg-slate-50{% else %}border-amber-300 bg-amber-50 text-amber-900 hover:bg-amber-100{% endif %}">
+      Investor Summary (.docx){% if not gc_cleared %} — internal only{% endif %}
+    </a>
     {% endif %}
   </div>
+  {% if done_run.investor_summary_filename and not gc_cleared %}
+  <p class="-mt-1 mb-3 text-xs text-amber-800">
+    The investor summary has not been cleared by counsel. It is an internal /
+    prospect-discussion document and must not be sent to a prospective investor
+    or any third party until GC signs off
+    (<span class="font-mono">docs/gc-review-investor-summary.md</span>).
+  </p>
+  {% endif %}
   {% endif %}
 
   {% if done_run %}
