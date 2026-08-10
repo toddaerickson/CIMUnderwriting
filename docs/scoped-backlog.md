@@ -483,6 +483,15 @@ second source of truth. Degrades cleanly when the levered layer is absent.
 
 ## T. Transparency consolidation — one assumptions register, no shadow defaults
 
+**A pattern worth naming, since it has now happened twice.** In Categories 2
+and 5 the shipped answer was to REGISTER a family of divergent values behind
+an AST guard rather than collapse it to one number — the three age ladders
+and the nine occupancy numbers. Both read as half-finished against the scope
+text, and neither is: this item's own **Out of scope** clause excludes
+"Re-underwriting any default", and deciding which of three age ladders is
+correct is exactly that. A third such family should expect the same
+treatment rather than a reconciliation.
+
 **Why.** The 2026-08-01 audit of valuation/modeling literals found roughly
 fifty hard-coded assumptions outside [config.py](../config.py). The most
 corrosive kind is not the missing key but the duplicated one: a value config
@@ -505,7 +514,7 @@ oracle" discipline applied to the whole pipeline.
 
 **Scope.**
 
-1. **Category 1 — kill the duplicates.** `analysis/risks.py` NOI step-up
+1. **Category 1 — kill the duplicates.** ~~`analysis/risks.py` NOI step-up
    0.15 → `GATES["max_noi_step_up"]`; the population literals in
    `analysis/market.py` and `risks.py` → `GATES["population_3mi"]`; the four
    hard-coded 5%-of-EGR management-fee targets in `analysis/financials.py`
@@ -514,22 +523,70 @@ oracle" discipline applied to the whole pipeline.
    caption → `SOLVER_TARGET_IRR` / `GATES["min_irr_5yr"]`;
    `model/value_add_model.py` imports `COERCED_SCENARIOS` instead of
    re-declaring it. Gate names and risk strings become f-strings over the
-   config values, so labels cannot drift from the tests they describe.
-2. **`analysis/value_add.py` consolidation** — an entire assumptions layer
+   config values, so labels cannot drift from the tests they describe.~~ —
+   **DONE**, PR #40 (`88aaf74`). Every named duplicate now reads from
+   config: `GATES["max_noi_step_up"]` at `analysis/risks.py:195,200` (test
+   and label both); `GATES["population_3mi"]` across `analysis/market.py`
+   and `risks.py`, with the narrative tiers moved to `POPULATION_TIERS` /
+   `OCCUPANCY_TIERS`; `MGMT_FEE_TARGET_PCT` behind the one resolver
+   `analysis/financials.py:26 resolve_mgmt_fee_target`, called from both
+   `financials.py:333` and `value_add.py:182`; `cfg.GATES["min_irr_5yr"]` +
+   `cfg.IRR_STRONG_THRESHOLD` at `output/memo_writer.py:1002-1009` and
+   `output/excel_writer.py:498-518`; `COERCED_SCENARIOS` declared once at
+   `analysis/valuation.py:32`.
+   **Two literals in the touched files deliberately survive**, and both
+   would look like misses to a later reader: the HHI `50_000` at
+   `analysis/market.py:67,89` is a different quantity that happens to equal
+   the population gate (pinned apart by
+   `test_the_hhi_thresholds_are_not_the_population_gate`), and the
+   rent-premium `0.15` at `analysis/risks.py:381` is a different quantity
+   that happens to equal the NOI step-up. That coincidence of value is
+   exactly what made the original duplicates hazardous, so the separation
+   is asserted rather than left to be re-noticed.
+2. **`analysis/value_add.py` consolidation** — ~~an entire assumptions layer
    with no config home: the occupancy-target policy, spread-recovery
    haircut, ECRI trigger/impact, ancillary thresholds, and the renovation
    cost schedule with its age triggers become `VALUE_ADD_ASSUMPTIONS` /
    `RENOVATION_COST` config sections (its `EXPENSE_BENCHMARKS` import sits
-   unused today). The three divergent building-age taxonomies
+   unused today).~~ — **DONE**, PR #46 (`fa36cfb`).
+   `config.py:442 VALUE_ADD_ASSUMPTIONS` holds the occupancy target, the
+   spread-recovery share, the four ECRI keys and the three ancillary keys;
+   `config.py:491 RENOVATION_COST` holds the five capex items with their
+   age triggers, rendered in declaration order at
+   `analysis/value_add.py:215-224`. The dead `EXPENSE_BENCHMARKS` import is
+   gone, guarded at `tests/test_config_single_source.py:1179`.
+   Settings-editability is split on purpose: `VALUE_ADD_ASSUMPTIONS` is a
+   `_PATCHED_DICTS` entry (`webapp/services.py:203`), `RENOVATION_COST` is
+   explicitly excluded as presentation-only (`webapp/services.py:184-189`).
+   **The age half shipped differently from this clause, and the difference
+   is the point.** ~~The three divergent building-age taxonomies
    (value_add 20/15/10, physical 5/15/30, risks 25) reconcile to one
-   schedule.
-3. **Model-layer hard-codes.** Solver brackets → one `SOLVER_BOUNDS` config
+   schedule.~~ They were **REGISTERED, not reconciled** —
+   `config.py:567 ASSET_AGE_LADDERS` names all three
+   (`registry.AGE_BANDS`, `RENOVATION_COST`, `RISK_TRIGGERS`) with an AST
+   guard (`test_no_age_threshold_survives_as_a_bare_literal`) forbidding a
+   fourth from appearing as a bare literal, and a completeness guard beside
+   it. This is the same call Category 5 later made on the nine occupancy
+   numbers, for the same reason: each ladder answers a different
+   underwriting question (when is a building due for renovation vs. how
+   does its age band a comp vs. when does age become a risk trigger), and
+   collapsing them to one schedule is re-underwriting — which this item's
+   own **Out of scope** explicitly excludes. A reader holding to the
+   original wording should call this DONE-with-deviation, not DONE.
+3. **Model-layer hard-codes.** ~~Solver brackets → one `SOLVER_BOUNDS` config
    pair used by both solvers (today static and value-add disagree: NOI/0.03
    vs NOI/0.02); sensitivity-grid axes → `SENSITIVITY_GRID`; `registry.py`'s
    `DEFAULT_EXPENSE_RATIO` / `EXPENSE_RATIO_CLAMP` move to config and
    reconcile with `EXPENSE_BENCHMARKS["opex_revenue_ratio"]` — one statement
    of the default, the clamp bounds, and their relation to the benchmark
-   band.
+   band.~~ — **DONE**, PR #47 (`d6e851e`); the paragraph below this one
+   carries the detail. Two anchors it does not: the single bracket helper
+   is `model/solver.py:114 solver_price_bracket`, pinned by
+   `test_all_three_solvers_bisect_the_same_bracket`, and
+   `registry.py:95 EXPENSE_RATIO_LIMITS` is what remains in `registry.py`
+   after the move — the sanctioned "registry's non-valuation constants"
+   carve-out that this item's own acceptance criterion names, so it is not
+   a literal the sweep should later flag.
    ~~the frozen import-time `SOLVER_TARGET_IRR` binding in
    `model/solver.py` resolves at call time, and the `engine.py` truthiness
    guard becomes `is not None` so a 0.0 target is passable~~ — **DONE**,
@@ -658,7 +715,17 @@ threshold), tests.
   moves; every later delta is enumerated and argued in its PR.
 - A grep/AST sweep finds no numeric modeling literals outside `config.py`
   and `registry.py`'s non-valuation constants — enforced by a CI test, not
-  by inspection.
+  by inspection. **STILL OPEN — the one acceptance criterion not met.**
+  What exists instead is five hand-written per-family AST guards in
+  `tests/test_config_single_source.py`: age (`:1264`), occupancy (`:2828`),
+  the solver bracket (`:1404`), a fabricated NOI (`:2288`) and a 1-SF
+  property (`:2314`). Each was added by the PR that created its family, and
+  together they meet the bar family-by-family — but **a literal family
+  nobody has thought of yet ships unguarded**, which is the property the
+  universal sweep was supposed to provide. Cap rates, growth rates and
+  transaction costs have no guard of their own today. Closing this means
+  one AST walk over `analysis/`, `model/` and `output/` with an allowlist
+  whose entries carry stated reasons, replacing the five.
 - Override round-trip: for each formerly-duplicated key, a ConfigOverride
   delta changes every output the audit found divergent (step-up flag,
   population gate and labels, memo recommendation threshold, sensitivity
