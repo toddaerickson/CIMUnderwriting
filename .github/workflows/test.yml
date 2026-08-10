@@ -4,7 +4,24 @@ on:
   push:
     branches: [main]
   pull_request:
-    branches: [main]
+    # ANY base, not just main. This filter matches the PR's BASE branch,
+    # so `branches: [main]` silently gave zero CI to every stacked PR —
+    # and GitHub renders "no checks reported" almost identically to a
+    # passing run, so the gap reads as green rather than as absent.
+    #
+    # Stacking is normal here: the parallel-session rules put each piece
+    # of work on its own worktree and branch, so a PR based on another
+    # in-flight branch is the expected shape whenever two changes touch
+    # the same files.
+    #
+    # `base_changed` is not a default `pull_request` activity type, so a
+    # PR retargeted to main when its base merges STILL does not trigger
+    # on its own — which is the second half of the same trap. Listing the
+    # types explicitly and adding `ready_for_review` does not cover that
+    # either; only a push, or close-and-reopen, does. Running on every
+    # base at least means the PR was tested against the tree it will
+    # actually land on top of.
+    branches: ['**']
 
 jobs:
   test:
