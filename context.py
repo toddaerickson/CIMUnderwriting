@@ -72,6 +72,15 @@ class AnalysisContext:
     gate_results: list = field(default_factory=list)
     gate_summary: dict = field(default_factory=dict)
 
+    # Model error-check register (item A) — evaluated ONCE and handed to
+    # every output surface, same discipline as the engine. This was the
+    # last engine-only payload: the CLI's memo skipped its "Model Checks"
+    # block, its workbook skipped the Checks sheet, and its LP summary
+    # footer skipped the check count — the $1-property-tax class of
+    # defect, silently invisible on exactly one of the two entry points.
+    checks: list = field(default_factory=list)
+    check_summary: dict = field(default_factory=dict)
+
     # Assumption fill log (item T Category 4) — every value this run
     # invented because the CIM did not supply it. The CLI is a separate
     # orchestration from engine.run_analysis, so it carries its own copy

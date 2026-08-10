@@ -2706,6 +2706,65 @@ def test_the_cli_discloses_the_same_assumptions_the_web_app_does(tmp_path,
         assert row["field"] in text
 
 
+def test_the_cli_runs_the_check_register_and_all_three_writers_see_it(tmp_path):
+    """The last engine-only payload. `engine.run_analysis` evaluates the
+    model error-check register once and hands it to every surface; the
+    CLI never ran it at all, so a $1 property-tax line — the exact defect
+    item A was built to catch — was flagged on the web path and silent on
+    this one. Same parity rule as the fill log above: a disclosure that
+    exists on only one of the two entry points is not a disclosure.
+
+    MUTATION: drop `checks=ctx.checks` from either writer call in
+    `run.stage_output`, or delete the register evaluation from
+    `run.stage_gates_and_risks`.
+    """
+    import run as cli
+    from context import AnalysisContext
+
+    ctx = AnalysisContext(pdf_path=str(tmp_path / "deal.pdf"))
+    ctx.cim_data = stabilized_deal()
+    # The item-A signature defect: a $1 property-tax line, orders of
+    # magnitude below half its benchmark low. `expense_line_floor` (check
+    # 8, the "$1 property tax catcher") must fire. The line lives on the
+    # CIM's `expense_lines`; `analyze_financials` carries it into
+    # `expense_analysis["lines"]`, which is what `input_from_cim` reads.
+    for line in ctx.cim_data.expense_lines:
+        if "tax" in line.label.lower():
+            line.t12 = 1.0
+
+    class _NoComps:
+        def query_expense_benchmarks(self, **kw):
+            return None
+
+        def query_rent_comps(self, **kw):
+            return None
+
+        def save_analysis(self, **kw):
+            return None
+
+    comp_db = _NoComps()
+    cli.stage_analyze(ctx, comp_db)
+    cli.stage_valuate(ctx)
+    cli.stage_gates_and_risks(ctx)
+
+    assert ctx.checks, "the CLI never ran the check register"
+    assert ctx.check_summary.get("total"), "summarize() never ran"
+    fired = {c["id"] for c in ctx.checks if c["status"] == "fail"}
+    assert "expense_line_floor" in fired, (
+        f"the $1 property-tax line fired no expense-floor check; failed: {fired}")
+
+    cli.stage_output(ctx, comp_db)
+
+    memo = _memo_text(ctx.memo_path)
+    assert "Model Checks" in memo, "the memo's Model Checks block is absent"
+
+    from openpyxl import load_workbook
+    wb = load_workbook(ctx.excel_path, read_only=True)
+    assert "Checks" in wb.sheetnames, (
+        f"the workbook has no Checks sheet; sheets: {wb.sheetnames}")
+    wb.close()
+
+
 def test_the_cli_lp_summary_carries_an_lp_net_irr(tmp_path):
     """The CLI's LP-facing document must not quote an unlevered IRR.
 
