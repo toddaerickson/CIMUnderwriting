@@ -4,10 +4,41 @@ on:
   push:
     branches: [main]
   pull_request:
-    branches: [main]
+    # ANY base, not just main. This filter matches the PR's BASE branch,
+    # so `branches: [main]` silently gave zero CI to every stacked PR —
+    # and GitHub renders "no checks reported" almost identically to a
+    # passing run, so the gap reads as green rather than as absent.
+    #
+    # Stacking is normal here: the parallel-session rules put each piece
+    # of work on its own worktree and branch, so a PR based on another
+    # in-flight branch is the expected shape whenever two changes touch
+    # the same files.
+    #
+    branches: ['**']
+    # The second half of the same trap. When a base branch merges and is
+    # deleted, GitHub RETARGETS the PRs stacked on it — so a PR that was
+    # tested against its old base silently becomes a PR against `main`
+    # that nothing has ever run on.
+    #
+    # There is no `base_changed` activity type; the retarget arrives as
+    # `edited` with a `changes.base` payload, and `edited` is not in the
+    # default set (`opened`, `synchronize`, `reopened`). Naming the types
+    # explicitly is what closes it — and the default three must be listed
+    # too, because supplying `types` REPLACES the default set rather than
+    # adding to it. Dropping one here would trade this hole for a worse
+    # one.
+    types: [opened, synchronize, reopened, edited]
 
 jobs:
   test:
+    # `edited` also fires on every title and body edit, and PR bodies get
+    # edited a lot — running the full suite for a typo fix is waste. Gate
+    # on the payload instead: `changes.base` is present ONLY when the base
+    # branch moved, which is the single case `edited` was added for.
+    # Non-`edited` events (push, opened, synchronize, reopened) short-
+    # circuit on the first clause and are unaffected.
+    # `smoke-pg` needs this job, so skipping here skips both.
+    if: github.event.action != 'edited' || github.event.changes.base != null
     runs-on: ubuntu-latest
     # `manage.py check` and `collectstatic` load cimweb.settings — the
     # PRODUCTION module — and DEBUG defaults to False there, so the
