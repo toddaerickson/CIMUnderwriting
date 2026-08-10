@@ -1,9 +1,12 @@
 # Levered returns + preferred-return waterfall — research & design
 
 Research date: 2026-07-28 (web sources; fixture arithmetic verified in Python).
-Status: DESIGN INPUT — not yet built. Scoped for build as item E in
+Status: BUILT — shipped as items E1–E4 in the order scoped in
 [scoped-backlog.md](scoped-backlog.md) (E1 debt → E2 waterfall → E3 wiring →
-E4 solver). The LPA confirmations at the bottom no longer block the build: they
+E4 solver): `model/debt.py`, `model/waterfall.py`, `model/levered.py`,
+`model/solver.py`. This file remains the design record; its numeric oracles
+are reproduced in `tests/test_debt.py`. The LPA confirmations at the bottom
+never blocked the build: they
 ship as named parameters carrying documented defaults, and every LP net IRR is
 displayed with its resolved assumption set. The number is not decision-grade
 until the LPA is actually read.

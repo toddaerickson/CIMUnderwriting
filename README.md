@@ -8,10 +8,11 @@ Self-storage investment screening and underwriting tool. Upload a CIM (Confident
 - **Assumptions editor** — 6-tab form to review/edit all inputs before analysis (Property, Size, Unit Mix, Income & Expenses, Scenarios, Demographics)
 - **Go/No-Go gates** — 7 investment criteria with PASS/FAIL/TBD evaluation
 - **Expense benchmarking** — analyst-adjusted NOI using $/NRSF benchmarks by state and region
-- **5-year unlevered DCF** — Bear/Base/Bull scenarios with IRR, MOIC, yield-on-cost
+- **Unlevered DCF** — Bear/Base/Bull scenarios with IRR, MOIC, yield-on-cost, net of transaction costs (default 5-year hold, editable 1–10)
 - **Value-add modeling** — monthly cash flow engine for lease-up and rent growth deals
-- **Max price solver** — bisection solver finds highest price for target IRR
-- **Output generation** — Word memo (.docx), Excel returns model (.xlsx), pre-filled underwriting template (.xlsm)
+- **Levered returns & LP waterfall** — debt sized as min(LTV, DSCR, debt yield), single-tier waterfall (pref + promote + AM fee) with LP net IRR/MOIC as a second lens beside the unlevered screen, every figure stamped with its resolved LPA assumptions
+- **Max price solvers** — two bisection solvers, both shown: max price for the 10% unlevered IRR gate, and max price for the fund's 15% LP net IRR
+- **Output generation** — Word memo (.docx), Excel returns model (.xlsx), pre-filled underwriting template (.xlsm), and a 2-page LP-facing investor summary (.docx)
 - **Deal tracker** — persistent deal folder with metadata and comp database
 - **Web app** — Django UI with upload, assumptions editing, threaded analysis runs, results tabs, downloads, comps browser, and settings overrides
 
@@ -55,7 +56,9 @@ Render/Neon deployment architecture and cutover runbook.
 
 Key environment variables:
 - `CENSUS_API_KEY` — demographic enrichment (optional)
-- `GP_NAME`, `GP_EQUITY_SHARE`, `GP_AM_FEE_RATE`, `GP_PROMOTE_PCT` — fund structure for UW template
+- `GP_NAME` — GP display name for the UW template (the old `GP_EQUITY_SHARE` /
+  `GP_AM_FEE_RATE` / `GP_PROMOTE_PCT` vars were removed in item E3b — fund
+  structure now lives in `config.py` and the per-deal Debt & Waterfall inputs)
 - `COMP_DB_PATH`, `CIM_DEALS_DIR`, `CIM_OVERRIDES_DIR` — data paths (set by `render.yaml` in prod)
 
 ## Investment Criteria
@@ -65,7 +68,7 @@ Key environment variables:
 | Population (3-mi) | >= 50,000 |
 | No Unproven Demand | Physical occupancy >= 75%, and no post-2020 vintage still in ramp (< 85%) |
 | Asking Price | <= Replacement Cost |
-| Base Case 5-yr IRR | >= 10% |
+| Base Case unlevered IRR | >= 10% over the hold (default 5-yr, editable 1–10) |
 | MSA Quality | Top-50 or strong secondary |
 | CIM Yr1 NOI Step-Up | <= 15% vs TTM |
 | Exit Cap | >= Entry Cap (base case) |
@@ -77,7 +80,7 @@ git clone https://github.com/toddaerickson/CIMUnderwriting.git
 cd CIMUnderwriting
 python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
-cp .env.example .env  # fill in CENSUS_API_KEY, GP_* values
+cp .env.example .env  # fill in CENSUS_API_KEY (optional) and GP_NAME
 python manage.py migrate
 OPERATOR_PASSWORD='<choose one>' python manage.py bootstrap_operator
 ```
