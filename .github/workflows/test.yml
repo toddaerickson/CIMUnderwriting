@@ -14,17 +14,31 @@ on:
     # in-flight branch is the expected shape whenever two changes touch
     # the same files.
     #
-    # `base_changed` is not a default `pull_request` activity type, so a
-    # PR retargeted to main when its base merges STILL does not trigger
-    # on its own — which is the second half of the same trap. Listing the
-    # types explicitly and adding `ready_for_review` does not cover that
-    # either; only a push, or close-and-reopen, does. Running on every
-    # base at least means the PR was tested against the tree it will
-    # actually land on top of.
     branches: ['**']
+    # The second half of the same trap. When a base branch merges and is
+    # deleted, GitHub RETARGETS the PRs stacked on it — so a PR that was
+    # tested against its old base silently becomes a PR against `main`
+    # that nothing has ever run on.
+    #
+    # There is no `base_changed` activity type; the retarget arrives as
+    # `edited` with a `changes.base` payload, and `edited` is not in the
+    # default set (`opened`, `synchronize`, `reopened`). Naming the types
+    # explicitly is what closes it — and the default three must be listed
+    # too, because supplying `types` REPLACES the default set rather than
+    # adding to it. Dropping one here would trade this hole for a worse
+    # one.
+    types: [opened, synchronize, reopened, edited]
 
 jobs:
   test:
+    # `edited` also fires on every title and body edit, and PR bodies get
+    # edited a lot — running the full suite for a typo fix is waste. Gate
+    # on the payload instead: `changes.base` is present ONLY when the base
+    # branch moved, which is the single case `edited` was added for.
+    # Non-`edited` events (push, opened, synchronize, reopened) short-
+    # circuit on the first clause and are unaffected.
+    # `smoke-pg` needs this job, so skipping here skips both.
+    if: github.event.action != 'edited' || github.event.changes.base != null
     runs-on: ubuntu-latest
     # `manage.py check` and `collectstatic` load cimweb.settings — the
     # PRODUCTION module — and DEBUG defaults to False there, so the
