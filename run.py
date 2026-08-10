@@ -300,6 +300,23 @@ def stage_gates_and_risks(ctx: AnalysisContext):
         ctx.risk_analysis = ctx._analyze_risks()
         del ctx._analyze_risks
 
+    # Model error-check register (item A) — evaluated ONCE, exactly as
+    # engine.run_analysis does it, then handed to all three writers. It
+    # runs HERE and not in stage_valuate because `va_results` is one of
+    # its inputs and only exists after the value-add pass above. This was
+    # the last engine-only payload: without it the CLI's memo skipped the
+    # "Model Checks" block, the workbook skipped the Checks sheet, and a
+    # $1 property-tax line — the exact defect item A was built to catch —
+    # was flagged on the web path and silent on this one.
+    from analysis import checks as model_checks
+    _check_results = model_checks.run_checks(model_checks.input_from_cim(
+        ctx.cim_data, ctx.financial_analysis, ctx.physical_analysis,
+        ctx.scenario_results, ctx.sources_uses,
+        va_results=ctx.va_results, market_cap=ctx.market_cap,
+        debt=ctx.debt))
+    ctx.checks = model_checks.to_dicts(_check_results)
+    ctx.check_summary = model_checks.summarize(_check_results)
+
     # Assembled ONCE, here, exactly as engine.run_analysis does it, and
     # then handed to all three writers below — the CLI's memo, workbook
     # and LP summary must disclose the same assumptions the web app's do
@@ -353,6 +370,7 @@ def stage_output(ctx: AnalysisContext, comp_db):
         sources_uses=ctx.sources_uses,
         assumption_fill_log=ctx.assumption_fill_log,
         assumption_register=ctx.assumption_register,
+        checks=ctx.checks,
         levered=ctx.levered,
         debt=ctx.debt,
         levered_max_offer=ctx.levered_max_offer,
@@ -380,6 +398,7 @@ def stage_output(ctx: AnalysisContext, comp_db):
             gate_summary=ctx.gate_summary,
             sources_uses=ctx.sources_uses,
             assumption_fill_log=ctx.assumption_fill_log,
+            check_summary=ctx.check_summary,
             levered=ctx.levered,
             debt=ctx.debt,
             output_dir=ctx.output_dir,
@@ -400,6 +419,7 @@ def stage_output(ctx: AnalysisContext, comp_db):
         sources_uses=ctx.sources_uses,
         assumption_fill_log=ctx.assumption_fill_log,
         assumption_register=ctx.assumption_register,
+        checks=ctx.checks,
         output_dir=ctx.output_dir,
     )
     logger.info("  Model: %s", ctx.excel_path)
