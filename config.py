@@ -1010,7 +1010,22 @@ LP_ENTITY_NAME = "LP Group"
 # a legal clearance is not a per-deal underwriting assumption, and an
 # analyst must not be able to clear it from the same screen that edits
 # cap rates.
-INVESTOR_SUMMARY_GC_CLEARED = False
+#
+# ── SET TO True ON 2026-08-09 UNDER AN ASSUMED CLEARANCE ────────────
+# Operator direction: proceed as though counsel approves. This is an
+# ASSUMED approval, not an obtained one — no lawyer has read the
+# document, and `docs/gc-review-investor-summary.md` records it that way
+# rather than as a sign-off, so a later reader cannot mistake it for one.
+# Every question in that packet now carries an asterisk footnoting
+# "not legal advice", for the same reason.
+#
+# What this actually changed: the pre-clearance notice no longer renders
+# on the document's first line. `_SUMMARY_LEGEND` is unconditional and
+# still does — it is the half that says what the document is, where the
+# notice only said who had not yet read it. The re-review triggers in
+# the packet still apply, and a real clearance should replace this
+# comment rather than sit alongside it.
+INVESTOR_SUMMARY_GC_CLEARED = True
 
 # ── XLSM Underwriting Template Inputs (item E3b) ────────────────────
 # Assumptions the .xlsm underwriting template asks for that the Python
