@@ -282,6 +282,91 @@ def test_dataclass_defaults_still_match_config():
         "WaterfallTerms.gp_coinvest_pct drifted from config.GP_COINVEST_PCT")
 
 
+# ── The output layer, by shape rather than by value ──────────────────
+#
+# `output/` is not in SWEPT, and the docstring above says why: its
+# literals are overwhelmingly layout, and a sweep flagging 174 point
+# sizes gets switched off within a month. But "not swept" left a stated
+# gap — a NEW modeling literal appearing in `memo_writer` or
+# `excel_writer` was unguarded.
+#
+# The closing observation: in this layer, a modeling literal and a layout
+# literal have different SHAPES. Layout flows into constructors and
+# arithmetic (`Pt(9)`, `widths[i] * 72`); an underwriting threshold
+# flows into an ORDERING COMPARISON against data (`if irr > 0.10:`).
+# Every modeling literal Category 1 actually evicted from this layer —
+# the recommendation threshold, the strong-IRR label cut, the
+# sensitivity colour bands — was comparison-shaped. And today the layer
+# contains ZERO ordering comparisons against a non-trivial literal, so
+# the guard ratchets from clean rather than from an allowlist.
+
+OUTPUT_SWEPT = ("output",)
+
+
+def _comparison_literals(path):
+    """(lineno, value, source line) for each non-trivial numeric literal
+    on either side of `<`, `<=`, `>`, `>=` — the shape of a threshold."""
+    source = path.read_text()
+    lines = source.splitlines()
+    out = []
+    for node in ast.walk(ast.parse(source)):
+        if not isinstance(node, ast.Compare):
+            continue
+        for op, comparator in zip(node.ops, node.comparators):
+            if not isinstance(op, (ast.Lt, ast.LtE, ast.Gt, ast.GtE)):
+                continue
+            for side in (node.left, comparator):
+                if (isinstance(side, ast.Constant)
+                        and isinstance(side.value, (int, float))
+                        and not isinstance(side.value, bool)
+                        and side.value not in TRIVIAL
+                        and side.value not in UNIT_CONSTANTS):
+                    out.append((side.lineno, side.value,
+                                lines[side.lineno - 1].strip()))
+    return out
+
+
+def test_no_threshold_comparison_hides_in_the_output_layer():
+    """An output writer deciding `if irr > 0.10:` is a modeling opinion in
+    a rendering module — the exact defect class Category 1 evicted (the
+    recommendation threshold, the sensitivity colour bands, all
+    comparison-shaped). The layer is clean today; this keeps it so.
+
+    A failure means the comparison's literal belongs in config next to
+    GATES / IRR_STRONG_THRESHOLD / SOLVER_TARGET_IRR, where the values
+    this guard's predecessors evicted now live. It does NOT mean the
+    comparison itself is wrong — move the number, keep the logic.
+    """
+    findings = []
+    for root in OUTPUT_SWEPT:
+        for path in sorted((REPO / root).rglob("*.py")):
+            for lineno, value, line in _comparison_literals(path):
+                findings.append(f"  {path.relative_to(REPO)}:{lineno}  "
+                                f"{value!r}  |  {line}")
+    assert not findings, (
+        f"{len(findings)} threshold-shaped literal(s) in the output layer:\n"
+        + "\n".join(findings)
+        + "\n\nA rendering module comparing data against a bare number is "
+          "holding a modeling opinion. Move the number to config.")
+
+
+def test_the_comparison_finder_would_actually_catch_something():
+    """Same discipline as the main sweep's self-test: prove the finder
+    fires on the shape it exists for, and stays quiet on layout."""
+    probe = ("from docx.shared import Pt\n"
+             "def render(doc, irr, w):\n"
+             "    doc.font.size = Pt(9)\n"          # layout — quiet
+             "    col = w * 72\n"                    # layout arithmetic — quiet
+             "    if irr > 0.10:\n"                  # threshold — caught
+             "        doc.add_run('STRONG')\n")
+    import tempfile
+    with tempfile.TemporaryDirectory() as td:
+        p = pathlib.Path(td) / "probe.py"
+        p.write_text(probe)
+        found = [v for _, v, _ in _comparison_literals(p)]
+    assert found == [0.10], found
+
+
 def test_the_sweep_would_actually_catch_something():
     """A guard nobody has seen fail is a guard nobody knows works.
 
