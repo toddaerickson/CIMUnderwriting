@@ -1519,9 +1519,37 @@ def _is_assumption_stamp(doc, budget, lev_base):
         # the stamp is missing so no levered FIGURE prints either. Kept as
         # a guard for direct callers.
         return
+    # "Proposed, subject to the final partnership agreement" is the right
+    # sentence for a convention nobody has read the LPA on, and the WRONG
+    # one for a convention the operator confirmed against it — this
+    # document goes to investors, so overstating and understating are both
+    # costly. Rows carry their own status; the caveat follows the rows
+    # that still need it rather than blanketing all five.
+    # Counted in three, not two. A `moot` row was NOT confirmed — nobody
+    # read the LPA on it; it simply stopped being able to move the number.
+    # Folding it into the confirmed count would claim more of the document
+    # had been read than has been, which is the overstatement this whole
+    # sentence exists to avoid.
+    confirmed = sum(1 for r in stamp if r.get("status") == "confirmed")
+    moot = sum(1 for r in stamp if r.get("status") == "moot")
+    total = len(stamp)
+    if confirmed + moot == 0:
+        caveat = ("These are proposed terms, subject to the final "
+                  "partnership agreement.")
+    else:
+        parts = []
+        if confirmed:
+            parts.append(f"{confirmed} of {total} confirmed against the "
+                         f"executed partnership agreement")
+        if moot:
+            parts.append(f"{moot} made moot by it")
+        settled = ", ".join(parts)
+        caveat = (f"{settled}."
+                  if confirmed + moot == total
+                  else f"{settled}; the rest are proposed terms, subject to it.")
+        caveat = caveat[0].upper() + caveat[1:]
     _is_para(doc, budget, "stamp",
-             f"LP net returns are computed under: {labels}. These are "
-             f"proposed terms, subject to the final partnership agreement.",
+             f"LP net returns are computed under: {labels}. {caveat}",
              style="LPMicro", italic=True, color=RGBColor(0x55, 0x55, 0x55))
 
 
