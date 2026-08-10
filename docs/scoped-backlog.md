@@ -369,13 +369,41 @@ re-runs the solved price forward through the full levered stack.
 confirmations. One tier plus the operator's no-clawback term answers two of
 them. Five still change the number and stay open:
 
-| # | Open question | Build default | Effect if wrong |
-|---|---------------|---------------|-----------------|
-| 1 | Pref simple or compounded, and at what frequency | annually compounded | ~19% swing in GP promote |
-| 2 | Accrual base: contributed/unreturned vs committed | contributed/unreturned | material on slow-draw deals |
-| 3 | ROC-before-pref or pref-before-ROC | ROC first (only matters if simple) | $81,600 vs $72,000 GP on the doc's fixture |
-| 4 | AM fee above the waterfall or netted from LP distributions | above (deal expense) | shifts LP net IRR directly |
-| 5 | Promote on 100% of residual or LP-attributable share only | LP-attributable only | GP overpaid by its co-invest share |
+| # | Open question | Build default | Effect if wrong | Status |
+|---|---------------|---------------|-----------------|--------|
+| 1 | Pref simple or compounded, and at what frequency | annually compounded | ~19% swing in GP promote | **CONFIRMED 2026-08-09** |
+| 2 | Accrual base: contributed/unreturned vs committed | contributed/unreturned | material on slow-draw deals | open |
+| 3 | ROC-before-pref or pref-before-ROC | ROC first (only matters if simple) | $81,600 vs $72,000 GP on the doc's fixture | **MOOT** (see below) |
+| 4 | AM fee above the waterfall or netted from LP distributions | above (deal expense) | shifts LP net IRR directly | open |
+| 5 | Promote on 100% of residual or LP-attributable share only | LP-attributable only | GP overpaid by its co-invest share | open |
+
+**Question 1 is confirmed, and confirming it closed question 3 for free.**
+The operator read the pref clause on 2026-08-09: annually compounded, which
+is what the build already assumed, so no number moved. Question 3 was never
+answered and does not need to be — ROC-before-pref only moves a dollar when
+the pref is SIMPLE, so a compounding pref makes the ordering arithmetically
+inert.
+
+That distinction is carried in the code rather than only here.
+`config.LPA_CONFIRMED` records which questions the document has actually
+been read on (with the date, because who said so and when is the whole
+content of a confirmation), and `model.waterfall.assumption_stamp` stamps
+each row `confirmed` / `moot` / `open`. Three states, not two: "the LPA says
+this" and "this cannot move the number given something else the LPA says"
+are different claims, and collapsing them would let a moot question borrow a
+confirmation it never received. A convention absent from `LPA_CONFIRMED`
+defaults to `open` — fail-open, since a convention that silently inherited
+someone else's confirmation would print as settled while still being a guess.
+
+Downstream, the LP-facing caveat is now conditional: "proposed terms,
+subject to the final partnership agreement" applies only to the rows that
+still need it, with a count when the stamp is mixed. Overstating and
+understating are both costly on the one document that leaves the firm.
+
+**Three of the five remain genuinely open** (2, 4, 5) — and per CLAUDE.md
+decision 7, two of those have exactly one implemented value with the
+alternative raising, so they deliberately get no form field. The LP net IRR
+is closer to decision-grade than it was, and still not there.
 
 Build with these as **named parameters carrying the defaults above**, and print
 the resolved assumption set next to every LP net IRR we display. That converts a
@@ -472,6 +500,30 @@ behind the operator's General Counsel gate. Build it as an internal /
 prospect-discussion document with a plain "not an offer to sell securities"
 legend, and route the final wording past GC before any external distribution.
 The build is not blocked; the distribution is.
+
+**Status 2026-08-09 — still gated, and two of the three preconditions are
+now met.** The legend ships (`output/memo_writer.py:1123`) and the
+assumption stamp now distinguishes what the LPA actually says from what the
+build assumed (see E4 below). **GC sign-off has not been sought and remains
+the open precondition** — it is an operator action, not a code change, and
+no amount of further building discharges it.
+
+One thing to hand GC along with the document: the caveat sentence beneath
+the LP net figures is now conditional, not fixed. It reads "proposed terms,
+subject to the final partnership agreement" only for conventions still
+unconfirmed, and says so by count when the stamp is mixed. That wording is
+exactly the kind of thing GC will want to set, so route the three variants
+in `memo_writer._is_assumption_stamp`, not just the document.
+
+**Also still open: the 2-page guarantee is unvalidated in this
+environment.** `tests/test_investor_summary.py:530` re-calibrates the
+Calibri width model by rendering through `soffice` and counting pages, and
+it skips whenever LibreOffice is absent — which it is here (no package, and
+installing it needs root this environment does not have). The content budget
+still fails loudly on overflow, so the guarantee is not unenforced; but the
+CALIBRATION behind it — the mapping from characters to lines — has not been
+re-checked on this machine. Run it once on a box with LibreOffice before any
+external distribution.
 
 **Acceptance.** Renders to exactly 2 pages with the longest realistic deal
 (longest property name, all three scenarios populated, 3 risks at maximum

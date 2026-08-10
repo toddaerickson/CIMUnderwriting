@@ -959,6 +959,63 @@ def test_the_stamp_says_when_ordering_is_inert():
     assert "presentation only" not in simple["ordering"]
 
 
+# ── Which questions the LPA has actually been read on (item E4) ──────
+
+def test_a_confirmed_question_is_marked_confirmed_and_dated():
+    """`config.LPA_CONFIRMED` is the difference between "this is what the
+    document says" and "this is a plausible stand-in for a document nobody
+    opened". The date travels with it because who said so and when is the
+    whole content of a confirmation."""
+    row = {r["key"]: r for r in assumption_stamp(ORACLE_1)}
+    assert row["pref_compounding"]["status"] == "confirmed"
+    assert row["pref_compounding"]["confirmed_on"] == \
+        cfg.LPA_CONFIRMED["pref_compounding"]
+
+
+def test_an_unconfirmed_question_stays_open_and_carries_no_date():
+    row = {r["key"]: r for r in assumption_stamp(ORACLE_1)}
+    for key in ("accrual_base", "am_fee_treatment", "promote_basis"):
+        assert row[key]["status"] == "open", key
+        assert "confirmed_on" not in row[key], key
+
+
+def test_confirming_the_compounding_moots_ordering_rather_than_confirming_it():
+    """Two different claims, and collapsing them would let a question
+    borrow a confirmation it never received. Nobody read the LPA's
+    ordering clause — ROC-before-pref simply stopped being able to move a
+    dollar once the pref was confirmed to compound."""
+    row = {r["key"]: r for r in assumption_stamp(ORACLE_1)}
+    assert row["ordering"]["status"] == "moot"
+    assert "confirmed_on" not in row["ordering"]
+
+
+def test_a_simple_pref_leaves_ordering_open_even_with_the_confirmation():
+    """Mootness is contingent on the compounding, not granted by the
+    confirmation. Under a simple pref the ordering question moves real
+    dollars again and must read as open."""
+    row = {r["key"]: r for r in assumption_stamp(ORACLE_2)}
+    assert row["ordering"]["status"] == "open"
+
+
+def test_an_unrecorded_convention_defaults_to_open(monkeypatch):
+    """Fail-open is the safe direction: a convention that silently
+    inherited someone else's confirmation would print as settled while
+    still being a guess."""
+    monkeypatch.setattr(cfg, "LPA_CONFIRMED", {}, raising=False)
+    stamp = assumption_stamp(ORACLE_1)
+    assert {r["status"] for r in stamp} == {"open"}
+    assert all("confirmed_on" not in r for r in stamp)
+
+
+def test_every_confirmed_key_names_a_real_waterfall_convention():
+    """A typo in `LPA_CONFIRMED` would confirm nothing while looking like
+    it confirmed something — the stamp would simply never match the key."""
+    stamp_keys = {r["key"] for r in assumption_stamp(ORACLE_1)}
+    for key in cfg.LPA_CONFIRMED:
+        assert key in stamp_keys, (
+            f"LPA_CONFIRMED names {key!r}, which no stamp row carries")
+
+
 def test_the_am_fee_row_does_not_claim_a_rate_this_module_never_charged():
     """The fee is charged upstream by E3, and no AM-fee rate exists in
     config. A row reading only "Above the waterfall (deal expense)" beside

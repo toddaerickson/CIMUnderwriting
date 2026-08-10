@@ -373,6 +373,58 @@ def test_unlevered_deal_gains_no_orphaned_stamp(tmp_path):
     assert "LP net returns are computed under" not in body
 
 
+def _stamped(tmp_path, statuses):
+    """Render the summary with the STAMP rows carrying `statuses`."""
+    stamp = [{**row, "status": s} for row, s in zip(STAMP, statuses)]
+    levered = {**LEVERED,
+               "base": {**LEVERED["base"], "assumption_stamp": stamp}}
+    return _text(_generate(tmp_path, levered=levered))
+
+
+def test_a_confirmed_convention_is_not_called_a_proposed_term(tmp_path):
+    """This document goes to investors, so overstating and understating
+    are both costly. Calling a convention the operator confirmed against
+    the executed LPA "proposed, subject to the final partnership
+    agreement" understates it — and blanketing all five with that caveat
+    is what the single sentence used to do."""
+    body = _stamped(tmp_path, ["confirmed", "confirmed", "confirmed"])
+    assert "3 of 3 confirmed against the executed partnership agreement" in body
+    assert "proposed terms" not in body
+
+
+def test_a_moot_row_is_never_counted_as_a_confirmed_one(tmp_path):
+    """The overstatement this sentence exists to avoid, caught by the
+    characterization snapshot when the first version of it read "2 of 5
+    are confirmed" for a deal where the operator had confirmed ONE.
+
+    Nobody read the LPA's ordering clause — it stopped being able to move
+    a dollar once the pref was confirmed to compound. Reporting that as a
+    confirmation claims more of the document has been read than has been.
+    """
+    body = _stamped(tmp_path, ["confirmed", "open", "moot"])
+    assert "1 of 3 confirmed against the executed partnership agreement" in body
+    assert "1 made moot by it" in body
+    assert "the rest are proposed terms" in body
+    assert "2 of 3 confirmed" not in body
+
+
+def test_a_fully_settled_stamp_drops_the_proposed_caveat_entirely(tmp_path):
+    body = _stamped(tmp_path, ["confirmed", "moot", "moot"])
+    assert "1 of 3 confirmed" in body and "2 made moot by it" in body
+    assert "proposed terms" not in body
+
+
+def test_an_all_open_stamp_keeps_the_original_caveat_verbatim(tmp_path):
+    """The status field is additive: a stamp from before it existed, or
+    one where nothing is confirmed, must read exactly as it always did."""
+    body = _stamped(tmp_path, ["open", "open", "open"])
+    assert ("These are proposed terms, subject to the final partnership "
+            "agreement.") in body
+    # And a row with no `status` key at all defaults to the same place.
+    assert ("These are proposed terms, subject to the final partnership "
+            "agreement.") in _text(_generate(tmp_path))
+
+
 # ── The plan to achieve the return ───────────────────────────────────
 
 def test_plan_section_carries_initiatives_impacts_and_the_bridge(tmp_path):

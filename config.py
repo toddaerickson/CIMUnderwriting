@@ -923,6 +923,32 @@ WATERFALL_TERMS = {
     "catch_up": False,              # scoped out; True raises
 }
 
+# ── Which LPA questions have actually been read (item E4) ───────────
+# The five conventions above shipped as BUILD DEFAULTS — plausible
+# choices standing in for a document nobody had opened. `model.waterfall.
+# assumption_stamp` prints all five beside every LP net IRR, and the rule
+# is that a stamped figure is a labeled assumption, not a decision-grade
+# number.
+#
+# This dict is the difference between the two. A key here means the LPA
+# was read on that question and the value above is what it says — so the
+# stamp can stop calling it "proposed". A question NOT here stays open,
+# and the default is FAILING-open: adding a convention to WATERFALL_TERMS
+# without adding it here leaves it correctly labelled as an assumption
+# rather than silently inheriting someone else's confirmation.
+#
+# The value is the date the operator confirmed it, kept because "who
+# said so and when" is the whole content of a confirmation. Do not add a
+# key here from a plan doc, a design note, or an inference — only from
+# the executed partnership agreement.
+LPA_CONFIRMED = {
+    # Operator confirmed 2026-08-09: the pref compounds annually. This is
+    # the question worth the most — the design doc measured ~19% of GP
+    # promote riding on it — and confirming it MOOTS `ordering` for free,
+    # since ROC-before-pref only moves a dollar when the pref is simple.
+    "pref_compounding": "2026-08-09",
+}
+
 # ── Asset-Management Fee (item E3a) ─────────────────────────────────
 # The GP's 1% annual management fee. Charged ABOVE the waterfall — it
 # reduces distributable cash before the LP/GP split — which is open LPA
