@@ -149,7 +149,8 @@ def stage_valuate(ctx: AnalysisContext):
     """[4/7] Run valuation scenarios and [5/7] solve max offer prices."""
     logger.info("\n[4/7] Running valuation scenarios...")
     from model.returns_model import build_returns_model
-    from model.solver import solve_max_price, solve_max_price_value_add
+    from model.solver import (solve_max_price, solve_max_price_levered,
+                              solve_max_price_value_add)
     from model.value_add_model import detect_value_add, run_value_add_scenarios
 
     if ctx.expense_ratio:
@@ -190,6 +191,13 @@ def stage_valuate(ctx: AnalysisContext):
     ctx.scenario_results = model["scenarios"]
     ctx.sensitivity = model["sensitivity"]
     ctx.sources_uses = model["sources_uses"]
+    # `build_returns_model` sizes the loan and runs the waterfall on every
+    # call — these two keys were computed and thrown away here, which is
+    # the whole of the CLI's levered gap. Keeping them costs nothing and
+    # the assumption stamp rides along inside `levered`, so no surface can
+    # print an LP net IRR the stamp does not cover.
+    ctx.debt = model["debt"]
+    ctx.levered = model["levered"]
 
     # Log static scenario summary
     logger.info("  Static DCF Scenarios:")
@@ -241,6 +249,26 @@ def stage_valuate(ctx: AnalysisContext):
         if ctx.asking_price:
             discount = (ctx.asking_price - mp) / ctx.asking_price
             logger.info("  Discount to asking: %.1f%%", discount * 100)
+
+    # The levered max offer (item E4). A SECOND max price, not a
+    # replacement: `max_offer` above is solved to the unlevered target the
+    # primary gate is read against, this one to the fund's LP NET target
+    # after debt service, the AM fee and the promote. Deliberately NOT
+    # passed a target here — `solve_max_price_levered` resolves
+    # `config.SOLVER_TARGET_LP_NET_IRR` itself, and handing it the
+    # unlevered target would quietly re-price the levered answer. Same
+    # reasoning as engine.py's comment at its own call site.
+    ctx.levered_max_offer = solve_max_price_levered(
+        adjusted_ttm_noi=ctx.adjusted_noi,
+        capex=ctx.capex,
+        expense_ratio=ctx.expense_ratio,
+        market_cap=ctx.market_cap,
+    )
+    lev_mp = ctx.levered_max_offer.get("max_price")
+    if lev_mp:
+        logger.info("  Levered max price: $%s (target LP net IRR: %.1f%%)",
+                    f"{lev_mp:,.0f}",
+                    ctx.levered_max_offer.get("target_irr", 0) * 100)
 
     if ctx.va_results:
         ctx.va_max_offer = solve_max_price_value_add(
@@ -325,6 +353,9 @@ def stage_output(ctx: AnalysisContext, comp_db):
         sources_uses=ctx.sources_uses,
         assumption_fill_log=ctx.assumption_fill_log,
         assumption_register=ctx.assumption_register,
+        levered=ctx.levered,
+        debt=ctx.debt,
+        levered_max_offer=ctx.levered_max_offer,
         output_dir=ctx.output_dir,
     )
     logger.info("  Memo: %s", ctx.memo_path)
@@ -349,6 +380,8 @@ def stage_output(ctx: AnalysisContext, comp_db):
             gate_summary=ctx.gate_summary,
             sources_uses=ctx.sources_uses,
             assumption_fill_log=ctx.assumption_fill_log,
+            levered=ctx.levered,
+            debt=ctx.debt,
             output_dir=ctx.output_dir,
         )
         logger.info("  Investor summary: %s", ctx.investor_summary_path)
