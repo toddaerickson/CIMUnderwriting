@@ -7,7 +7,7 @@ from CIM-extracted data.
 
 # All three are mutated in place by the per-run override patch, so a
 # module-level binding still sees a ConfigOverride (webapp.services).
-from config import GATES, OCCUPANCY_TIERS, POPULATION_TIERS
+from config import GATES, HHI_TIERS, OCCUPANCY_TIERS, POPULATION_TIERS
 
 
 def analyze_market(cim_data) -> dict:
@@ -64,7 +64,7 @@ def _assess_demographics(cim_data) -> dict:
         "population_5mi": pop_5,
         "median_hhi_3mi": hhi,
         "pop_3mi_adequate": pop_3 >= GATES["population_3mi"] if pop_3 else None,
-        "hhi_adequate": hhi >= 50_000 if hhi else None,
+        "hhi_adequate": hhi >= HHI_TIERS["narrative_adequate"] if hhi else None,
         "pop_narrative": _pop_narrative(pop_3),
         "hhi_narrative": _hhi_narrative(hhi),
     }
@@ -84,9 +84,9 @@ def _pop_narrative(pop_3mi) -> str:
 def _hhi_narrative(hhi) -> str:
     if hhi is None:
         return "Median household income not available."
-    if hhi >= 75_000:
+    if hhi >= HHI_TIERS["narrative_affluent"]:
         return f"Affluent trade area (${hhi:,.0f} median HHI) — supports premium pricing."
-    if hhi >= 50_000:
+    if hhi >= HHI_TIERS["narrative_adequate"]:
         return f"Middle-income trade area (${hhi:,.0f} median HHI) — adequate purchasing power."
     return f"Lower-income trade area (${hhi:,.0f} median HHI) — may limit rent growth."
 
@@ -155,9 +155,9 @@ def _assess_demand(cim_data) -> dict:
         negatives.append(f"Thin trade area ({pop:,} within 3 mi).")
 
     hhi = cim_data.median_hhi_3mi
-    if hhi and hhi >= 65_000:
+    if hhi and hhi >= HHI_TIERS["signal_above_average"]:
         positives.append(f"Above-average household income (${hhi:,.0f}).")
-    elif hhi and hhi < 45_000:
+    elif hhi and hhi < HHI_TIERS["signal_below_average"]:
         negatives.append(f"Below-average household income (${hhi:,.0f}).")
 
     return {
