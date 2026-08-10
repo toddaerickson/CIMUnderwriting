@@ -39,5 +39,7 @@ services:
         value: /data/overrides
       - key: UW_TEMPLATE_PATH
         value: /data/template_uw.xlsm   # gitignored (*.xlsm) so never in the build; lives on the disk
+      - key: ADMIN_ENABLED
+        value: "false"       # /admin/ unmounted (404); flip to "1" only for DEPLOY.md runbook step 7
       - key: PYTHON_VERSION
         value: "3.12.6"

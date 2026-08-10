@@ -47,8 +47,14 @@ jobs:
     # the guard learning to look the other way. Same move
     # scripts/smoke_pg_django.py already makes for the Postgres job, and
     # cimweb/settings_test.py for pytest.
+    #
+    # The key is padded past 50 characters because `check --deploy` below
+    # raises security.W009 for anything shorter — and W009 must stay LIVE
+    # (it checks the real key at deploy time; Render's generateValue key
+    # passes it), so the throwaway key satisfies the check rather than the
+    # check being silenced.
     env:
-      DJANGO_SECRET_KEY: ci-only-key-never-deployed
+      DJANGO_SECRET_KEY: ci-only-key-never-deployed-padded-well-past-fifty-characters-for-w009
     steps:
       - uses: actions/checkout@v4
 
@@ -61,6 +67,16 @@ jobs:
 
       - name: Django checks
         run: python manage.py check && python manage.py makemigrations --check --dry-run
+
+      # --fail-level WARNING: a NEW deploy warning fails the build instead
+      # of scrolling past. The known-and-deliberate one (security.W021,
+      # HSTS preload off on purpose) is silenced with a reason in
+      # cimweb/settings.py SILENCED_SYSTEM_CHECKS; everything else that
+      # ever appears here is a regression by definition. CI has no .env,
+      # so DEBUG defaults False and this runs against the production
+      # branch of the settings — no extra env needed.
+      - name: Deploy checks (fail on new warnings)
+        run: python manage.py check --deploy --fail-level WARNING
 
       - name: Collectstatic (whitenoise manifest build gate)
         run: python manage.py collectstatic --noinput
