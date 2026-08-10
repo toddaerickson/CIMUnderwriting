@@ -1,12 +1,23 @@
 # GC review — LP-facing investor summary
 
-**Status: NOT CLEARED. Awaiting counsel.**
+**Status: CLEARED UNDER AN ASSUMED APPROVAL\*. Not reviewed by counsel.**
 
-`config.INVESTOR_SUMMARY_GC_CLEARED = False` is the machine-readable form of
-that status. While it is False the generated document carries a notice on its
-first line and the download button on the results page carries a caveat. Flip it
-to `True` only after a real sign-off, and record the sign-off in the table at the
-bottom of this file in the same commit.
+`config.INVESTOR_SUMMARY_GC_CLEARED = True` is the machine-readable form of that
+status. It was set on 2026-08-09 on the operator's direction to proceed as though
+counsel approves — **no lawyer has read this document.** The distinction is
+recorded here, in the flag's own comment in `config.py`, and beside every question
+below, because an assumed approval that gets filed as a sign-off is worse than no
+approval at all: the next reader has no way to tell them apart.
+
+What flipping it changed: the pre-clearance notice no longer renders on the
+document's first line, and the download button no longer carries its caveat.
+`_SUMMARY_LEGEND` is unconditional and still renders — it says what the document
+is, where the notice only said who had not yet read it.
+
+When a real review happens, record it in the table at the bottom of this file and
+replace this status block rather than adding to it.
+
+\* Not legal advice.
 
 This document exists so the review is a half-hour of reading rather than a
 reverse-engineering exercise. It states what the document is, where every number
@@ -99,29 +110,29 @@ fixture copy with `tests/test_investor_summary.py::_generate`.
 1. **Is the legend sufficient for this audience and this content?** Specifically,
    is "for internal and prospect discussion only" the right characterization for
    a document that will in fact be handed to a prospective investor, or does that
-   phrase understate the distribution and weaken the disclaimer?
+   phrase understate the distribution and weaken the disclaimer?\*
 
 2. **Do the projected returns require a fuller performance disclosure** than
    "figures are underwriting estimates, not results" — e.g. an explicit statement
    of the assumptions' hypothetical nature, or a statement that no LP has
-   achieved these returns because the investment does not yet exist?
+   achieved these returns because the investment does not yet exist?\*
 
 3. **Does the LP net IRR trigger anything the unlevered figure does not?** It is
    net of a management fee and a promote, which reads closer to a fund-level
-   performance figure than a property-level one.
+   performance figure than a property-level one.\*
 
 4. **Is a general-solicitation concern in scope?** The document is generated per
    deal and handed to named prospects; it is not posted publicly. Confirm that
    distribution pattern is what counsel is clearing, and say what would take it
-   out of scope.
+   out of scope.\*
 
 5. **Does anything here need to be conditioned on the recipient's status**
    (accredited / qualified purchaser), and if so should that be a gate in the app
-   rather than a line in the document?
+   rather than a line in the document?\*
 
 6. **Is there wording counsel wants added, removed or changed?** Any change to
    `_SUMMARY_LEGEND` is a one-line code change plus a test update; treat the
-   current text as a draft, not a constraint.
+   current text as a draft, not a constraint.\*
 
 7. **The caveat beneath the LP net figures is CONDITIONAL — please set its
    wording.** It is not one fixed sentence. `memo_writer._is_assumption_stamp`
@@ -130,7 +141,9 @@ fixture copy with `tests/test_investor_summary.py::_generate`.
    agreement" only for conventions still unconfirmed, and states the position
    by count when the stamp is mixed. So the disclaimer a given deal carries
    depends on the state of the LPA at the time it was run. Counsel should set
-   all three variants, not just read the one that happens to render today.
+   all three variants, not just read the one that happens to render today.\*
+
+\* Answered under an **assumed** approval on the operator's direction (2026-08-09), not by counsel. Not legal advice.
 
 ---
 
@@ -142,7 +155,10 @@ replaced.
 
 | Date | Reviewer | Reviewed version | Scope of clearance | Notes |
 |------|----------|------------------|--------------------|-------|
-| _pending_ | | | | |
+| 2026-08-09 | **none — assumed\*** | `3aafd0c` | **none** | Operator directed that the gate proceed as though counsel approves. No legal review took place. The flag is `True`; the clearance is not. |
+| _pending_ | | | | Real counsel review — replaces the row above, does not append to it |
+
+\* Not legal advice.
 
 **Re-review triggers.** Clearance covers the wording above as it stood at the
 reviewed commit. Put it back in front of counsel if any of these change:
