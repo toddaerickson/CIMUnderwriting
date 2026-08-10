@@ -260,9 +260,10 @@ output/
    assumptions page's "Debt & Waterfall" section — per-deal only, never
    settings-page editable, for the same in-place-mutation reason the
    capital block is not (item E3b).
-7. **No LP net IRR without its assumption stamp**: five LPA questions are
-   still open and each changes the number, so `model.levered` builds the
-   resolved set and EVERY surface that prints a levered figure renders it
+7. **No LP net IRR without its assumption stamp**: five LPA questions
+   each change the number — **three still open, one CONFIRMED, one made
+   MOOT by that confirmation** — so `model.levered` builds the resolved
+   set and EVERY surface that prints a levered figure renders it
    beside that figure — the Returns tab, memo section 6, the workbook
    sheet, and the LP-facing investor summary (item G), which is the only
    one that leaves the firm and so the one where the rule binds hardest.
@@ -274,6 +275,18 @@ output/
    implemented value (`accrual_base`, `am_fee_treatment`, `catch_up`) and
    the other value RAISES, so they deliberately get no form field: a
    dropdown whose second option crashes the run is a trap, not a setting.
+   **Which questions have actually been READ is state, not memory** (item
+   E4): `config.LPA_CONFIRMED` maps a question key to the date the
+   operator confirmed it, and `model.waterfall.assumption_stamp` stamps
+   every row `confirmed` / `moot` / `open`. Three states because "the LPA
+   says this" and "this cannot move the number given something else the
+   LPA says" are different claims — `pref_compounding` is confirmed
+   (annually compounded, 2026-08-09) and that MOOTS `ordering`, since
+   ROC-before-pref only moves a dollar under a simple pref. Nobody read
+   the ordering clause; it stopped mattering. A key absent from
+   `LPA_CONFIRMED` stays `open`, so a new convention cannot inherit
+   someone else's confirmation. The LP-facing caveat follows the rows
+   that still need it rather than blanketing all five.
 8. **Bisection solvers**: Deterministic, ~20 iterations to 0.1% precision.
    There are now TWO max offers and they are both kept (item E4,
    operator's call 2026-08-01): `solve_max_price` targets the 10%
