@@ -2767,7 +2767,16 @@ def test_the_cli_lp_summary_carries_an_lp_net_irr(tmp_path):
     # than the row labels: `_is_assumption_stamp` joins them and runs the
     # result through `_ascii`, so the labels do not survive verbatim.
     assert "LP net returns are computed under:" in summary
-    assert "subject to the final partnership agreement" in summary
+    # The caveat is CONDITIONAL as of the LPA-stamp work: it reads "These
+    # are proposed terms, subject to the final partnership agreement" only
+    # when nothing is confirmed, and reports the split by count once some
+    # conventions have been read against the executed LPA. This test was
+    # written against the old fixed sentence and asserted a string that no
+    # longer renders on a fixture with confirmed rows — so it asserts the
+    # ACCOUNTING, which is what makes the caveat honest, rather than one
+    # variant's exact prose.
+    assert "confirmed against the executed partnership agreement" in summary
+    assert "proposed terms, subject to it" in summary
 
     memo = _memo_text(ctx.memo_path)
     assert "Levered Returns (LP Net)" in memo, (
