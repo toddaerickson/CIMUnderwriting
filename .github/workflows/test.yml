@@ -68,6 +68,54 @@ jobs:
       - name: Run tests
         run: python -m pytest tests/ -v
 
+  # The investor summary's two-page guarantee is a CONTENT BUDGET, not a
+  # page count — python-docx does not paginate, so every other test in
+  # tests/test_investor_summary.py asserts the budget's own arithmetic and
+  # none of them can notice that the arithmetic models the wrong thing.
+  # `test_real_render_is_two_pages` is the only check that puts the
+  # document through a real renderer, and it skipped everywhere, because
+  # LibreOffice needs root to install and the dev box has no passwordless
+  # sudo. A CI runner does. So the calibration runs HERE or nowhere.
+  #
+  # Its own job, not a step in `test`: the LibreOffice install costs ~60-90s
+  # and would tax every run of a suite that does not need it. Parallel with
+  # `test` rather than `needs:`-chained, because it validates typography and
+  # has no dependency on the rest of the suite passing.
+  page-budget:
+    runs-on: ubuntu-latest
+    env:
+      # Turns the test's skip into a FAILURE. Without it an apt-get step
+      # that silently installed nothing would leave the test skipping and
+      # this job reporting green — a calibration check that validates
+      # nothing while looking like it does.
+      CIM_REQUIRE_SOFFICE: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      # libreoffice-writer, not libreoffice: the summary is a .docx and
+      # the full suite pulls in Calc, Impress and Draw for nothing.
+      # poppler-utils gives `pdfinfo`, which counts pages authoritatively
+      # instead of scraping bytes for `/Type /Page`.
+      - name: Install LibreOffice Writer and poppler
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            libreoffice-writer poppler-utils fonts-crosextra-carlito
+      # Carlito is Calibri's metric-compatible clone. Without it
+      # LibreOffice substitutes a font with different advance widths and
+      # the render disagrees with the budget for a reason that has
+      # nothing to do with the calibration — see output/page_budget.py.
+      - name: Confirm the toolchain is really present
+        run: |
+          soffice --version
+          pdfinfo -v
+          fc-match Calibri
+      - run: pip install -r requirements.txt pytest
+      - name: Re-validate the content budget against a real renderer
+        run: python -m pytest tests/test_investor_summary.py -v -k "real_render or page_counter"
+
   smoke-pg:
     runs-on: ubuntu-latest
     needs: test

@@ -579,18 +579,102 @@ def test_long_names_do_not_collide_across_the_writers():
 
 # ── Opt-in: the only test that re-validates the calibration ──────────
 
-@pytest.mark.skipif(shutil.which("soffice") is None,
-                    reason="LibreOffice not installed; the calibration check "
-                           "is opt-in and deliberately not a CI dependency")
-def test_real_render_is_two_pages(tmp_path):
-    docx = _generate(tmp_path)
-    subprocess.run(["soffice", "--headless", "--convert-to", "pdf",
-                    "--outdir", str(tmp_path), docx],
-                   check=True, capture_output=True, timeout=180)
+def pdf_page_count(raw: bytes) -> int:
+    """Pages in a PDF, from its bytes, without a PDF library.
+
+    Extracted from the render test and unit-tested below BECAUSE it is
+    the fragile half. `/Type /Page` is a PREFIX of `/Type /Pages`, the
+    page-tree root — so the obvious `raw.count(b"/Type /Page")` returns
+    N+1, and the calibration test it backed could only ever have passed
+    on a one-page document. That defect survived because the test around
+    it has never run: it skips wherever LibreOffice is absent, which is
+    everywhere.
+
+    Returns 0 when the structure is compressed into object streams,
+    which the caller treats as "cannot count" rather than "zero pages" —
+    `pdfinfo` is used in preference wherever it exists for exactly that
+    reason.
+    """
+    import re
+
+    return len(re.findall(rb"/Type\s*/Page(?![s/\w])", raw))
+
+
+def _render_page_count(docx_path, tmp_path, soffice) -> int:
+    """Render to PDF and count, preferring `pdfinfo` over byte-scraping.
+
+    Two counters, and the preference order is the point: `pdfinfo` is
+    authoritative and `pdf_page_count` is a heuristic over bytes that a
+    future LibreOffice could compress out of sight. Falling back rather
+    than requiring poppler keeps the LOCAL opt-in run possible with only
+    LibreOffice installed; CI installs both and so never takes the
+    fallback.
+    """
+    subprocess.run([soffice, "--headless", "--convert-to", "pdf",
+                    "--outdir", str(tmp_path), str(docx_path)],
+                   check=True, capture_output=True, timeout=300)
     pdf = next(p for p in tmp_path.iterdir() if p.suffix == ".pdf")
-    raw = pdf.read_bytes()
-    pages = raw.count(b"/Type /Page") or raw.count(b"/Type/Page")
-    assert pages == 2, f"rendered {pages} pages"
+
+    if shutil.which("pdfinfo"):
+        out = subprocess.run(["pdfinfo", str(pdf)], check=True,
+                             capture_output=True, timeout=60).stdout.decode()
+        line = next(ln for ln in out.splitlines() if ln.startswith("Pages:"))
+        return int(line.split(":", 1)[1].strip())
+
+    pages = pdf_page_count(pdf.read_bytes())
+    assert pages, ("could not count pages: no pdfinfo, and the PDF's object "
+                   "structure is not scannable — install poppler-utils")
+    return pages
+
+
+def test_real_render_is_two_pages(tmp_path):
+    """The ONLY thing that re-validates the content budget against a real
+    renderer. Everything else in this file asserts the budget's own
+    arithmetic, which cannot notice that the arithmetic models the wrong
+    thing.
+
+    **`CIM_REQUIRE_SOFFICE=1` turns the skip into a failure**, and the
+    calibration CI job sets it. Without that, an apt-get step that
+    silently installed nothing would leave this test skipping and the job
+    reporting green — a calibration check that validates nothing while
+    looking like it does, which is worse than not having one.
+    """
+    import os
+
+    soffice = shutil.which("soffice") or shutil.which("libreoffice")
+    if soffice is None:
+        if os.environ.get("CIM_REQUIRE_SOFFICE"):
+            pytest.fail(
+                "CIM_REQUIRE_SOFFICE is set but neither soffice nor "
+                "libreoffice is on PATH — the calibration job installed "
+                "nothing and would otherwise have reported green")
+        pytest.skip("LibreOffice not installed; the calibration check is "
+                    "opt-in locally. CI runs it in the `page-budget` job; "
+                    "set CIM_REQUIRE_SOFFICE=1 to make its absence fail.")
+
+    pages = _render_page_count(_generate(tmp_path), tmp_path, soffice)
+    assert pages == 2, (
+        f"rendered {pages} pages, not 2 — the content budget in "
+        f"output/page_budget.py no longer models what Word does. Read that "
+        f"module's docstring before changing a bucket width.")
+
+
+@pytest.mark.parametrize("raw,expected", [
+    # The trap: one page-tree root plus two pages is TWO pages, not three.
+    (b"<</Type /Pages /Count 2>> <</Type /Page>> <</Type /Page>>", 2),
+    # LibreOffice omits the space; the root must still not be counted.
+    (b"<</Type/Pages/Count 2>><</Type/Page>><</Type/Page>>", 2),
+    (b"<</Type /Pages /Count 1>> <</Type /Page /MediaBox[0 0 612 792]>>", 1),
+    # Compressed object streams: unscannable, and reported as such rather
+    # than as a confident zero.
+    (b"%PDF-1.7\n<</Type/ObjStm/N 8>>stream\x00\x01binary", 0),
+])
+def test_the_page_counter_does_not_count_the_page_tree_root(raw, expected):
+    """The unit test the render test cannot be: it runs everywhere,
+    including on the box that has no LibreOffice, so the half of the
+    calibration check most likely to be wrong is covered even when the
+    half that needs a renderer cannot run."""
+    assert pdf_page_count(raw) == expected
 
 
 # ── Review findings ──────────────────────────────────────────────────
