@@ -134,6 +134,10 @@ UNIT_YEARS = "yr"
 UNIT_MONTHS = "mo"
 UNIT_BPS = "bps"
 UNIT_COUNT = "#"
+#: A vintage year. Its own unit because EVERY other numeric branch here
+#: groups thousands, and a year that renders "2,015" reads as a quantity
+#: of something rather than a date.
+UNIT_VINTAGE = "vintage"
 UNIT_TEXT = ""
 
 
@@ -266,6 +270,8 @@ def format_number(value, unit: str) -> str:
         return f"{value:g} bps"
     if unit == UNIT_COUNT:
         return f"{value:,.0f}"
+    if unit == UNIT_VINTAGE:
+        return f"{value:.0f}"
     return f"{value:,.4g}"
 
 

@@ -361,10 +361,10 @@ def _add_assumption_register(doc, assumption_register):
         f"{counts['total']} assumptions, {counts['chosen']} came from "
         f"something other than the model's shipped defaults: "
         f"{counts['deal']} entered for this deal, {counts['settings']} from "
-        f"a dated settings override, {counts['fallback']} filled in because "
-        f"the CIM did not state them. Those are listed first. The full "
-        f"register follows — nothing is omitted from it, so an assumption "
-        f"absent below is an assumption this run did not use."
+        f"a dated settings override, and {counts['fallback']} filled in "
+        f"because the CIM did not state a value. Those are listed first. "
+        f"The full register follows — nothing is omitted from it, so an "
+        f"assumption absent below is an assumption this run did not use."
     )
 
     chosen = [r for r in rows if r.provenance in CHOSEN]

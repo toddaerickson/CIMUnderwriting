@@ -2424,7 +2424,7 @@
           "v": "85.0%"
         },
         "C103": {
-          "v": "2,021"
+          "v": "2021"
         },
         "C104": {
           "v": "10.0%"
@@ -2829,7 +2829,7 @@
           "v": "320"
         },
         "C84": {
-          "v": "1,998"
+          "v": "1998"
         },
         "C85": {
           "v": "$4,200,000"
@@ -4814,7 +4814,7 @@
         "Appendix A. Assumptions Filled From Defaults",
         "The CIM did not state the inputs below. The model used the value in the second column, from the source in the third \u2014 not a figure from this deal. Each one moves the returns in section 6, so an assumption an IC reader disagrees with is an assumption to change on the assumptions page and re-run, not a number to discount by eye.",
         "Appendix B. Assumption Register",
-        "Every number this analysis used, with its source. Of 142 assumptions, 10 came from something other than the model's shipped defaults: 0 entered for this deal, 0 from a dated settings override, 10 filled in because the CIM did not state them. Those are listed first. The full register follows \u2014 nothing is omitted from it, so an assumption absent below is an assumption this run did not use.",
+        "Every number this analysis used, with its source. Of 142 assumptions, 10 came from something other than the model's shipped defaults: 0 entered for this deal, 0 from a dated settings override, and 10 filled in because the CIM did not state a value. Those are listed first. The full register follows \u2014 nothing is omitted from it, so an assumption absent below is an assumption this run did not use.",
         "B.1 Assumptions not taken from the model defaults",
         "B.2 Full register"
       ],
@@ -5472,7 +5472,7 @@
           [
             "Deal Inputs",
             "Year Built",
-            "1,998",
+            "1998",
             "stated in the CIM"
           ],
           [
@@ -5586,7 +5586,7 @@
           [
             "Investment Gates",
             "Unproven-Vintage Cutoff",
-            "2,021",
+            "2021",
             "model default"
           ],
           [

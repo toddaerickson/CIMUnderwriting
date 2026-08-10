@@ -59,7 +59,8 @@ from dataclasses import asdict, dataclass
 import config as cfg
 from analysis.fills import (UNIT_BPS, UNIT_COUNT, UNIT_DOLLARS, UNIT_MONTHS,
                             UNIT_PCT, UNIT_PSF, UNIT_PSF_MO, UNIT_PSF_YR,
-                            UNIT_SF, UNIT_TEXT, UNIT_YEARS, format_number)
+                            UNIT_SF, UNIT_TEXT, UNIT_VINTAGE, UNIT_YEARS,
+                            format_number)
 from analysis.fills import from_dicts as fills_from_dicts
 
 # ── Provenance vocabulary ───────────────────────────────────────────
@@ -141,8 +142,12 @@ CIM_FIELDS = (
     ("nrsf", "Rentable Square Feet", UNIT_SF),
     ("total_units", "Unit Count", UNIT_COUNT),
     ("acreage", "Acreage", UNIT_TEXT),
-    ("year_built", "Year Built", UNIT_COUNT),
-    ("year_expanded", "Year Expanded", UNIT_COUNT),
+    # A vintage is a label, not a magnitude — 2015 must not render
+    # "2,015". Both `UNIT_COUNT` and `UNIT_TEXT` group thousands, which is
+    # why this needed a unit of its own rather than a different existing
+    # one; see `_VINTAGE_KEYS` for the config-side twin.
+    ("year_built", "Year Built", UNIT_VINTAGE),
+    ("year_expanded", "Year Expanded", UNIT_VINTAGE),
     ("asking_price", "Asking Price", UNIT_DOLLARS),
     ("capex_estimate", "CapEx Estimate", UNIT_DOLLARS),
     ("physical_occupancy", "Physical Occupancy", UNIT_PCT),
@@ -303,13 +308,17 @@ _COUNT_KEYS = {"population_3mi", "max_sf_per_capita", "preferred_density",
 _MONTH_KEYS = {"months_to_stabilize", "ecri_tenant_tenure_months", "io_months"}
 _YEAR_KEYS = {"amort_years", "term_years"}
 _DOLLAR_KEYS = {"zero_noi_low_price", "zero_noi_high_price"}
-#: Numbers that are neither magnitudes nor rates — a vintage year and a
-#: coverage ratio. Both belong in `UNIT_TEXT`'s `,.4g`, which prints 2021
-#: and 1.25 as themselves; `UNIT_COUNT` would render them "2,021" and "1".
-_PLAIN_KEYS = {"unproven_vintage_year", "min_dscr"}
+#: A coverage ratio: neither a magnitude nor a rate. `UNIT_TEXT`'s `,.4g`
+#: prints 1.25 as itself, where `UNIT_COUNT` would render it "1".
+_PLAIN_KEYS = {"min_dscr"}
+#: Vintage years. `UNIT_TEXT` is NOT enough — its `,.4g` groups thousands
+#: too, so 2021 came out "2,021" until a rendered memo was actually read.
+_VINTAGE_KEYS = {"unproven_vintage_year"}
 
 
 def _unit_for(key: str) -> str:
+    if key in _VINTAGE_KEYS:
+        return UNIT_VINTAGE
     if key in _PLAIN_KEYS:
         return UNIT_TEXT
     if key in _PCT_KEYS:

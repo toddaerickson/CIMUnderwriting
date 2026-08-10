@@ -654,3 +654,24 @@ def test_the_results_page_marks_the_rows_a_human_chose(tmp_path, monkeypatch):
     gate = next(r for r in ctx["register_chosen"]
                 if r["key"] == "GATES.min_irr_5yr")
     assert gate["value"] == "8.0%" and gate["was"] == "10.0%"
+
+
+@pytest.mark.parametrize("field", ["year_built", "year_expanded"])
+def test_a_vintage_renders_as_a_year_not_a_quantity(field, mock_cim_data):
+    """Caught by reading the rendered memo, not by a test — `UNIT_COUNT`
+    groups thousands, so a 2015 vintage printed as "2,015", which reads as
+    a quantity of something. A year is a label, not a magnitude."""
+    setattr(mock_cim_data, field, 2015)
+    row = next(r for r in A.collect(cim_data=mock_cim_data)
+               if r.key == f"cim.{field}")
+    assert A.format_value(row) == "2015"
+
+
+def test_the_appendix_lead_sentence_agrees_with_a_single_fill(tmp_path):
+    """The count sentence is generated prose, so its grammar has to hold
+    for the singular case too — the stabilized fixture fills exactly one
+    input, which is the case a plural-only sentence gets wrong."""
+    result = _run(stabilized_deal(), tmp_path)
+    text = _memo_text(result.memo_path)
+    assert "the CIM did not state a value" in text
+    assert "did not state them" not in text
