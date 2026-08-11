@@ -500,7 +500,43 @@ def test_disclosures_state_mechanism_and_direction():
 
 # ── The real template, when it happens to be present ─────────────────
 
-REAL_TEMPLATE = Path(__file__).resolve().parents[1] / "template_uw.xlsm"
+def _is_merged(ws, coordinate: str) -> bool:
+    """True if `coordinate` falls inside ANY merged range.
+
+    Covers both halves of the failure: the anchor (a writable Cell that
+    would overwrite a multi-cell label) and every other member (a
+    MergedCell whose `.value` is read-only, so the write raises).
+    """
+    cell = ws[coordinate]
+    return any(cell.row >= rng.min_row and cell.row <= rng.max_row
+               and cell.column >= rng.min_col and cell.column <= rng.max_col
+               for rng in ws.merged_cells.ranges)
+
+
+def test_the_merge_detector_catches_both_halves_of_the_failure():
+    """The tripwire is only worth having if it fails when it should, and
+    `.value is None` provably does not: a merged band reads empty from
+    every cell it covers. Pins the detector against the two shapes —
+    anchor and member — that an emptiness check waves through."""
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.merge_cells("B263:D264")
+    try:
+        assert ws["B263"].value is None and ws["B264"].value is None
+        assert _is_merged(ws, "B263")      # anchor: silent overwrite
+        assert _is_merged(ws, "B264")      # member: the write raises
+        assert not _is_merged(ws, "B270")  # a genuinely free cell
+    finally:
+        wb.close()
+
+
+
+# The path the WRITER resolves, not a second guess at it: the module
+# honors UW_TEMPLATE_PATH (render.yaml sets it to /data), and a parity
+# test hardcoded to the project root would skip — reporting "no template
+# here" — on exactly the machine that has one somewhere else. Read at
+# import, before any fixture monkeypatches it.
+REAL_TEMPLATE = Path(template_writer.TEMPLATE_PATH)
 
 
 @pytest.mark.skipif(not REAL_TEMPLATE.exists(),
@@ -533,12 +569,24 @@ def test_real_template_still_has_the_cells_the_stub_claims(monkeypatch):
             '=IF(G253="% of EGR",G254*K148/12,K60*G254/12)')
         assert ws["K60"].value == "=($K$55-$K$66)*H60"
         # The disclosure rows the writer claims (settled 2026-08-10)
-        # must be BLANK in the real workbook — the cell choice was made
-        # on a machine that has never seen the file, and a wrong guess
-        # silently overwrites a label or formula. This assertion is the
-        # designed tripwire: it fails HERE, on the first machine that
+        # must be BLANK and WRITABLE in the real workbook — the cell
+        # choice was made on a machine that has never seen the file, and
+        # a wrong guess silently overwrites a label or formula. This is
+        # the designed tripwire: it fails HERE, on the first machine that
         # has the template, before anyone relies on the workbook.
-        assert ws[template_writer._DISCLOSURE_PREF_CELL].value is None
-        assert ws[template_writer._DISCLOSURE_AM_FEE_CELL].value is None
+        for cell in (template_writer._DISCLOSURE_PREF_CELL,
+                     template_writer._DISCLOSURE_AM_FEE_CELL):
+            assert ws[cell].value is None, cell
+            # Emptiness alone is NOT enough, and the gap is not
+            # theoretical (review finding): a cell inside a merged band
+            # reads None whatever the band displays. If it is the band's
+            # ANCHOR the writer silently overwrites a multi-cell label;
+            # if it is any other member, `ws[cell] = text` raises
+            # AttributeError and every real run dies before wb.save,
+            # producing no workbook at all — while this test, checking
+            # only `.value is None`, passed.
+            assert not _is_merged(ws, cell), (
+                f"{cell} participates in a merged range in the real "
+                f"template — pick a cell outside it")
     finally:
         wb.close()
