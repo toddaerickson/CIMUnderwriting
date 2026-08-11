@@ -23,6 +23,7 @@ from analysis.valuation import (COERCED_SCENARIOS, resolve_exit_cap,
                                 resolve_exit_noi,
                                 resolve_hold_years, resolve_market_cap,
                                 resolve_transaction_costs)
+import config as cfg
 from config import VALUE_ADD_SCENARIOS, VALUE_ADD_TRIGGERS
 from registry import ScenarioType
 
@@ -255,6 +256,7 @@ def _run_single_va_scenario(name: str, params: dict,
     # wrong twice: the final hold year's own NOI is the TRAILING
     # convention.)
     exit_noi = resolve_exit_noi(annual_noi[-1], forward_annual_noi)
+    exit_noi_convention = cfg.EXIT_NOI_CONVENTION
     exit_value = exit_noi / exit_cap if exit_cap > 0 else 0
 
     # Entry cap = Year 1 NOI / asking price
@@ -325,6 +327,12 @@ def _run_single_va_scenario(name: str, params: dict,
         "current_occupancy": current_occ,
         "target_occupancy": target_occ,
         "cash_flows": cash_flows,
+        # The NOI actually capitalized, and under which convention. Under
+        # "forward" it is year N+1's — a figure that appears nowhere in
+        # `annual_noi`, so a surface must be able to print it rather than
+        # showing an exit value beside a trailing NOI it does not tie to.
+        "exit_noi": exit_noi,
+        "exit_noi_convention": exit_noi_convention,
         "exit_value": exit_value,
         "disposition_cost": disposition_cost,
         "net_exit_proceeds": net_exit_proceeds,

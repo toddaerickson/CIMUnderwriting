@@ -246,7 +246,8 @@ output/
    capitalizes the terminal hold year's OWN NOI (`noi_series[-1]`);
    forward is one more step of the SAME rev/exp series at the rates in
    force for year N+1 — NOT NOI×(1+g), because the two series grow at
-   different rates (base differential ≈ +2.2% exit NOI, bear ≈ +0.5%).
+   different rates (measured on the standard fixture: base differential
+   ≈ +2.2% exit NOI, bear ≈ +0.4%, bull ≈ +3.8%).
    The default is trailing so no published number moved when the name
    arrived; flipping it is a deliberate operator act whose delta must be
    enumerated (item T's snapshot discipline), and the convention is a

@@ -10,7 +10,7 @@ through the one selector `resolve_exit_noi`.
 The forward expectations below are DERIVED FROM THE RESULT'S OWN SERIES,
 never asserted as "~3%": revenue and expenses grow at different rates
 and NOI is their difference, so the true forward step is ~+2.2% on the
-base params and ~+0.5% on bear (expense growth outruns revenue growth) —
+base params and ~+0.4% on bear (expense growth outruns revenue growth) —
 a single-rate step would overstate both.
 """
 import pytest
@@ -97,6 +97,60 @@ def test_the_convention_is_read_at_call_time_not_frozen_at_import():
         assert resolve_exit_noi(1.0, 2.0) == 2.0
     finally:
         cfg.EXIT_NOI_CONVENTION = "trailing"
+
+
+def test_both_engines_report_the_noi_they_capitalized(monkeypatch):
+    """Review finding: the selector's result was consumed and dropped.
+
+    Under "forward" the capitalized NOI is one step PAST the hold, so it
+    appears in no NOI series any surface prints — an exit value shown
+    beside the year-N row would not divide to the exit cap shown under
+    it, and the true figure would be recoverable only by multiplying
+    back. Both engines now return it, with the convention beside it so a
+    reader knows which year it is.
+    """
+    from model.value_add_model import _run_single_va_scenario
+
+    va_kwargs = dict(
+        name=ScenarioType.BASE,
+        params=dict(cfg.VALUE_ADD_SCENARIOS[ScenarioType.BASE]),
+        in_place_rent_psf=10.0, market_rent_psf=14.0, nrsf=50_000,
+        current_occ=0.80, monthly_expenses_start=20_000.0,
+        asking_price=10_000_000, capex=250_000, hold_years=5,
+        market_cap={"market_cap": 0.06, "source": "analyst"},
+    )
+
+    for convention in ("trailing", "forward"):
+        monkeypatch.setattr(cfg, "EXIT_NOI_CONVENTION", convention)
+        static = _project()
+        va = _run_single_va_scenario(**va_kwargs)
+        for result in (static, va):
+            assert result["exit_noi_convention"] == convention
+            # The reported figure is the one the exit value was built
+            # from — that tie is the whole point of returning it.
+            assert result["exit_value"] == pytest.approx(
+                result["exit_noi"] / result["exit_cap"])
+
+    # And under forward it is genuinely NOT the last projected year, so
+    # a surface printing that row instead would be printing the wrong
+    # number.
+    monkeypatch.setattr(cfg, "EXIT_NOI_CONVENTION", "forward")
+    forward = _project()
+    assert forward["exit_noi"] != pytest.approx(forward["noi"][-1])
+
+
+def test_the_workbook_and_memo_name_the_forward_year(monkeypatch):
+    """The label has to move with the number. Under trailing both
+    surfaces are byte-identical to what they always printed (which is
+    why the characterization snapshots do not move); under forward they
+    say which year they capitalized."""
+    from output.excel_writer import _exit_noi_label
+
+    trailing_scen = {"exit_noi_convention": "trailing"}
+    assert _exit_noi_label(trailing_scen, 5) == "Year 5 NOI"
+
+    forward_scen = {"exit_noi_convention": "forward"}
+    assert _exit_noi_label(forward_scen, 5) == "Year 6 NOI (forward)"
 
 
 def test_the_value_add_engine_flips_with_the_convention(monkeypatch):

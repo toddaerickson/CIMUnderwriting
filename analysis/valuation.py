@@ -345,6 +345,14 @@ def project_cash_flows(ttm_noi: float, price: float, capex: float,
         "expenses": exp_series,
         "noi": noi_series,
         "entry_cap": entry_cap,
+        # The NOI that was actually capitalized, and under which
+        # convention. Both are returned because under "forward" the
+        # capitalized figure is NOT in `noi` — it is one step past the
+        # hold — and a surface printing exit value beside the last NOI
+        # row would show a pair that does not tie to the printed exit
+        # cap, with the true number recoverable only by dividing back.
+        "exit_noi": exit_noi,
+        "exit_noi_convention": cfg.EXIT_NOI_CONVENTION,
         "requested_exit_cap": requested_exit_cap,
         "exit_cap": exit_cap,
         "exit_cap_coerced": exit_cap_coerced,
@@ -457,6 +465,8 @@ def _run_single_scenario(scenario_name: str, ttm_noi: float,
         "exit_cap_coerced": p["exit_cap_coerced"],
         "exit_cap_detail": p["exit_cap_detail"],
         "entry_cap": p["entry_cap"],
+        "exit_noi": p["exit_noi"],
+        "exit_noi_convention": p["exit_noi_convention"],
         "exit_value": p["exit_value"],
         "disposition_cost": p["disposition_cost"],
         "net_exit_proceeds": p["net_exit_proceeds"],

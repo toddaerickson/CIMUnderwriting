@@ -135,6 +135,20 @@ def _dotted(d: dict, key):
     return cur
 
 
+def _exit_noi_label(scen: dict, years) -> str:
+    """Name the year whose NOI was capitalized.
+
+    Trailing (the default) capitalizes year N, so the label is the one
+    this sheet has always printed and the workbook is unchanged. Forward
+    capitalizes year N+1, which is one step PAST the projection above —
+    so the label has to say so, or a reader ties the exit value to the
+    wrong row (`config.EXIT_NOI_CONVENTION`, decision 5).
+    """
+    if scen.get("exit_noi_convention") == "forward" and years:
+        return f"Year {years + 1} NOI (forward)"
+    return f"Year {years} NOI"
+
+
 def _exit_cap_rows(scen: dict) -> list:
     """(label, value, format) rows that make ONE scenario's exit cap
     retraceable — the anchor it started from, the two modifiers, and, when
@@ -450,8 +464,15 @@ def _build_scenario_tab(ws, scen_name: str, scen: dict, cim_data):
 
     # Exit & Returns
     row = _write_section_header(ws, row, "Exit & Returns", cols=2)
+    # The NOI the exit actually capitalized. Under the trailing default
+    # that IS year N's, so this row is unchanged; under "forward" it is
+    # year N+1's — a number that appears in no other row here, and
+    # printing year N beside the exit value would show a pair that does
+    # not divide to the exit cap printed under it.
     exit_items = [
-        (f"Year {years} NOI", noi_proj[-1] if noi_proj else None, CURRENCY_FULL),
+        (_exit_noi_label(scen, years),
+         scen.get("exit_noi", noi_proj[-1] if noi_proj else None),
+         CURRENCY_FULL),
         *_exit_cap_rows(scen),
         ("Exit Value (gross)", scen.get("exit_value"), CURRENCY_FULL),
         ("Disposition Costs", scen.get("disposition_cost"), CURRENCY_FULL),

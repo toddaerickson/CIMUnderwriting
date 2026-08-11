@@ -694,6 +694,16 @@ def _add_section_6(doc, scenario_results, max_offer, sources_uses=None,
         derivation = _exit_cap_derivation(s)
         if derivation:
             doc.add_paragraph(f"  {derivation}")
+        # Under the trailing default the capitalized NOI is the last
+        # column of the table above, so nothing is added and the memo is
+        # unchanged. Under "forward" it is year N+1's — absent from that
+        # table — and an exit value printed beside a table it does not
+        # tie to is the kind of unauditable figure this memo refuses
+        # everywhere else (`config.EXIT_NOI_CONVENTION`, decision 5).
+        if s.get("exit_noi_convention") == "forward":
+            doc.add_paragraph(
+                f"Exit NOI (forward, Yr {hold + 1}): "
+                f"{_fmt_currency(s.get('exit_noi'))}")
         doc.add_paragraph(f"Exit Value (gross): {_fmt_currency(s.get('exit_value'))}")
         # Costs are stated, not folded silently into the return: an IRR
         # quoted net of costs the reader can't see is not auditable.
