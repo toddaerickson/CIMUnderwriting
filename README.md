@@ -10,7 +10,7 @@ Self-storage investment screening and underwriting tool. Upload a CIM (Confident
 - **Expense benchmarking** — analyst-adjusted NOI using $/NRSF benchmarks by state and region
 - **Unlevered DCF** — Bear/Base/Bull scenarios with IRR, MOIC, yield-on-cost, net of transaction costs (default 5-year hold, editable 1–10)
 - **Value-add modeling** — monthly cash flow engine for lease-up and rent growth deals
-- **Levered returns & LP waterfall** — debt sized as min(LTV, DSCR, debt yield), single-tier waterfall (pref + promote + AM fee) with LP net IRR/MOIC as a second lens beside the unlevered screen, every figure stamped with its resolved LPA assumptions
+- **Levered returns & LP waterfall** — debt sized as min(LTV, DSCR, debt yield), an AM fee charged above a single-tier waterfall (pref + promote), with LP net IRR/MOIC as a second lens beside the unlevered screen, every figure stamped with its resolved LPA assumptions
 - **Max price solvers** — two bisection solvers, both shown: max price for the 10% unlevered IRR gate, and max price for the fund's 15% LP net IRR
 - **Output generation** — Word memo (.docx), Excel returns model (.xlsx), pre-filled underwriting template (.xlsm), and a 2-page LP-facing investor summary (.docx)
 - **Deal tracker** — persistent deal folder with metadata and comp database

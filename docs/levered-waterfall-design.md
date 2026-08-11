@@ -6,7 +6,7 @@ Status: BUILT — shipped as items E1–E4 in the order scoped in
 E4 solver): `model/debt.py`, `model/waterfall.py`, `model/levered.py`,
 `model/solver.py`. This file remains the design record; its numeric oracles
 are reproduced in `tests/test_debt.py`. The LPA confirmations at the bottom
-never blocked the build: they
+were the original stated blocker and stopped being one (PR #21): they
 ship as named parameters carrying documented defaults, and every LP net IRR is
 displayed with its resolved assumption set. The number is not decision-grade
 until the LPA is actually read.
