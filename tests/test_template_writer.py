@@ -467,9 +467,136 @@ def test_defaults_resolve_without_any_terms_passed(tmp_path, stub_template):
     assert cells["G254"] == cfg.AM_FEE_PCT
 
 
+# ── The divergence disclosures (settled 2026-08-10) ──────────────────
+
+def test_divergence_disclosures_land_in_the_workbook(tmp_path,
+                                                     stub_template):
+    """Both structural divergences are stamped INTO the workbook, not
+    only into the module docstring — the docstring is the one place the
+    analyst reading the .xlsm will never look."""
+    cells = _generate(tmp_path)
+    assert (cells[template_writer._DISCLOSURE_PREF_CELL]
+            == template_writer._PREF_DISCLOSURE)
+    assert (cells[template_writer._DISCLOSURE_AM_FEE_CELL]
+            == template_writer._AM_FEE_DISCLOSURE)
+    # And the TRUE rate stands beside the disclosure: the operator
+    # rejected the gross-up (2026-08-10), reaffirming the recorded
+    # stance — dollars that tie by printing a rate the fund does not
+    # charge trade a visible discrepancy for a hidden one.
+    assert cells["G254"] == cfg.AM_FEE_PCT
+
+
+def _disclosure_texts(ws):
+    return [c.value for row in ws.iter_rows() for c in row
+            if isinstance(c.value, str)
+            and c.value in (template_writer._PREF_DISCLOSURE,
+                            template_writer._AM_FEE_DISCLOSURE)]
+
+
+def _write_into(tmp_path, prepare):
+    """Run the disclosure writer over a sheet `prepare` has shaped."""
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    prepare(ws)
+    template_writer._write_divergence_disclosures(ws)
+    return ws
+
+
+def test_disclosures_survive_a_merged_band_at_the_preferred_rows(tmp_path):
+    """The failure the parity test alone could not prevent, now harmless.
+
+    A merged label band covering B263/B264 makes those cells read empty
+    while B264 is a read-only MergedCell — so the old writer raised
+    AttributeError mid-run and NO workbook was produced. The disclosure
+    now moves below the band instead.
+    """
+    ws = _write_into(tmp_path, lambda w: w.merge_cells("B263:D264"))
+    assert _disclosure_texts(ws) == [template_writer._PREF_DISCLOSURE,
+                                     template_writer._AM_FEE_DISCLOSURE]
+    # And it did NOT write into the merged band.
+    assert ws["B263"].value is None and ws["B264"].value is None
+
+
+def test_disclosures_never_overwrite_an_occupied_cell(tmp_path):
+    """The other half: a label already sitting where we guessed."""
+    def occupy(w):
+        w["B263"] = "Waterfall Notes"
+        w["B264"] = "=SUM(H259:H261)"
+
+    ws = _write_into(tmp_path, occupy)
+    assert ws["B263"].value == "Waterfall Notes"
+    assert ws["B264"].value == "=SUM(H259:H261)"
+    assert _disclosure_texts(ws) == [template_writer._PREF_DISCLOSURE,
+                                     template_writer._AM_FEE_DISCLOSURE]
+
+
+def test_no_room_warns_and_writes_nothing_rather_than_corrupting(
+        tmp_path, caplog):
+    """The last resort must still produce a workbook. A missing note with
+    a loud warning beats a destroyed deliverable — and beats a crash that
+    leaves the analyst with no file at all."""
+    def fill(w):
+        for offset in range(template_writer._DISCLOSURE_SEARCH_ROWS):
+            w.cell(row=template_writer._DISCLOSURE_FIRST_ROW + offset,
+                   column=template_writer._DISCLOSURE_COL).value = "taken"
+
+    with caplog.at_level("WARNING"):
+        ws = _write_into(tmp_path, fill)
+    assert _disclosure_texts(ws) == []
+    assert any("divergence disclosures" in r.message for r in caplog.records)
+
+
+def test_disclosures_state_mechanism_and_direction():
+    """The disclosure is only a disclosure while it names the mechanism
+    and the direction. A future rewording may shorten it; it may not
+    hollow it."""
+    pref = template_writer._PREF_DISCLOSURE
+    fee = template_writer._AM_FEE_DISCLOSURE
+    assert "IRR hurdle" in pref and "accru" in pref
+    assert "LP equity" in fee and "invested equity" in fee
+    assert "light" in fee            # the direction of the gap
+    assert "true rate" in fee        # what G254 actually carries
+
+
 # ── The real template, when it happens to be present ─────────────────
 
-REAL_TEMPLATE = Path(__file__).resolve().parents[1] / "template_uw.xlsm"
+def _is_merged(ws, coordinate: str) -> bool:
+    """True if `coordinate` falls inside ANY merged range.
+
+    Covers both halves of the failure: the anchor (a writable Cell that
+    would overwrite a multi-cell label) and every other member (a
+    MergedCell whose `.value` is read-only, so the write raises).
+    """
+    cell = ws[coordinate]
+    return any(cell.row >= rng.min_row and cell.row <= rng.max_row
+               and cell.column >= rng.min_col and cell.column <= rng.max_col
+               for rng in ws.merged_cells.ranges)
+
+
+def test_the_merge_detector_catches_both_halves_of_the_failure():
+    """The tripwire is only worth having if it fails when it should, and
+    `.value is None` provably does not: a merged band reads empty from
+    every cell it covers. Pins the detector against the two shapes —
+    anchor and member — that an emptiness check waves through."""
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.merge_cells("B263:D264")
+    try:
+        assert ws["B263"].value is None and ws["B264"].value is None
+        assert _is_merged(ws, "B263")      # anchor: silent overwrite
+        assert _is_merged(ws, "B264")      # member: the write raises
+        assert not _is_merged(ws, "B270")  # a genuinely free cell
+    finally:
+        wb.close()
+
+
+
+# The path the WRITER resolves, not a second guess at it: the module
+# honors UW_TEMPLATE_PATH (render.yaml sets it to /data), and a parity
+# test hardcoded to the project root would skip — reporting "no template
+# here" — on exactly the machine that has one somewhere else. Read at
+# import, before any fixture monkeypatches it.
+REAL_TEMPLATE = Path(template_writer.TEMPLATE_PATH)
 
 
 @pytest.mark.skipif(not REAL_TEMPLATE.exists(),
@@ -501,5 +628,24 @@ def test_real_template_still_has_the_cells_the_stub_claims(monkeypatch):
         assert ws["H254"].value == (
             '=IF(G253="% of EGR",G254*K148/12,K60*G254/12)')
         assert ws["K60"].value == "=($K$55-$K$66)*H60"
+        # The PREFERRED disclosure rows should be blank and unmerged in
+        # the real workbook. This is now a drift report, not a load-
+        # bearing guarantee: `_free_disclosure_cells` verifies its target
+        # at write time, so a wrong guess costs a lower row rather than a
+        # corrupted or missing workbook. Still asserted, because the
+        # first machine to open the real file is the only one that can
+        # tell us the constant points somewhere sensible.
+        for cell in (template_writer._DISCLOSURE_PREF_CELL,
+                     template_writer._DISCLOSURE_AM_FEE_CELL):
+            assert ws[cell].value is None, (
+                f"{cell} is occupied in the real template — the writer "
+                f"will skip past it; move _DISCLOSURE_FIRST_ROW")
+            # Emptiness alone would NOT be enough (review finding): a
+            # cell inside a merged band reads None whatever the band
+            # displays, so this checks the shape the value cannot show.
+            assert not _is_merged(ws, cell), (
+                f"{cell} participates in a merged range in the real "
+                f"template — the writer will skip past it; move "
+                f"_DISCLOSURE_FIRST_ROW to a free area")
     finally:
         wb.close()
