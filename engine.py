@@ -128,6 +128,29 @@ def extract_pdf_data(pdf_path: str, cim_overrides: dict = None,
 
     result.extraction_report = cim_data.extraction_report()
 
+    # Step 3b: AI gap-filler (item B1, OFF by default). Fills ONLY fields
+    # still missing after regex + overrides, applies a value only where the
+    # attribute is genuinely None (fill-only-missing — AI never overrides a
+    # parsed or analyst value), and records provenance on the report so every
+    # surface can flag which numbers an LLM supplied. Degrades to a no-op on
+    # any failure; the required underwriting fields are excluded upstream in
+    # ai_fill so an AI value can never satisfy require_underwritable.
+    import config as cfg
+    if cfg.AI_EXTRACTION_ENABLED and cfg.DEEPSEEK_API_KEY:
+        _progress(3, 4, "AI-assisted extraction...")
+        from extract.ai_fill import ai_fill_missing
+        report = result.extraction_report or {}
+        values, ai_error = ai_fill_missing(raw, report.get("missing", []))
+        applied = []
+        for name, value in values.items():
+            if getattr(cim_data, name, None) is None:   # fill-only-missing
+                setattr(cim_data, name, value)
+                applied.append(name)
+        result.extraction_report = cim_data.extraction_report()
+        result.extraction_report["ai_filled"] = applied
+        if ai_error:
+            result.extraction_report["ai_error"] = ai_error
+
     # Step 4: Enrichment
     _progress(3, 4, "Running data enrichment...")
     try:

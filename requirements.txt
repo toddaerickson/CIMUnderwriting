@@ -4,6 +4,10 @@ openpyxl==3.1.5
 numpy-financial==1.0.0
 requests==2.33.0
 beautifulsoup4==4.14.3
+# OpenAI-compatible client for the optional AI extraction gap-filler (item
+# B1). Used only when AI_EXTRACTION_ENABLED=1; imported lazily so the pipeline
+# runs without it when the feature is off.
+openai==2.53.0
 
 # ── Django front end (pins mirrored from managertools) ──
 Django==5.1.15

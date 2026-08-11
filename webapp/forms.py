@@ -781,13 +781,19 @@ def _display_value(v):
     return f"{v:,.2f}".rstrip("0").rstrip(".")
 
 
-def model_rows(form, pairs, snapshot, source_log=None, extras=None):
+def model_rows(form, pairs, snapshot, source_log=None, extras=None,
+               ai_filled=None):
     """Vertical driver rows: label | extracted (read-only) | input [| extra].
     source: 'you' when the bound/initial value differs from snapshot;
+    'AI' when the snapshot value was supplied by the B1 gap-filler (item B1);
     'Census' when the snapshot value was tier-2 enrichment (extract-time
     enrichment runs BEFORE the snapshot is saved, so Census fills live
     inside cim_json — the run payload's enrichment.source_log is the
     only way to tell them from CIM-extracted values).
+
+    `ai_filled` is the set of field names the AI gap-filler wrote; those
+    read 'AI' rather than 'CIM' until the analyst edits them, so an
+    LLM-supplied number is never mistaken for one the CIM stated.
 
     Percent fields (physical_occupancy etc.) are stored as decimals
     (0.92) in the snapshot but displayed/submitted as whole numbers (92)
@@ -806,6 +812,7 @@ def model_rows(form, pairs, snapshot, source_log=None, extras=None):
     """
     source_log = source_log or {}
     extras = extras or {}
+    ai_filled = ai_filled or set()
     rows = []
     for name, label in pairs:
         snap = snapshot.get(name)
@@ -820,8 +827,12 @@ def model_rows(form, pairs, snapshot, source_log=None, extras=None):
         if cur not in (None, "", snap):
             src = "you"
         elif snap is not None:
-            src = ("Census" if source_log.get(name, {}).get("tier") == 2
-                   else "CIM")
+            if name in ai_filled:
+                src = "AI"
+            elif source_log.get(name, {}).get("tier") == 2:
+                src = "Census"
+            else:
+                src = "CIM"
         else:
             src = ""
         rows.append({"label": label, "bf": bf, "extra_bf": extra_bf,

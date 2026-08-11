@@ -152,6 +152,7 @@ def deal_assumptions(request, pk):
                       {"deal": deal, "failed": state == "failed"})
     report = deal.extraction_report or {}
     missing_required = set(report.get("missing", [])) & assumptions_forms.REQUIRED_FIELDS
+    ai_filled = set(report.get("ai_filled") or [])   # item B1 provenance tag
     if request.method == "POST":
         form = assumptions_forms.AssumptionsForm(request.POST)
         if form.is_valid():
@@ -243,13 +244,13 @@ def deal_assumptions(request, pk):
         "unit_rows": rows,
         "benchmark_rows": benchmark_rows,
         "driver_rows": f.model_rows(form, f.SECTION_DRIVERS, deal.cim_json or {},
-                                    source_log,
+                                    source_log, ai_filled=ai_filled,
                                     extras={"capex_estimate": form["capex_basis"]}),
         "sec_property": f.section_fields(form, f.SECTION_PROPERTY, missing_required),
         "sec_size": f.section_fields(form, f.SECTION_SIZE, missing_required),
         "sec_income": f.section_fields(form, f.SECTION_INCOME, missing_required),
         "demo_rows": f.model_rows(form, f.SECTION_DEMOGRAPHICS, deal.cim_json or {},
-                                  source_log),
+                                  source_log, ai_filled=ai_filled),
         "scenario_rows": f.scenario_grid(form),
         "va_rows": f.va_grid(form),
         "rc_rows": f.rc_grid(form),

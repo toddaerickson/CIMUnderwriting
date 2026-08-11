@@ -469,10 +469,24 @@ def _extract_worker(deal_pk, pdf_path, stamp):
     try:
         result = extract_pdf_data(pdf_path)
         cim = result.cim_data
+        # AI-filled fields (item B1) ride the warnings banner by NAME, so the
+        # analyst sees exactly which numbers an LLM supplied and can verify
+        # them before running — provenance the report also carries per-field.
+        warnings = list(result.errors)
+        report = result.extraction_report or {}
+        ai_filled = report.get("ai_filled") or []
+        if ai_filled:
+            warnings.insert(0, (
+                f"AI-extracted {len(ai_filled)} field"
+                f"{'s' if len(ai_filled) != 1 else ''} not found by the parser "
+                f"— verify before running: {', '.join(ai_filled)}."))
+        elif report.get("ai_error"):
+            warnings.insert(0, f"AI extraction pass did not run: "
+                               f"{report['ai_error']}.")
         updates = {
             "cim_json": cim_to_dict(cim),
             "extraction_report": result.extraction_report,
-            "extract_warnings": list(result.errors),
+            "extract_warnings": warnings,
             "extract_status": "done",
             "extract_error": "",
             "asset_type": detect_asset_type(cim),

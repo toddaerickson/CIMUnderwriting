@@ -55,6 +55,12 @@ Render/Neon deployment architecture and cutover runbook.
 
 Key environment variables:
 - `CENSUS_API_KEY` — demographic enrichment (optional)
+- `AI_EXTRACTION_ENABLED` / `DEEPSEEK_API_KEY` — optional AI gap-filler that
+  fills fields the parser misses (item B1). **Off unless both are set.** When
+  enabled, extracted CIM *text* is sent to a third-party API (DeepSeek by
+  default) — a deliberate data-egress choice, since CIMs are confidential. It
+  never fills the required underwriting inputs, applies only to fields the
+  parser left blank, and flags every value it supplies for review.
 - `GP_NAME`, `GP_EQUITY_SHARE`, `GP_AM_FEE_RATE`, `GP_PROMOTE_PCT` — fund structure for UW template
 - `COMP_DB_PATH`, `CIM_DEALS_DIR`, `CIM_OVERRIDES_DIR` — data paths (set by `render.yaml` in prod)
 

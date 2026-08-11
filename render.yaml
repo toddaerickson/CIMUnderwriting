@@ -31,6 +31,12 @@ services:
         sync: false          # https://<same host>
       - key: CENSUS_API_KEY
         sync: false
+      # AI extraction gap-filler (item B1) — dark until BOTH are set. Sends
+      # confidential CIM text to a third-party API; enable deliberately.
+      - key: AI_EXTRACTION_ENABLED
+        sync: false          # set to "1" to turn on
+      - key: DEEPSEEK_API_KEY
+        sync: false
       - key: CIM_DEALS_DIR
         value: /data/deals
       - key: COMP_DB_PATH

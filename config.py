@@ -676,6 +676,27 @@ COMP_DB_NRSF_RANGE = (0.5, 2.0) # match properties within 50%-200% of subject NR
 
 CENSUS_API_KEY = os.environ.get("CENSUS_API_KEY", "")
 
+# ── AI extraction gap-filler (item B1) ──────────────────────────────
+# Optional: after the regex parser runs, an LLM fills ONLY the CIMData
+# scalar fields it left missing (extract/ai_fill.py). OFF by default —
+# the extraction path sends CIM text to a third-party API only when an
+# operator sets BOTH the flag and a key, a deliberate data-egress choice
+# (confidential OMs leave the box). Infrastructure config, not a
+# settings-editable threshold, so it is absent from override_key_registry()
+# exactly as CENSUS_API_KEY / COMP_DB_PATH are.
+AI_EXTRACTION_ENABLED = os.environ.get("AI_EXTRACTION_ENABLED", "") == "1"
+DEEPSEEK_API_KEY = os.environ.get("DEEPSEEK_API_KEY", "")
+# DeepSeek is OpenAI-compatible; point the base URL elsewhere to use a
+# different OpenAI-compatible provider without touching the code.
+AI_EXTRACTION_BASE_URL = os.environ.get(
+    "AI_EXTRACTION_BASE_URL", "https://api.deepseek.com")
+AI_EXTRACTION_MODEL = os.environ.get("AI_EXTRACTION_MODEL", "deepseek-chat")
+# Cap on CIM text sent per call, and a hard per-call timeout kept well below
+# webapp.services.EXTRACT_TIMEOUT_SECONDS (180s) so a slow/hung call degrades
+# to the regex-only result instead of racing the extraction-failed timeout.
+AI_EXTRACTION_MAX_INPUT_CHARS = 120_000
+AI_EXTRACTION_TIMEOUT_SECONDS = 60
+
 # ── IRR Solver Parameters ───────────────────────────────────────────
 
 SOLVER_TARGET_IRR = 0.10
