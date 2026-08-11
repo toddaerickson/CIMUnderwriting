@@ -197,14 +197,28 @@ _SUMMARY_NOTE_COL = 6              # F
 _SUMMARY_STRENGTH_ROWS = range(6, 11)
 _SUMMARY_WEAKNESS_ROWS = range(12, 17)
 
-# Divergence disclosures — two rows immediately below the waterfall
-# block (which ends at the tier rows, 259-261). These cells must be
-# BLANK in the shipped template: the writer cannot verify that here
-# (the workbook is proprietary, gitignored, absent in CI), so
-# `test_real_template_still_has_the_cells_the_stub_claims` asserts
-# their emptiness and FAILS on the first machine that has the real
-# file if the guess was wrong — a wrong cell would silently overwrite
-# a label or formula, which is exactly what that test exists to catch.
+# Divergence disclosures — column B, starting just below the waterfall
+# block (which ends at the tier rows, 259-261).
+#
+# **These addresses are a PREFERENCE, not an assumption.** The template
+# is proprietary, gitignored and absent from CI and from the machine
+# that chose them, so "B263 is blank" was a guess — and a guess is not
+# something a deliverable may depend on. Two ways it goes wrong: a cell
+# inside a merged label band raises on write (openpyxl MergedCells are
+# read-only), killing the run before `wb.save` so NO workbook is
+# produced at all; and an occupied cell would be silently overwritten.
+#
+# So the writer VERIFIES rather than trusts: `_free_disclosure_cells`
+# takes the first free, unmerged, empty cells at or below the preferred
+# row, and if it cannot find enough it warns and writes nothing rather
+# than corrupting a workbook or crashing a run. The parity test still
+# asserts the preferred cells are the ideal ones, so drift is reported —
+# but the workbook no longer BREAKS when they are not.
+_DISCLOSURE_COL = 2                    # B
+_DISCLOSURE_FIRST_ROW = 263
+#: How far below the preferred row to look before giving up. Bounded so
+#: a disclosure can never wander into an unrelated part of the sheet.
+_DISCLOSURE_SEARCH_ROWS = 12
 _DISCLOSURE_PREF_CELL = "B263"
 _DISCLOSURE_AM_FEE_CELL = "B264"
 
@@ -844,6 +858,40 @@ def _write_waterfall(ws, terms, am_fee_pct: float):
         ws.cell(row=row, column=_COL_PROMOTE).value = terms.promote_split
 
 
+def _covered_by_merge(ws, cell) -> bool:
+    """True if `cell` sits in ANY merged range — anchor included.
+
+    Both halves break a write. A non-anchor member is a `MergedCell`
+    whose `.value` is read-only, so assigning raises and the run dies
+    before `wb.save`. The anchor IS writable, but writing there paints
+    text across a band that belongs to some label, which is the silent
+    corruption the emptiness check alone cannot see.
+    """
+    return any(rng.min_row <= cell.row <= rng.max_row
+               and rng.min_col <= cell.column <= rng.max_col
+               for rng in ws.merged_cells.ranges)
+
+
+def _free_disclosure_cells(ws, count: int) -> list:
+    """The first `count` cells safe to write a disclosure into.
+
+    Safe means: not inside a merged range, and empty — so nothing the
+    template already says is destroyed. Returns fewer than `count` when
+    the sheet has no room, which the caller treats as "say nothing"
+    rather than "write anyway".
+    """
+    free = []
+    for offset in range(_DISCLOSURE_SEARCH_ROWS):
+        cell = ws.cell(row=_DISCLOSURE_FIRST_ROW + offset,
+                       column=_DISCLOSURE_COL)
+        if _covered_by_merge(ws, cell) or cell.value not in (None, ""):
+            continue
+        free.append(cell)
+        if len(free) == count:
+            break
+    return free
+
+
 def _write_divergence_disclosures(ws):
     """Stamp the two structural divergences INTO the workbook.
 
@@ -852,9 +900,26 @@ def _write_divergence_disclosures(ws):
     module docstring carries the full reasoning; these two lines carry
     the direction and the mechanism to the reader who has only the file.
     Text only — the AST gate is numeric and untouched by design.
+
+    The target cells are CHECKED, not assumed (see `_DISCLOSURE_COL`):
+    this writer runs against a proprietary workbook nobody who chose the
+    addresses can open, and a deliverable must not depend on that guess
+    being right. Worst case here is a missing note and a loud warning;
+    the alternative was a corrupted workbook or no workbook at all.
     """
-    ws[_DISCLOSURE_PREF_CELL] = _PREF_DISCLOSURE
-    ws[_DISCLOSURE_AM_FEE_CELL] = _AM_FEE_DISCLOSURE
+    disclosures = (_PREF_DISCLOSURE, _AM_FEE_DISCLOSURE)
+    cells = _free_disclosure_cells(ws, len(disclosures))
+    if len(cells) < len(disclosures):
+        logger.warning(
+            "No free rows for the XLSM divergence disclosures near row %d "
+            "(column B) — the workbook is written WITHOUT them. The pref "
+            "and AM-fee divergences still apply; see the module docstring "
+            "in output/template_writer.py, and move "
+            "_DISCLOSURE_FIRST_ROW to a blank area of the template.",
+            _DISCLOSURE_FIRST_ROW)
+        return
+    for cell, text in zip(cells, disclosures):
+        cell.value = text
 
 
 # ── Summary Sheet Notes ──────────────────────────────────────────────

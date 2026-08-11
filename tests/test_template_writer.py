@@ -486,6 +486,66 @@ def test_divergence_disclosures_land_in_the_workbook(tmp_path,
     assert cells["G254"] == cfg.AM_FEE_PCT
 
 
+def _disclosure_texts(ws):
+    return [c.value for row in ws.iter_rows() for c in row
+            if isinstance(c.value, str)
+            and c.value in (template_writer._PREF_DISCLOSURE,
+                            template_writer._AM_FEE_DISCLOSURE)]
+
+
+def _write_into(tmp_path, prepare):
+    """Run the disclosure writer over a sheet `prepare` has shaped."""
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    prepare(ws)
+    template_writer._write_divergence_disclosures(ws)
+    return ws
+
+
+def test_disclosures_survive_a_merged_band_at_the_preferred_rows(tmp_path):
+    """The failure the parity test alone could not prevent, now harmless.
+
+    A merged label band covering B263/B264 makes those cells read empty
+    while B264 is a read-only MergedCell — so the old writer raised
+    AttributeError mid-run and NO workbook was produced. The disclosure
+    now moves below the band instead.
+    """
+    ws = _write_into(tmp_path, lambda w: w.merge_cells("B263:D264"))
+    assert _disclosure_texts(ws) == [template_writer._PREF_DISCLOSURE,
+                                     template_writer._AM_FEE_DISCLOSURE]
+    # And it did NOT write into the merged band.
+    assert ws["B263"].value is None and ws["B264"].value is None
+
+
+def test_disclosures_never_overwrite_an_occupied_cell(tmp_path):
+    """The other half: a label already sitting where we guessed."""
+    def occupy(w):
+        w["B263"] = "Waterfall Notes"
+        w["B264"] = "=SUM(H259:H261)"
+
+    ws = _write_into(tmp_path, occupy)
+    assert ws["B263"].value == "Waterfall Notes"
+    assert ws["B264"].value == "=SUM(H259:H261)"
+    assert _disclosure_texts(ws) == [template_writer._PREF_DISCLOSURE,
+                                     template_writer._AM_FEE_DISCLOSURE]
+
+
+def test_no_room_warns_and_writes_nothing_rather_than_corrupting(
+        tmp_path, caplog):
+    """The last resort must still produce a workbook. A missing note with
+    a loud warning beats a destroyed deliverable — and beats a crash that
+    leaves the analyst with no file at all."""
+    def fill(w):
+        for offset in range(template_writer._DISCLOSURE_SEARCH_ROWS):
+            w.cell(row=template_writer._DISCLOSURE_FIRST_ROW + offset,
+                   column=template_writer._DISCLOSURE_COL).value = "taken"
+
+    with caplog.at_level("WARNING"):
+        ws = _write_into(tmp_path, fill)
+    assert _disclosure_texts(ws) == []
+    assert any("divergence disclosures" in r.message for r in caplog.records)
+
+
 def test_disclosures_state_mechanism_and_direction():
     """The disclosure is only a disclosure while it names the mechanism
     and the direction. A future rewording may shorten it; it may not
@@ -568,25 +628,24 @@ def test_real_template_still_has_the_cells_the_stub_claims(monkeypatch):
         assert ws["H254"].value == (
             '=IF(G253="% of EGR",G254*K148/12,K60*G254/12)')
         assert ws["K60"].value == "=($K$55-$K$66)*H60"
-        # The disclosure rows the writer claims (settled 2026-08-10)
-        # must be BLANK and WRITABLE in the real workbook — the cell
-        # choice was made on a machine that has never seen the file, and
-        # a wrong guess silently overwrites a label or formula. This is
-        # the designed tripwire: it fails HERE, on the first machine that
-        # has the template, before anyone relies on the workbook.
+        # The PREFERRED disclosure rows should be blank and unmerged in
+        # the real workbook. This is now a drift report, not a load-
+        # bearing guarantee: `_free_disclosure_cells` verifies its target
+        # at write time, so a wrong guess costs a lower row rather than a
+        # corrupted or missing workbook. Still asserted, because the
+        # first machine to open the real file is the only one that can
+        # tell us the constant points somewhere sensible.
         for cell in (template_writer._DISCLOSURE_PREF_CELL,
                      template_writer._DISCLOSURE_AM_FEE_CELL):
-            assert ws[cell].value is None, cell
-            # Emptiness alone is NOT enough, and the gap is not
-            # theoretical (review finding): a cell inside a merged band
-            # reads None whatever the band displays. If it is the band's
-            # ANCHOR the writer silently overwrites a multi-cell label;
-            # if it is any other member, `ws[cell] = text` raises
-            # AttributeError and every real run dies before wb.save,
-            # producing no workbook at all — while this test, checking
-            # only `.value is None`, passed.
+            assert ws[cell].value is None, (
+                f"{cell} is occupied in the real template — the writer "
+                f"will skip past it; move _DISCLOSURE_FIRST_ROW")
+            # Emptiness alone would NOT be enough (review finding): a
+            # cell inside a merged band reads None whatever the band
+            # displays, so this checks the shape the value cannot show.
             assert not _is_merged(ws, cell), (
                 f"{cell} participates in a merged range in the real "
-                f"template — pick a cell outside it")
+                f"template — the writer will skip past it; move "
+                f"_DISCLOSURE_FIRST_ROW to a free area")
     finally:
         wb.close()
