@@ -19,6 +19,20 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt pytest
 
+      # Guards against the one silent failure in the hand-rebuilt CSS workflow:
+      # a template class change that ships without re-running the Tailwind
+      # build, leaving static/css/tw.css missing the new classes (elements then
+      # render unstyled with no error anywhere). Rebuilds with the exact pinned
+      # command documented in webapp/templates/base.html and fails on any drift.
+      - name: Tailwind CSS is up to date
+        run: |
+          TAILWINDCSS_VERSION=v3.4.17 tailwindcss -c tailwind.config.js \
+            -i static/src/input.css -o static/css/tw.css --minify
+          git diff --exit-code static/css/tw.css || {
+            echo "::error file=static/css/tw.css::tw.css is stale. Rebuild with the command in webapp/templates/base.html and commit the result."
+            exit 1
+          }
+
       - name: Django checks
         run: python manage.py check && python manage.py makemigrations --check --dry-run
 
