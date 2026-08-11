@@ -480,10 +480,14 @@ def test_the_cli_resolves_an_anchor_for_every_consumer():
 
     src = inspect.getsource(cli.stage_valuate)
     assert "resolve_market_cap(" in src
-    # build_returns_model, run_value_add_scenarios, solve_max_price and
-    # solve_max_price_value_add. An exact count so a fifth consumer added
-    # without the anchor fails here rather than in a published memo.
-    assert src.count("market_cap=ctx.market_cap") == 4
+    # build_returns_model, run_value_add_scenarios, solve_max_price,
+    # solve_max_price_value_add and solve_max_price_levered. An exact
+    # count so a sixth consumer added without the anchor fails here
+    # rather than in a published memo. This assertion has now caught what
+    # it was built to catch once: solve_max_price_levered joined
+    # stage_valuate when the CLI gained its levered payload, and the
+    # count going 4 → 5 is the tripwire firing correctly, not breaking.
+    assert src.count("market_cap=ctx.market_cap") == 5
 
 
 def test_both_orchestrations_name_the_same_consumers():
@@ -498,7 +502,7 @@ def test_both_orchestrations_name_the_same_consumers():
     engine_src = inspect.getsource(engine.run_analysis)
     cli_src = inspect.getsource(cli.stage_valuate)
     for consumer in ("build_returns_model", "run_value_add_scenarios",
-                     "solve_max_price"):
+                     "solve_max_price", "solve_max_price_levered"):
         assert consumer in engine_src, consumer
         assert consumer in cli_src, consumer
     # and neither leaves a solver to fall back to the default anchor

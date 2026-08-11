@@ -1,4 +1,6 @@
 {
+  "autoCompactEnabled": true,
+  "autoCompactWindow": 300000,
   "permissions": {
     "allow": [
       "WebFetch(domain:crdrealty.com)",
@@ -10,18 +12,8 @@
       "Bash(python3 -c \":*)",
       "Bash(ls -la SS_*Devon*)",
       "Bash(pip install --break-system-packages requests beautifulsoup4)",
-      "Bash(python3 /home/terickson/CIM_Analyst/run.py)",
       "Bash(python -c \":*)",
-      "Bash(ls /home/terickson/CIM_Analyst/*.pdf /home/terickson/CIM_Analyst/*.PDF)",
-      "Bash(find /home/terickson/CIM_Analyst -type f -name \"*.py\" -exec grep -l \"override\\\\|override.json\\\\|manual_data\" {} ;)",
-      "Bash(wc -l /home/terickson/CIM_Analyst/**/*.py)",
-      "Bash(grep -rn \"def \" /home/terickson/CIM_Analyst/analysis/*.py)",
-      "Bash(wc -l /home/terickson/CIM_Analyst/analysis/*.py /home/terickson/CIM_Analyst/model/*.py /home/terickson/CIM_Analyst/output/*.py /home/terickson/CIM_Analyst/data/*.py)",
-      "Bash(grep -rn \"def \" /home/terickson/CIM_Analyst/model/*.py)",
       "Bash(python3 -c \"import ast, os; [print\\(f''{f}: Circular import check''\\) for f in os.listdir\\(''.''\\) if f.endswith\\(''.py''\\)]\")",
-      "Bash(grep -rn \"^from \\\\|^import \" /home/terickson/CIM_Analyst/extract/*.py)",
-      "Bash(python3 -m py_compile /home/terickson/CIM_Analyst/*.py)",
-      "Bash(grep -c \"def \" /home/terickson/CIM_Analyst/**/*.py)",
       "Bash(pip install streamlit)",
       "Bash(pip install --break-system-packages streamlit)",
       "Bash(ls *.pdf)",
@@ -30,9 +22,7 @@
       "Bash(python3 -c \"import pytest; print\\(pytest.__version__\\)\")",
       "Bash(pip install:*)",
       "Bash(python3 -m pytest tests/ -v)",
-      "Bash(grep -r \"tempfile\\\\|NamedTemporaryFile\\\\|upload\" /home/terickson/CIM_Analyst/gui/*.py)",
       "Bash(python3 -m pytest tests/test_deal_manager.py -v)",
-      "Bash(ls -lt /home/terickson/CIM_Analyst/*.docx /home/terickson/CIM_Analyst/*.xlsx)",
       "Bash(streamlit run:*)",
       "Bash(.venv/bin/python -m pytest *)",
       "Bash(.venv/bin/pytest *)",
@@ -54,7 +44,6 @@
       "Bash(gh search prs *)",
       "Bash(curl -sf -o /dev/null *)",
       "Bash(flyctl logs *)",
-      "Bash(/home/terickson/.claude/plugins/cache/claude-plugins-official/superpowers/*)",
       "mcp__claude_ai_Supabase__list_projects",
       "mcp__claude_ai_Supabase__list_migrations",
       "mcp__claude_ai_Supabase__get_advisors",
@@ -64,9 +53,6 @@
       "mcp__claude_ai_Vercel__get_deployment",
       "mcp__claude_ai_Vercel__get_runtime_logs",
       "mcp__claude_ai_Vercel__list_teams",
-      "Bash(bash /home/terickson/.claude/plugins/cache/claude-plugins-official/superpowers:*)",
-      "Bash(bash /home/terickson/.claude/plugins/cache/claude-plugins-official/superpowers/*)",
-      "Bash(/home/terickson/.claude/plugins/cache/claude-plugins-official/superpowers:*)",
       "Bash(.venv/bin/python -m pytest:*)",
       "Bash(.venv/bin/pytest:*)",
       "Bash(.venv/bin/python -m py_compile:*)",
@@ -75,10 +61,6 @@
       "Bash(.venv/bin/python manage.py check:*)",
       "Bash(curl -s -m 20 https://cim-analyst.onrender.com/*)",
       "Bash(curl -s -m 15 https://cim-analyst.onrender.com/*)"
-    ],
-    "additionalDirectories": [
-      "/home/terickson/CIM_Analyst",
-      "/home/terickson/CIM_Analyst/gui"
     ]
   },
   "hooks": {
@@ -92,7 +74,23 @@
           },
           {
             "type": "command",
-            "command": "for W in /home/terickson/CIM_Analyst/.superpowers/sdd/*/progress.md; do [ -f \"$W\" ] || continue; echo \"IN-FLIGHT SDD BUILD LEDGER ($W) \u2014 an implementation plan is mid-execution. Resume it: invoke superpowers:subagent-driven-development, follow the ledger below (trust it and git log over recollection; tasks with a complete line are DONE):\"; tail -40 \"$W\"; done",
+            "command": "for W in ${CLAUDE_PROJECT_DIR:-.}/.superpowers/sdd/*/progress.md; do [ -f \"$W\" ] || continue; echo \"IN-FLIGHT SDD BUILD LEDGER ($W) — an implementation plan is mid-execution. Resume it: invoke superpowers:subagent-driven-development, follow the ledger below (trust it and git log over recollection; tasks with a complete line are DONE):\"; tail -40 \"$W\"; done",
+            "timeout": 10
+          },
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PROJECT_DIR:-$(git rev-parse --show-toplevel 2>/dev/null || echo .)}/.claude/hooks/session-start-carryover.py\"",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "PreCompact": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PROJECT_DIR:-$(git rev-parse --show-toplevel 2>/dev/null || echo .)}/.claude/hooks/precompact-carryover.py\"",
             "timeout": 10
           }
         ]

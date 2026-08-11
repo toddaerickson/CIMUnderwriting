@@ -626,7 +626,8 @@ def test_a_saved_mgmt_fee_target_actually_reaches_the_run(monkeypatch,
               transaction_costs=None, capital_structure=None,
               market_cap_rate=None, market_cap=None,
               debt_terms=None, waterfall_terms=None, am_fee_pct=None,
-              mgmt_fee_target_pct=None):
+              mgmt_fee_target_pct=None, config_deltas=None,
+              config_defaults=None, deal_overrides=None, cim_snapshot=None):
         seen["mgmt_fee_target_pct"] = mgmt_fee_target_pct
         result.gate_results = []
         result.gate_summary = {"passed": 0, "failed": 0, "tbd": 0, "total": 0,
@@ -2703,6 +2704,142 @@ def test_the_cli_discloses_the_same_assumptions_the_web_app_does(tmp_path,
     assert "Appendix A. Assumptions Filled From Defaults" in text
     for row in ctx.assumption_fill_log:
         assert row["field"] in text
+
+
+def test_the_cli_runs_the_check_register_and_all_three_writers_see_it(tmp_path):
+    """The last engine-only payload. `engine.run_analysis` evaluates the
+    model error-check register once and hands it to every surface; the
+    CLI never ran it at all, so a $1 property-tax line — the exact defect
+    item A was built to catch — was flagged on the web path and silent on
+    this one. Same parity rule as the fill log above: a disclosure that
+    exists on only one of the two entry points is not a disclosure.
+
+    MUTATION: drop `checks=ctx.checks` from either writer call in
+    `run.stage_output`, or delete the register evaluation from
+    `run.stage_gates_and_risks`.
+    """
+    import run as cli
+    from context import AnalysisContext
+
+    ctx = AnalysisContext(pdf_path=str(tmp_path / "deal.pdf"))
+    ctx.cim_data = stabilized_deal()
+    # The item-A signature defect: a $1 property-tax line, orders of
+    # magnitude below half its benchmark low. `expense_line_floor` (check
+    # 8, the "$1 property tax catcher") must fire. The line lives on the
+    # CIM's `expense_lines`; `analyze_financials` carries it into
+    # `expense_analysis["lines"]`, which is what `input_from_cim` reads.
+    for line in ctx.cim_data.expense_lines:
+        if "tax" in line.label.lower():
+            line.t12 = 1.0
+
+    class _NoComps:
+        def query_expense_benchmarks(self, **kw):
+            return None
+
+        def query_rent_comps(self, **kw):
+            return None
+
+        def save_analysis(self, **kw):
+            return None
+
+    comp_db = _NoComps()
+    cli.stage_analyze(ctx, comp_db)
+    cli.stage_valuate(ctx)
+    cli.stage_gates_and_risks(ctx)
+
+    assert ctx.checks, "the CLI never ran the check register"
+    assert ctx.check_summary.get("total"), "summarize() never ran"
+    fired = {c["id"] for c in ctx.checks if c["status"] == "fail"}
+    assert "expense_line_floor" in fired, (
+        f"the $1 property-tax line fired no expense-floor check; failed: {fired}")
+
+    cli.stage_output(ctx, comp_db)
+
+    memo = _memo_text(ctx.memo_path)
+    assert "Model Checks" in memo, "the memo's Model Checks block is absent"
+
+    from openpyxl import load_workbook
+    wb = load_workbook(ctx.excel_path, read_only=True)
+    assert "Checks" in wb.sheetnames, (
+        f"the workbook has no Checks sheet; sheets: {wb.sheetnames}")
+    wb.close()
+
+
+def test_the_cli_lp_summary_carries_an_lp_net_irr(tmp_path):
+    """The CLI's LP-facing document must not quote an unlevered IRR.
+
+    `build_returns_model` sizes the loan and runs the waterfall on every
+    call, but `run.stage_valuate` kept three of its six keys and dropped
+    `debt` and `levered` on the floor. Nothing raised: `_is_build` nulls
+    the levered payload when no assumption stamp reaches it, so the
+    summary rendered its whole "LP Net (after fees & promote)" column as
+    N/A and the leverage-effect sentence vanished. A document whose entire
+    reason for existing is the fund's 15% LP NET target was shipping the
+    property-level unlevered number instead — degrading safely, and to
+    exactly the wrong thing.
+
+    MUTATION: drop `levered=ctx.levered` from the
+    `generate_investor_summary` call in `run.stage_output`, or stop
+    capturing `model["levered"]` in `run.stage_valuate`.
+    """
+    import run as cli
+    from context import AnalysisContext
+
+    ctx = AnalysisContext(pdf_path=str(tmp_path / "deal.pdf"))
+    ctx.cim_data = stabilized_deal()
+
+    class _NoComps:
+        def query_expense_benchmarks(self, **kw):
+            return None
+
+        def query_rent_comps(self, **kw):
+            return None
+
+        def save_analysis(self, **kw):
+            return None
+
+    comp_db = _NoComps()
+    cli.stage_analyze(ctx, comp_db)
+    cli.stage_valuate(ctx)
+    cli.stage_gates_and_risks(ctx)
+
+    # The payload the CLI used to discard.
+    assert ctx.levered, "stage_valuate dropped model['levered']"
+    assert ctx.debt, "stage_valuate dropped model['debt']"
+    assert ctx.levered.get("base", {}).get("assumption_stamp"), (
+        "no stamp — every levered figure would be nulled downstream")
+    # Item E4's second max price, solved to the LP NET target rather than
+    # the unlevered one the primary gate reads.
+    assert ctx.levered_max_offer.get("max_price"), (
+        "the CLI never solved the levered max offer")
+
+    cli.stage_output(ctx, comp_db)
+
+    summary = _memo_text(ctx.investor_summary_path)
+    # The leverage-effect sentence is the tell: it is a DIFFERENCE between
+    # the unlevered and LP net figures, so it can only render when both
+    # exist. Its absence is what the unlevered-only document looked like.
+    assert "Leverage effect:" in summary
+    assert "LP Net (after fees & promote)" in summary
+    # And the stamp rides with it — decision 7's rule binds hardest on the
+    # one document that leaves the firm. Matched on the sentence rather
+    # than the row labels: `_is_assumption_stamp` joins them and runs the
+    # result through `_ascii`, so the labels do not survive verbatim.
+    assert "LP net returns are computed under:" in summary
+    # The caveat is CONDITIONAL as of the LPA-stamp work: it reads "These
+    # are proposed terms, subject to the final partnership agreement" only
+    # when nothing is confirmed, and reports the split by count once some
+    # conventions have been read against the executed LPA. This test was
+    # written against the old fixed sentence and asserted a string that no
+    # longer renders on a fixture with confirmed rows — so it asserts the
+    # ACCOUNTING, which is what makes the caveat honest, rather than one
+    # variant's exact prose.
+    assert "confirmed against the executed partnership agreement" in summary
+    assert "proposed terms, subject to it" in summary
+
+    memo = _memo_text(ctx.memo_path)
+    assert "Levered Returns (LP Net)" in memo, (
+        "the IC memo half of the same gap is still open")
 
 
 @pytest.mark.django_db

@@ -152,3 +152,43 @@ def test_health_disk_ok_on_pristine_mount(client, monkeypatch, settings):
     resp = client.get("/health/")
     assert resp.status_code == 200
     assert resp.json()["disk"] is True
+
+
+# ── Production settings guards ──────────────────────────────────────
+
+def test_insecure_secret_key_is_refused_in_production():
+    """`check --deploy` only WARNS about the dev key. With DEBUG=False
+    that key is a live session-forgery hole — anyone who has read this
+    open-source-shaped repo can mint a signed cookie — so it must stop
+    the boot, not annotate it."""
+    from django.core.exceptions import ImproperlyConfigured
+    from cimweb.settings import check_secret_key, INSECURE_DEFAULT_SECRET_KEY
+
+    with pytest.raises(ImproperlyConfigured) as exc:
+        check_secret_key(INSECURE_DEFAULT_SECRET_KEY, debug=False)
+    assert "DJANGO_SECRET_KEY" in str(exc.value)
+
+
+def test_secret_key_guard_allows_dev_and_real_keys():
+    """The default must stay usable for a fresh clone (DEBUG=True), and a
+    real key must pass in production — a guard that fires on either would
+    just get deleted."""
+    from cimweb.settings import check_secret_key, INSECURE_DEFAULT_SECRET_KEY
+
+    check_secret_key(INSECURE_DEFAULT_SECRET_KEY, debug=True)
+    check_secret_key("a-real-generated-production-key", debug=False)
+
+
+def test_security_headers_present_in_production_branch():
+    """HSTS is the one header the settings file must supply itself.
+
+    nosniff and X-Frame-Options are deliberately absent from settings.py
+    (Django defaults them on) — this asserts the DEFAULTS hold, so that
+    if a future Django release flips one, this test fails instead of the
+    protection silently disappearing."""
+    from django.conf import settings as dj
+
+    assert dj.SECURE_CONTENT_TYPE_NOSNIFF is True
+    assert dj.X_FRAME_OPTIONS == "DENY"
+    assert ("django.middleware.clickjacking.XFrameOptionsMiddleware"
+            in dj.MIDDLEWARE)

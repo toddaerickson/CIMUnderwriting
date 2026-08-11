@@ -45,6 +45,46 @@ never remove, weaken, or bypass them:
   and "is solo mode on" — one definition, so they can never protect different
   trees. `tests/test_hook_shared_tree.py` is the CI gate on that.
 
+## Context resets (long unattended sessions)
+
+`autoCompactWindow` in `.claude/settings.json` is set to **300,000 tokens** —
+compaction fires there rather than at the model's default. No hook does this
+and none can: every hook event is documented as unable to trigger a compact or
+a clear, so the setting is the mechanism and the hooks below only preserve
+state across it.
+
+- **PreCompact** `.claude/hooks/precompact-carryover.py` — snapshots the
+  DERIVABLE state (which worktree, which branch, commits not yet on
+  origin/main, uncommitted paths, the worktree list) to
+  `<primary .git>/cim-carryover-<sessionhash>`. It never blocks: exit 2 on
+  this event blocks the compaction the operator asked for, so every path
+  exits 0.
+- **SessionStart** `.claude/hooks/session-start-carryover.py` — restores it,
+  but only when `source` is `clear` or `compact`. `resume` already has the
+  real transcript and `startup` is a genuinely new session; re-injecting
+  beside either is noise arguing with the record.
+- `<primary .git>/cim-session-notes.md` is the half that matters and the half
+  no hook writes. **Maintain it by hand during long runs** — which phase of a
+  plan is in flight, what was decided and why, what is next. The snapshot
+  covers what a machine can rebuild; the notes cover what it cannot. It is one
+  file per clone, not per session, deliberately: concurrent sessions sharing a
+  task board is a feature, and keying it by session would lose it at exactly
+  the moment `/clear` mints a new session id.
+- Both carry-over hooks read their paths from `_shared_tree.py` for the same
+  reason the guard pair does. The notes filename must never share
+  `CARRYOVER_PREFIX`, or the snapshot sweep deletes it;
+  `test_the_notes_file_is_not_matched_as_a_snapshot` pins that.
+
+# Compact instructions
+
+When compacting this session, preserve above all else: the absolute path of
+the worktree being committed into and its branch name; which phase of the
+in-flight plan is done versus pending; any deliberate deviation from a plan
+and the reason for it; test failures and their output; and decisions the
+operator made by hand (they cannot be re-derived from the code). Drop file
+listings, full test output for passing runs, and exploratory reads that led
+nowhere.
+
 **The mistake this catches, because it is easy to make:** `cd` does NOT
 persist between Bash calls. A relative path in a later command therefore
 resolves against the primary tree, not your worktree. Use absolute paths and
@@ -98,6 +138,15 @@ analysis/
   valuation.py             # THE unlevered projection (project_cash_flows) + scenario NOI forecast, IRR/MOIC
   value_add.py             # Operational improvement identification
   risks.py                 # Risk identification
+  checks.py                # Model error-check register — is each input self-consistent?
+  fills.py                 # Assumption fill log — which inputs did the CIM never supply?
+                           #   Also `require_underwritable`, the three-input refusal
+  assumptions.py           # Assumption register — where did EVERY number come from?
+                           #   The three above are siblings by design: one assembly each,
+                           #   built ONCE at the engine and handed to every surface, so the
+                           #   memo, the workbook and the results page cannot disagree.
+                           #   They stay separate because a check has a pass/fail axis, a
+                           #   fill has none, and the register has a provenance axis instead
 model/
   returns_model.py         # Unlevered DCF wrapper + sensitivity grid: Bear/Base/Bull
                            #   + Sources & Uses; sizes the ONE loan off the base case
@@ -211,9 +260,10 @@ output/
    assumptions page's "Debt & Waterfall" section — per-deal only, never
    settings-page editable, for the same in-place-mutation reason the
    capital block is not (item E3b).
-7. **No LP net IRR without its assumption stamp**: five LPA questions are
-   still open and each changes the number, so `model.levered` builds the
-   resolved set and EVERY surface that prints a levered figure renders it
+7. **No LP net IRR without its assumption stamp**: five LPA questions
+   each change the number — **three still open, one CONFIRMED, one made
+   MOOT by that confirmation** — so `model.levered` builds the resolved
+   set and EVERY surface that prints a levered figure renders it
    beside that figure — the Returns tab, memo section 6, the workbook
    sheet, and the LP-facing investor summary (item G), which is the only
    one that leaves the firm and so the one where the rule binds hardest.
@@ -225,6 +275,18 @@ output/
    implemented value (`accrual_base`, `am_fee_treatment`, `catch_up`) and
    the other value RAISES, so they deliberately get no form field: a
    dropdown whose second option crashes the run is a trap, not a setting.
+   **Which questions have actually been READ is state, not memory** (item
+   E4): `config.LPA_CONFIRMED` maps a question key to the date the
+   operator confirmed it, and `model.waterfall.assumption_stamp` stamps
+   every row `confirmed` / `moot` / `open`. Three states because "the LPA
+   says this" and "this cannot move the number given something else the
+   LPA says" are different claims — `pref_compounding` is confirmed
+   (annually compounded, 2026-08-09) and that MOOTS `ordering`, since
+   ROC-before-pref only moves a dollar under a simple pref. Nobody read
+   the ordering clause; it stopped mattering. A key absent from
+   `LPA_CONFIRMED` stays `open`, so a new convention cannot inherit
+   someone else's confirmation. The LP-facing caveat follows the rows
+   that still need it rather than blanketing all five.
 8. **Bisection solvers**: Deterministic, ~20 iterations to 0.1% precision.
    There are now TWO max offers and they are both kept (item E4,
    operator's call 2026-08-01): `solve_max_price` targets the 10%
@@ -283,6 +345,83 @@ output/
    `config.XLSM_TEMPLATE_INPUTS["assumed_physical_occupancy"]` (0.90) is
    the one surviving assumed occupancy left anywhere in the codebase, and
    belongs to item E3b, not this decision.
+10. **Single-operator and in-process are CHOSEN, not overlooked.** An
+    external UI review (2026-08-09) filed both as defects; they are not,
+    and the next review will file them again unless the reasoning is
+    written down.
+    - **No owner FK on `Deal`, and every `get_object_or_404(Deal, pk=pk)`
+      is unscoped.** Correct for a system whose signup is closed outright
+      (`webapp.auth_adapter.ClosedSignupAdapter.is_open_for_signup`
+      returns False) and whose only accounts come from
+      `manage.py bootstrap_operator` reading a one-address
+      `ALLOWED_EMAILS`. Adding an owner column and scoped querysets now
+      would buy nothing and cost a migration on live deal history. It
+      becomes real work the day a SECOND operator exists — and on that
+      day it is the FIRST thing to do, before the account is created,
+      because retrofitting ownership onto rows that predate it means
+      guessing who owned what.
+    - **Analysis runs in an in-process daemon thread, not a task queue.**
+      The thread is the symptom; `webapp.services._patched_config` is the
+      cause. It mutates `config.py`'s module-level dicts IN PLACE for the
+      duration of a run — never rebinding, because importers hold the
+      original dict objects — under a process-local `_ANALYSIS_LOCK`.
+      So throughput is one run at a time per process BY CONSTRUCTION, and
+      a queue is not a drop-in swap: global mutable config has to be
+      threaded through as a parameter first, or every worker inherits the
+      same serialization plus its own divergent copy of the patch state.
+      This is the same in-place-mutation coupling decision 6 cites for
+      why the capital and debt blocks are per-deal and never
+      settings-page editable. Sequence any queue work behind that
+      refactor; do not start with the queue.
+    - **Django already sets `SECURE_CONTENT_TYPE_NOSNIFF` and
+      `X_FRAME_OPTIONS`** (both since 3.0), so `cimweb/settings.py` sets
+      neither and restating them would only invite drift. The defaults
+      are pinned by `test_security_headers_present_in_production_branch`,
+      so a future Django flipping one fails CI instead of silently
+      dropping the header. An audit calling them "missing" has read the
+      settings file, not the response headers.
+11. **Every number discloses its provenance** (item T Category 6).
+    `analysis/assumptions.py` is the register: every value that moved an
+    output, with the one of five provenances that produced it — `deal`
+    (entered on the assumptions page), `settings` (a dated
+    `ConfigOverride` row), `fallback` (invented; the Category 4 fill log),
+    `cim` (stated in the CIM), `config` (the shipped default). Precedence
+    is the model's own and each assumption yields exactly ONE row carrying
+    the winner, with `was` holding what it displaced; printing both the
+    superseded and the applied value is how a reader ends up auditing a
+    number the engine never used.
+    **It resolves nothing.** Every value is read from live `config` —
+    patched in place for the duration of a run, so a live read IS the
+    effective value — or through THE resolver the model itself calls
+    (`resolve_hold_years`, `resolve_mgmt_fee_target`, `resolve_target_irr`,
+    `get_regional_benchmarks`). A second derivation would be item T's own
+    defect wearing its badge. The `config_deltas`/`config_defaults`/
+    `deal_overrides`/`cim_snapshot` parameters on `run_analysis` are
+    PROVENANCE ONLY and change no arithmetic; the delta dicts are read for
+    MEMBERSHIP, never for their values, so a delta that disagreed with
+    live config could not make the register print a number the run did not
+    use. `config_defaults` is captured in `webapp.services` BEFORE
+    `_patched_config` mutates anything — inside the lock the live value IS
+    the override, and a register asking config what it used to be would
+    report "settings override, was 8%, now 8%".
+    Surfaces: memo **Appendix B** (B.1 = only the rows a human or a
+    fallback produced, B.2 = the whole register), the workbook's Inputs
+    sheet, and a collapsed panel on the results Summary tab. Appendix A
+    stays beside B rather than folding into it: "what did the model
+    invent?" is a sharper question than "what did the model use?", and
+    nine invented numbers inside a hundred and forty do not read as an
+    answer to it. The LP investor summary is deliberately excluded — it is
+    two pages held by a content budget (item G) and already carries the
+    fill count.
+    **Membership is CI-enforced, not curated**:
+    `test_every_settings_editable_key_is_in_the_register_or_declared_out`
+    walks `override_key_registry()` (derived live from config.py) and
+    fails unless each key produces a row or appears in `NOT_IN_REGISTER`
+    with a stated reason. A new config key defaults to FAILING, because a
+    completeness claim maintained by memory stops being true the first
+    month nobody remembers it. `MARKET_CAP_RATES` is the sole exemption:
+    the table holds twelve cells, one of which priced this exit, and the
+    resolved anchor is reported instead.
 
 ## Manual steps flagged by the program
 - Population verification (if not in CIM)

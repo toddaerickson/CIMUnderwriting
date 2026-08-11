@@ -27,6 +27,7 @@ def generate_memo(property_name: str, cim_data, gate_results: list,
                   levered: dict = None, debt: dict = None,
                   levered_max_offer: dict = None,
                   assumption_fill_log: list = None,
+                  assumption_register: list = None,
                   output_dir: str = ".") -> str:
     """
     Generate the SS Investment Memo .docx.
@@ -86,6 +87,17 @@ def generate_memo(property_name: str, cim_data, gate_results: list,
     # navigate by number. Section 1 carries the count so a reader knows
     # to turn here (item T Category 4).
     _add_assumptions_appendix(doc, assumption_fill_log)
+
+    # ── Appendix B: Assumption Register ─────────────────────────
+    # Item T Category 6, and the item's acceptance criterion: every number
+    # that moved an output, with the provenance that produced it, in one
+    # auditable place. It CONTAINS Appendix A's rows — an invented value
+    # appears here as one `fallback` row among the rest — so an auditor
+    # who reads only this has still seen everything. A stays because
+    # "what did the model invent?" is a sharper question than "what did
+    # the model use?", and nine invented numbers inside a hundred and
+    # forty do not read as an answer to it.
+    _add_assumption_register(doc, assumption_register)
 
     doc.save(filepath)
     return filepath
@@ -317,6 +329,97 @@ def _add_assumptions_appendix(doc, assumption_fill_log):
         row[1].text = format_value(fill)
         row[2].text = fill.source_label
         row[3].text = fill.label
+
+
+def _add_assumption_register(doc, assumption_register):
+    """Appendix B — every number that moved an output, and who chose it.
+
+    Two tables, because they answer to two readers. The first lists only
+    the rows something other than the shipped model produced — a deal
+    entry, a dated settings row, a fallback — which is what is unusual
+    about THIS run and is typically ten to twenty lines. The second is the
+    whole register, grouped by subject, for the auditor.
+
+    Neither table omits anything. A "defaults suppressed for brevity"
+    register asks the reader to trust that absence means default, which is
+    the same act of faith item T exists to end — so the bulk goes to the
+    back of the document rather than out of it.
+    """
+    if not assumption_register:
+        return
+
+    from analysis.assumptions import (CHOSEN, PROVENANCE_LABELS, format_value,
+                                      from_dicts, summarize)
+
+    rows = from_dicts(assumption_register)
+    counts = summarize(rows)
+
+    doc.add_page_break()
+    doc.add_heading("Appendix B. Assumption Register", level=1)
+    doc.add_paragraph(
+        f"Every number this analysis used, with its source. Of "
+        f"{counts['total']} assumptions, {counts['chosen']} came from "
+        f"something other than the model's shipped defaults: "
+        f"{counts['deal']} entered for this deal, {counts['settings']} from "
+        f"a dated settings override, and {counts['fallback']} filled in "
+        f"because the CIM did not state a value. Those are listed first. "
+        f"The full register follows — nothing is omitted from it, so an "
+        f"assumption absent below is an assumption this run did not use."
+    )
+
+    chosen = [r for r in rows if r.provenance in CHOSEN]
+    doc.add_heading("B.1 Assumptions not taken from the model defaults",
+                    level=2)
+    if not chosen:
+        doc.add_paragraph(
+            "None. Every number below is the model's shipped default, and "
+            "every input came from the CIM as stated.")
+    else:
+        table = doc.add_table(rows=1, cols=4)
+        table.style = "Light Grid Accent 1"
+        hdr = table.rows[0].cells
+        hdr[0].text = "Assumption"
+        hdr[1].text = "Value Used"
+        hdr[2].text = "Source"
+        hdr[3].text = "Replaced"
+        for row in chosen:
+            cells = table.add_row().cells
+            cells[0].text = row.label
+            cells[1].text = format_value(row)
+            cells[2].text = PROVENANCE_LABELS.get(row.provenance,
+                                                  row.provenance)
+            cells[3].text = (_register_prior(row) if row.was is not None
+                             else (row.detail or "—"))
+
+    doc.add_heading("B.2 Full register", level=2)
+    table = doc.add_table(rows=1, cols=4)
+    table.style = "Light Grid Accent 1"
+    hdr = table.rows[0].cells
+    hdr[0].text = "Group"
+    hdr[1].text = "Assumption"
+    hdr[2].text = "Value Used"
+    hdr[3].text = "Source"
+    for row in rows:
+        cells = table.add_row().cells
+        cells[0].text = row.group
+        cells[1].text = row.label
+        cells[2].text = format_value(row)
+        cells[3].text = PROVENANCE_LABELS.get(row.provenance, row.provenance)
+
+
+def _register_prior(row):
+    """What the winning value displaced, rendered in its own units.
+
+    Built by swapping the value on a copy rather than by a second
+    formatter: `was` is the same quantity in the same unit as `value`, and
+    a separate rendering path is how one of them ends up printing 0.8
+    where the other prints 80%.
+    """
+    import dataclasses
+
+    from analysis.assumptions import format_value
+
+    return format_value(dataclasses.replace(row, value=row.was))
 
 
 def _add_occupancy_spread_note(doc, cim_data):
@@ -1114,6 +1217,27 @@ _IS_PUNCT = {"’": "'", "‘": "'", "“": '"', "”": '"',
              "—": "-", "–": "-", "…": "...", "·": "-",
              "→": "->", "×": "x", " ": " ", "•": "*"}
 
+#: Shown while `config.INVESTOR_SUMMARY_GC_CLEARED` is False, on the
+#: document's own first line. It is NOT a substitute for
+#: `_SUMMARY_LEGEND`, which is permanent and states what the document is;
+#: this states that nobody has yet cleared it to leave the firm.
+#:
+#: On the page rather than only on screen because the failure this guards
+#: is a file already detached from the app — attached to an email, in a
+#: data room. A caveat that lives beside the download button is invisible
+#: the moment the .docx moves, which is precisely when it matters.
+#:
+#: ASCII only, deliberately. `_is_para` folds typographic punctuation to
+#: ASCII so `page_budget` can measure it, so an em dash here would make
+#: the constant differ from the rendered text — and a test asserting
+#: `_GC_PENDING_NOTICE in body` would fail while the notice was on the
+#: page. `_SUMMARY_LEGEND` is ASCII for the same reason.
+_GC_PENDING_NOTICE = (
+    "INTERNAL DRAFT - NOT CLEARED FOR EXTERNAL DISTRIBUTION. This summary "
+    "has not been reviewed by counsel. Do not send it to any prospective "
+    "investor or third party."
+)
+
 _SUMMARY_LEGEND = (
     "Prepared by CIM Analyst from the seller's Confidential Information "
     "Memorandum supplemented by benchmark assumptions. Figures are "
@@ -1206,6 +1330,7 @@ def _is_build(property_name, cim_data, market_analysis, physical_analysis,
     page1 = PageBudget("Page 1")
     page2 = PageBudget("Page 2")
 
+    _is_gc_notice(doc, page1)
     _is_header(doc, page1, cim_data, profile, property_name)
     _is_target_return(doc, page1, scenario_results, levered)
     _is_assumption_stamp(doc, page1, lev_base)
@@ -1332,6 +1457,23 @@ def _truncate(text, limit: int) -> str:
 
 # ── Page 1 — "What you make" ─────────────────────────────────────────
 
+def _is_gc_notice(doc, budget):
+    """The distribution gate, on the first line of page 1 (item G).
+
+    Read at CALL time via `cfg.` rather than imported by name, so
+    flipping the flag takes effect without a reimport — the scalar rule
+    recorded in CLAUDE.md's config-reads note.
+
+    Charged to the page budget like every other block, because it is
+    real content: a notice that renders without being measured is how a
+    document that fits in the tests overflows in Word.
+    """
+    if cfg.INVESTOR_SUMMARY_GC_CLEARED:
+        return
+    _is_para(doc, budget, "gc/pending", _GC_PENDING_NOTICE,
+             style="LPMicro", bold=True)
+
+
 def _is_header(doc, budget, cim_data, profile, property_name):
     name = _truncate(property_name or profile.get("property_name")
                      or "Property", _IS_MAX_NAME_CHARS)
@@ -1416,9 +1558,37 @@ def _is_assumption_stamp(doc, budget, lev_base):
         # the stamp is missing so no levered FIGURE prints either. Kept as
         # a guard for direct callers.
         return
+    # "Proposed, subject to the final partnership agreement" is the right
+    # sentence for a convention nobody has read the LPA on, and the WRONG
+    # one for a convention the operator confirmed against it — this
+    # document goes to investors, so overstating and understating are both
+    # costly. Rows carry their own status; the caveat follows the rows
+    # that still need it rather than blanketing all five.
+    # Counted in three, not two. A `moot` row was NOT confirmed — nobody
+    # read the LPA on it; it simply stopped being able to move the number.
+    # Folding it into the confirmed count would claim more of the document
+    # had been read than has been, which is the overstatement this whole
+    # sentence exists to avoid.
+    confirmed = sum(1 for r in stamp if r.get("status") == "confirmed")
+    moot = sum(1 for r in stamp if r.get("status") == "moot")
+    total = len(stamp)
+    if confirmed + moot == 0:
+        caveat = ("These are proposed terms, subject to the final "
+                  "partnership agreement.")
+    else:
+        parts = []
+        if confirmed:
+            parts.append(f"{confirmed} of {total} confirmed against the "
+                         f"executed partnership agreement")
+        if moot:
+            parts.append(f"{moot} made moot by it")
+        settled = ", ".join(parts)
+        caveat = (f"{settled}."
+                  if confirmed + moot == total
+                  else f"{settled}; the rest are proposed terms, subject to it.")
+        caveat = caveat[0].upper() + caveat[1:]
     _is_para(doc, budget, "stamp",
-             f"LP net returns are computed under: {labels}. These are "
-             f"proposed terms, subject to the final partnership agreement.",
+             f"LP net returns are computed under: {labels}. {caveat}",
              style="LPMicro", italic=True, color=RGBColor(0x55, 0x55, 0x55))
 
 

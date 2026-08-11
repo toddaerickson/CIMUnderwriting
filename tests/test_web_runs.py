@@ -339,8 +339,13 @@ def fake_run(monkeypatch):
               transaction_costs=None, capital_structure=None,
               market_cap_rate=None, market_cap=None,
               debt_terms=None, waterfall_terms=None, am_fee_pct=None,
-              mgmt_fee_target_pct=None):
+              mgmt_fee_target_pct=None, config_deltas=None,
+              config_defaults=None, deal_overrides=None, cim_snapshot=None):
         calls["cim_data"] = result.cim_data
+        calls["config_deltas"] = config_deltas
+        calls["config_defaults"] = config_defaults
+        calls["deal_overrides"] = deal_overrides
+        calls["cim_snapshot"] = cim_snapshot
         calls["output_dir"] = output_dir
         calls["custom_scenarios"] = custom_scenarios
         calls["custom_va_scenarios"] = custom_va_scenarios
@@ -1035,3 +1040,55 @@ def test_investor_summary_button_appears_only_once_a_run_produced_one(
     # ...and the endpoint itself refuses rather than serving a stale file.
     assert client.get(
         f"/deals/{deal.pk}/download/investor_summary/").status_code == 404
+
+
+# ── Item G: the distribution gate on the download surface ────────────
+
+@pytest.mark.django_db
+def test_the_investor_summary_button_warns_while_gc_has_not_cleared(
+        client, deals_dir, monkeypatch, django_user_model):
+    """MUTATION: drop `"gc_cleared": cfg.INVESTOR_SUMMARY_GC_CLEARED` from
+    the deal_detail context, or the `{% if not gc_cleared %}` block from
+    the template.
+
+    The gate lived in a backlog paragraph and a code comment — the two
+    places the analyst clicking this button will never look.
+    """
+    import config as cfg
+    from webapp.models import AnalysisRun
+
+    monkeypatch.setattr(cfg, "INVESTOR_SUMMARY_GC_CLEARED", False)
+    django_user_model.objects.create_user(username="u", password="p")
+    client.login(username="u", password="p")
+
+    deal = _make_extracted_deal(deals_dir)
+    AnalysisRun.objects.create(deal=deal, status="done", result_json={},
+                               investor_summary_filename="s.docx")
+
+    body = client.get(f"/deals/{deal.pk}/").content.decode()
+    assert "has not been cleared by counsel" in body
+    assert "internal only" in body
+    # The other three downloads are unconditional; only this one is gated.
+    assert "Returns Model (.xlsx)" in body
+
+
+@pytest.mark.django_db
+def test_clearing_the_gate_removes_the_download_caveat(
+        client, deals_dir, monkeypatch, django_user_model):
+    """The flag has to be a flag on this surface too, or the operator
+    clears it in config and the page keeps crying wolf."""
+    import config as cfg
+    from webapp.models import AnalysisRun
+
+    monkeypatch.setattr(cfg, "INVESTOR_SUMMARY_GC_CLEARED", True)
+    django_user_model.objects.create_user(username="u", password="p")
+    client.login(username="u", password="p")
+
+    deal = _make_extracted_deal(deals_dir)
+    AnalysisRun.objects.create(deal=deal, status="done", result_json={},
+                               investor_summary_filename="s.docx")
+
+    body = client.get(f"/deals/{deal.pk}/").content.decode()
+    assert "has not been cleared by counsel" not in body
+    assert "internal only" not in body
+    assert "Investor Summary (.docx)" in body

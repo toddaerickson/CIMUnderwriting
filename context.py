@@ -54,9 +54,32 @@ class AnalysisContext:
     max_offer: dict = field(default_factory=dict)
     va_max_offer: dict = field(default_factory=dict)
 
+    # ── Levered lens ──────────────────────────────────────────────
+    # `debt` is the one sized loan; `levered` carries the LP net IRR and
+    # the assumption stamp that licenses printing it. Both come straight
+    # off `build_returns_model`, which computes them on EVERY run — the
+    # CLI simply discarded them until now, which left the LP-facing
+    # investor summary quoting an unlevered IRR: the one number that
+    # document exists to replace (item G's "still open" note).
+    # `levered_max_offer` is item E4's second max price, solved to the
+    # fund's LP NET target rather than the unlevered one; it does not
+    # replace `max_offer`, which is what the primary gate is read against.
+    debt: dict = field(default_factory=dict)
+    levered: dict = field(default_factory=dict)
+    levered_max_offer: dict = field(default_factory=dict)
+
     # ── Gates ─────────────────────────────────────────────────────
     gate_results: list = field(default_factory=list)
     gate_summary: dict = field(default_factory=dict)
+
+    # Model error-check register (item A) — evaluated ONCE and handed to
+    # every output surface, same discipline as the engine. This was the
+    # last engine-only payload: the CLI's memo skipped its "Model Checks"
+    # block, its workbook skipped the Checks sheet, and its LP summary
+    # footer skipped the check count — the $1-property-tax class of
+    # defect, silently invisible on exactly one of the two entry points.
+    checks: list = field(default_factory=list)
+    check_summary: dict = field(default_factory=dict)
 
     # Assumption fill log (item T Category 4) — every value this run
     # invented because the CIM did not supply it. The CLI is a separate
@@ -64,6 +87,15 @@ class AnalysisContext:
     # for the same reason `market_cap` above does: a disclosure that
     # exists on only one of the two entry points is not a disclosure.
     assumption_fill_log: list = field(default_factory=list)
+
+    # Assumption register (item T Category 6) — every number that moved an
+    # output with the provenance that produced it. Carried here for the
+    # same reason the fill log above is: the CLI is a separate
+    # orchestration, and a disclosure present on only one of the two entry
+    # points is not a disclosure. A CLI run has no ConfigOverride table and
+    # no assumptions page, so its register is `config` / `cim` /
+    # `fallback` — the truth about a CLI run, not a degraded mode.
+    assumption_register: list = field(default_factory=list)
 
     # ── Outputs ───────────────────────────────────────────────────
     memo_path: str = ""

@@ -32,7 +32,7 @@ from docx.shared import Inches
 
 import config as cfg
 from output import MAX_FILENAME_STEM, safe_filename
-from output.memo_writer import (_IS_BODY_PT, _IS_HEAD_PT,
+from output.memo_writer import (_GC_PENDING_NOTICE, _IS_BODY_PT, _IS_HEAD_PT,
                                 _IS_MAX_MITIGANT_CHARS, _IS_MAX_NAME_CHARS,
                                 _IS_MICRO_PT, _SUMMARY_LEGEND, _derive_thesis,
                                 _is_build, generate_investor_summary)
@@ -373,6 +373,58 @@ def test_unlevered_deal_gains_no_orphaned_stamp(tmp_path):
     assert "LP net returns are computed under" not in body
 
 
+def _stamped(tmp_path, statuses):
+    """Render the summary with the STAMP rows carrying `statuses`."""
+    stamp = [{**row, "status": s} for row, s in zip(STAMP, statuses)]
+    levered = {**LEVERED,
+               "base": {**LEVERED["base"], "assumption_stamp": stamp}}
+    return _text(_generate(tmp_path, levered=levered))
+
+
+def test_a_confirmed_convention_is_not_called_a_proposed_term(tmp_path):
+    """This document goes to investors, so overstating and understating
+    are both costly. Calling a convention the operator confirmed against
+    the executed LPA "proposed, subject to the final partnership
+    agreement" understates it — and blanketing all five with that caveat
+    is what the single sentence used to do."""
+    body = _stamped(tmp_path, ["confirmed", "confirmed", "confirmed"])
+    assert "3 of 3 confirmed against the executed partnership agreement" in body
+    assert "proposed terms" not in body
+
+
+def test_a_moot_row_is_never_counted_as_a_confirmed_one(tmp_path):
+    """The overstatement this sentence exists to avoid, caught by the
+    characterization snapshot when the first version of it read "2 of 5
+    are confirmed" for a deal where the operator had confirmed ONE.
+
+    Nobody read the LPA's ordering clause — it stopped being able to move
+    a dollar once the pref was confirmed to compound. Reporting that as a
+    confirmation claims more of the document has been read than has been.
+    """
+    body = _stamped(tmp_path, ["confirmed", "open", "moot"])
+    assert "1 of 3 confirmed against the executed partnership agreement" in body
+    assert "1 made moot by it" in body
+    assert "the rest are proposed terms" in body
+    assert "2 of 3 confirmed" not in body
+
+
+def test_a_fully_settled_stamp_drops_the_proposed_caveat_entirely(tmp_path):
+    body = _stamped(tmp_path, ["confirmed", "moot", "moot"])
+    assert "1 of 3 confirmed" in body and "2 made moot by it" in body
+    assert "proposed terms" not in body
+
+
+def test_an_all_open_stamp_keeps_the_original_caveat_verbatim(tmp_path):
+    """The status field is additive: a stamp from before it existed, or
+    one where nothing is confirmed, must read exactly as it always did."""
+    body = _stamped(tmp_path, ["open", "open", "open"])
+    assert ("These are proposed terms, subject to the final partnership "
+            "agreement.") in body
+    # And a row with no `status` key at all defaults to the same place.
+    assert ("These are proposed terms, subject to the final partnership "
+            "agreement.") in _text(_generate(tmp_path))
+
+
 # ── The plan to achieve the return ───────────────────────────────────
 
 def test_plan_section_carries_initiatives_impacts_and_the_bridge(tmp_path):
@@ -527,18 +579,102 @@ def test_long_names_do_not_collide_across_the_writers():
 
 # ── Opt-in: the only test that re-validates the calibration ──────────
 
-@pytest.mark.skipif(shutil.which("soffice") is None,
-                    reason="LibreOffice not installed; the calibration check "
-                           "is opt-in and deliberately not a CI dependency")
-def test_real_render_is_two_pages(tmp_path):
-    docx = _generate(tmp_path)
-    subprocess.run(["soffice", "--headless", "--convert-to", "pdf",
-                    "--outdir", str(tmp_path), docx],
-                   check=True, capture_output=True, timeout=180)
+def pdf_page_count(raw: bytes) -> int:
+    """Pages in a PDF, from its bytes, without a PDF library.
+
+    Extracted from the render test and unit-tested below BECAUSE it is
+    the fragile half. `/Type /Page` is a PREFIX of `/Type /Pages`, the
+    page-tree root — so the obvious `raw.count(b"/Type /Page")` returns
+    N+1, and the calibration test it backed could only ever have passed
+    on a one-page document. That defect survived because the test around
+    it has never run: it skips wherever LibreOffice is absent, which is
+    everywhere.
+
+    Returns 0 when the structure is compressed into object streams,
+    which the caller treats as "cannot count" rather than "zero pages" —
+    `pdfinfo` is used in preference wherever it exists for exactly that
+    reason.
+    """
+    import re
+
+    return len(re.findall(rb"/Type\s*/Page(?![s/\w])", raw))
+
+
+def _render_page_count(docx_path, tmp_path, soffice) -> int:
+    """Render to PDF and count, preferring `pdfinfo` over byte-scraping.
+
+    Two counters, and the preference order is the point: `pdfinfo` is
+    authoritative and `pdf_page_count` is a heuristic over bytes that a
+    future LibreOffice could compress out of sight. Falling back rather
+    than requiring poppler keeps the LOCAL opt-in run possible with only
+    LibreOffice installed; CI installs both and so never takes the
+    fallback.
+    """
+    subprocess.run([soffice, "--headless", "--convert-to", "pdf",
+                    "--outdir", str(tmp_path), str(docx_path)],
+                   check=True, capture_output=True, timeout=300)
     pdf = next(p for p in tmp_path.iterdir() if p.suffix == ".pdf")
-    raw = pdf.read_bytes()
-    pages = raw.count(b"/Type /Page") or raw.count(b"/Type/Page")
-    assert pages == 2, f"rendered {pages} pages"
+
+    if shutil.which("pdfinfo"):
+        out = subprocess.run(["pdfinfo", str(pdf)], check=True,
+                             capture_output=True, timeout=60).stdout.decode()
+        line = next(ln for ln in out.splitlines() if ln.startswith("Pages:"))
+        return int(line.split(":", 1)[1].strip())
+
+    pages = pdf_page_count(pdf.read_bytes())
+    assert pages, ("could not count pages: no pdfinfo, and the PDF's object "
+                   "structure is not scannable — install poppler-utils")
+    return pages
+
+
+def test_real_render_is_two_pages(tmp_path):
+    """The ONLY thing that re-validates the content budget against a real
+    renderer. Everything else in this file asserts the budget's own
+    arithmetic, which cannot notice that the arithmetic models the wrong
+    thing.
+
+    **`CIM_REQUIRE_SOFFICE=1` turns the skip into a failure**, and the
+    calibration CI job sets it. Without that, an apt-get step that
+    silently installed nothing would leave this test skipping and the job
+    reporting green — a calibration check that validates nothing while
+    looking like it does, which is worse than not having one.
+    """
+    import os
+
+    soffice = shutil.which("soffice") or shutil.which("libreoffice")
+    if soffice is None:
+        if os.environ.get("CIM_REQUIRE_SOFFICE"):
+            pytest.fail(
+                "CIM_REQUIRE_SOFFICE is set but neither soffice nor "
+                "libreoffice is on PATH — the calibration job installed "
+                "nothing and would otherwise have reported green")
+        pytest.skip("LibreOffice not installed; the calibration check is "
+                    "opt-in locally. CI runs it in the `page-budget` job; "
+                    "set CIM_REQUIRE_SOFFICE=1 to make its absence fail.")
+
+    pages = _render_page_count(_generate(tmp_path), tmp_path, soffice)
+    assert pages == 2, (
+        f"rendered {pages} pages, not 2 — the content budget in "
+        f"output/page_budget.py no longer models what Word does. Read that "
+        f"module's docstring before changing a bucket width.")
+
+
+@pytest.mark.parametrize("raw,expected", [
+    # The trap: one page-tree root plus two pages is TWO pages, not three.
+    (b"<</Type /Pages /Count 2>> <</Type /Page>> <</Type /Page>>", 2),
+    # LibreOffice omits the space; the root must still not be counted.
+    (b"<</Type/Pages/Count 2>><</Type/Page>><</Type/Page>>", 2),
+    (b"<</Type /Pages /Count 1>> <</Type /Page /MediaBox[0 0 612 792]>>", 1),
+    # Compressed object streams: unscannable, and reported as such rather
+    # than as a confident zero.
+    (b"%PDF-1.7\n<</Type/ObjStm/N 8>>stream\x00\x01binary", 0),
+])
+def test_the_page_counter_does_not_count_the_page_tree_root(raw, expected):
+    """The unit test the render test cannot be: it runs everywhere,
+    including on the box that has no LibreOffice, so the half of the
+    calibration check most likely to be wrong is covered even when the
+    half that needs a renderer cannot run."""
+    assert pdf_page_count(raw) == expected
 
 
 # ── Review findings ──────────────────────────────────────────────────
@@ -577,3 +713,81 @@ def test_bear_bull_band_alone_cannot_print_without_a_stamp(tmp_path):
     body = _text(_generate(tmp_path, levered={"bear": {"lp_net_irr": 0.012},
                                               "bull": {"lp_net_irr": 0.2891}}))
     assert "1.2%" not in body and "28.9%" not in body
+
+
+# ── Item G: the distribution gate ────────────────────────────────────
+#
+# The gate used to live in a backlog paragraph and a code comment, which
+# are the two places the analyst clicking "Investor Summary (.docx)" will
+# never look. These tests hold it as behaviour instead.
+
+def test_an_uncleared_summary_says_so_on_its_own_first_line(tmp_path,
+                                                            monkeypatch):
+    """MUTATION: delete the `_is_gc_notice` call from `_is_build`.
+
+    On the PAGE, not only on screen: the failure this guards is a file
+    already detached from the app — attached to an email, sitting in a
+    data room — and a caveat beside the download button is invisible the
+    moment the .docx moves.
+    """
+    monkeypatch.setattr(cfg, "INVESTOR_SUMMARY_GC_CLEARED", False)
+    body = _text(_generate(tmp_path))
+    assert _GC_PENDING_NOTICE in body
+    assert body.strip().startswith("INTERNAL DRAFT")
+
+
+def test_clearing_the_gate_removes_the_notice_and_keeps_the_legend(
+        tmp_path, monkeypatch):
+    """The flag has to actually be a flag — a notice that cannot be
+    removed is one the operator will strip by editing the constant, and
+    the legend would go with it.
+
+    The legend is the half that must survive BOTH states: it says what
+    the document is, where the notice only says who has not yet read it.
+    """
+    monkeypatch.setattr(cfg, "INVESTOR_SUMMARY_GC_CLEARED", True)
+    body = _text(_generate(tmp_path))
+    assert _GC_PENDING_NOTICE not in body
+    assert _SUMMARY_LEGEND in body
+
+
+def test_the_notice_is_measured_not_just_written(tmp_path, monkeypatch):
+    """Every block on this document is charged to the page budget, and a
+    notice exempted from that is how a document that fits in the tests
+    overflows in Word.
+
+    Asserts the DIFFERENCE, so it fails if the notice renders free.
+    """
+    def _page1_pt(cleared):
+        monkeypatch.setattr(cfg, "INVESTOR_SUMMARY_GC_CLEARED", cleared)
+        _doc, page1, _page2 = _build()
+        return page1.total_pt
+
+    charged = _page1_pt(False) - _page1_pt(True)
+    assert charged > 0, "the notice rendered without being charged to the page"
+    # And it is charged as the block it is, not as a rounding wobble.
+    assert charged >= _IS_MICRO_PT
+
+
+def test_the_gc_flag_is_not_settings_page_editable():
+    """A legal clearance is not a per-deal underwriting assumption, and an
+    analyst must not be able to clear it from the screen that edits cap
+    rates. It is absent from the override registry by construction; this
+    says so out loud, because the registry is derived LIVE from config
+    and a future refactor could sweep it in."""
+    from webapp.forms import override_key_registry
+
+    keys = override_key_registry()
+    assert not [k for k in keys if "GC_CLEARED" in k.upper()]
+
+
+def test_the_notice_survives_the_punctuation_fold(tmp_path, monkeypatch):
+    """`_is_para` folds typographic punctuation to ASCII so the budget can
+    measure it, so a constant containing an em dash would differ from the
+    text on the page — and every assertion above would pass while the
+    notice was subtly not the constant. Caught in development, pinned
+    here."""
+    monkeypatch.setattr(cfg, "INVESTOR_SUMMARY_GC_CLEARED", False)
+    assert _GC_PENDING_NOTICE.isascii()
+    assert _SUMMARY_LEGEND.isascii()
+    assert _GC_PENDING_NOTICE in _text(_generate(tmp_path))

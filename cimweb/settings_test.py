@@ -1,5 +1,15 @@
 """Test settings: in-memory SQLite, no manifest static storage."""
-from .settings import *  # noqa: F401,F403
+import os
+
+# MUST precede the star-import: settings.py refuses to boot on the
+# insecure default key whenever DEBUG is falsy, and DEBUG defaults to
+# False here exactly as it does in prod. That guard is the point — but a
+# test run is not a deploy, so supply a real (throwaway) key rather than
+# weaken the check. Same shape as the SECURE_SSL_REDIRECT override below:
+# the production default is correct and the test env opts out explicitly.
+os.environ.setdefault("DJANGO_SECRET_KEY", "test-only-key-never-deployed")
+
+from .settings import *  # noqa: E402,F401,F403
 
 DATABASES = {"default": {"ENGINE": "django.db.backends.sqlite3", "NAME": ":memory:"}}
 STORAGES = {
@@ -13,12 +23,6 @@ STORAGES = {
 # behavior) is reachable. Same override managertools' settings_test.py makes
 # via IS_PROD.
 SECURE_SSL_REDIRECT = False
-
-# settings.py also enables HSTS whenever DEBUG is falsy. The test client talks
-# plain HTTP, so HSTS headers are never emitted anyway, but we clear it here for
-# parity with the SSL-redirect override above — the test env asserts no
-# production-only transport rule leaks into a view-level assertion.
-SECURE_HSTS_SECONDS = 0
 
 # Extraction runs inline: a daemon thread opens its own connection to the
 # shared in-memory test DB and its writes commit outside the test

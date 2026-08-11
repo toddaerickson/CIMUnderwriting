@@ -4,10 +4,17 @@ Scoped 2026-07-29. Source: gap triage of the CIM Analyst pipeline against the
 Top Shelf Models "TSM Storage Development Model" ($1,325 Excel), plus defects
 found while reading the DCF code during that triage.
 
-**Status: scoped, not started.** Everything here queues behind the in-flight
-dense-model-view build (`.superpowers/sdd/2026-07-29-dense-model-view/`, T8–T9).
-Each item gets its own `docs/superpowers/plans/<date>-<slug>.md` when it reaches
-the front of the queue — this file is the scope contract, not the build plan.
+**Status (2026-08-09): A, B, D, E1–E4, G and T all shipped.** The header below
+said "scoped, not started" through the whole build; it is corrected here rather
+than deleted, because the build order underneath it is still the record of why
+the items shipped in the sequence they did. Each item got its own
+`docs/superpowers/plans/<date>-<slug>.md` as it reached the front of the queue —
+this file is the scope contract, not the build plan.
+
+Item T's six categories closed in PRs #40, #46, #47, #49, #50 and this one; the
+one acceptance criterion still OPEN across the whole file is the general
+numeric-literal sweep under item T (see its Acceptance list), which the four
+targeted AST guards approximate but do not discharge.
 
 Only the five items the operator selected are scoped here (a, b, d, e, g of the
 triage). Items c (property-tax millage), f (exit-cap comp panel) and h (CapEx
@@ -33,7 +40,7 @@ projection that D, E and G all read from.
 | E2 | Single-tier waterfall (`model/waterfall.py`) | E1 | Medium | **High-risk** |
 | E3 | Levered wiring — E3a seam ⚑ shipped; E3b surfaces ⚑ shipped; E3b XLSM de-literalization ⚑ shipped | E2, D | Medium-large | **High-risk** |
 | E4 | Solver retargeted to LP net IRR | E3 | Small | **High-risk** |
-| T | Transparency consolidation (audit remediation) | E4 | Large | **High-risk** (live literals) |
+| T | Transparency consolidation — Cat 1 ⚑ #40, Cat 2 ⚑ #46, Cat 3 ⚑ #47, Cat 4 ⚑ #49, Cat 5 ⚑ #50, Cat 6 ⚑ shipped | E4 | Large | **High-risk** (live literals) |
 
 Sequence: **A → B → D → E1 → E2 → E3 → E4 → G → T**. A goes first because it is the
 cheapest and because its checks guard B's arithmetic while B changes it. T
@@ -362,13 +369,41 @@ re-runs the solved price forward through the full levered stack.
 confirmations. One tier plus the operator's no-clawback term answers two of
 them. Five still change the number and stay open:
 
-| # | Open question | Build default | Effect if wrong |
-|---|---------------|---------------|-----------------|
-| 1 | Pref simple or compounded, and at what frequency | annually compounded | ~19% swing in GP promote |
-| 2 | Accrual base: contributed/unreturned vs committed | contributed/unreturned | material on slow-draw deals |
-| 3 | ROC-before-pref or pref-before-ROC | ROC first (only matters if simple) | $81,600 vs $72,000 GP on the doc's fixture |
-| 4 | AM fee above the waterfall or netted from LP distributions | above (deal expense) | shifts LP net IRR directly |
-| 5 | Promote on 100% of residual or LP-attributable share only | LP-attributable only | GP overpaid by its co-invest share |
+| # | Open question | Build default | Effect if wrong | Status |
+|---|---------------|---------------|-----------------|--------|
+| 1 | Pref simple or compounded, and at what frequency | annually compounded | ~19% swing in GP promote | **CONFIRMED 2026-08-09** |
+| 2 | Accrual base: contributed/unreturned vs committed | contributed/unreturned | material on slow-draw deals | open |
+| 3 | ROC-before-pref or pref-before-ROC | ROC first (only matters if simple) | $81,600 vs $72,000 GP on the doc's fixture | **MOOT** (see below) |
+| 4 | AM fee above the waterfall or netted from LP distributions | above (deal expense) | shifts LP net IRR directly | open |
+| 5 | Promote on 100% of residual or LP-attributable share only | LP-attributable only | GP overpaid by its co-invest share | open |
+
+**Question 1 is confirmed, and confirming it closed question 3 for free.**
+The operator read the pref clause on 2026-08-09: annually compounded, which
+is what the build already assumed, so no number moved. Question 3 was never
+answered and does not need to be — ROC-before-pref only moves a dollar when
+the pref is SIMPLE, so a compounding pref makes the ordering arithmetically
+inert.
+
+That distinction is carried in the code rather than only here.
+`config.LPA_CONFIRMED` records which questions the document has actually
+been read on (with the date, because who said so and when is the whole
+content of a confirmation), and `model.waterfall.assumption_stamp` stamps
+each row `confirmed` / `moot` / `open`. Three states, not two: "the LPA says
+this" and "this cannot move the number given something else the LPA says"
+are different claims, and collapsing them would let a moot question borrow a
+confirmation it never received. A convention absent from `LPA_CONFIRMED`
+defaults to `open` — fail-open, since a convention that silently inherited
+someone else's confirmation would print as settled while still being a guess.
+
+Downstream, the LP-facing caveat is now conditional: "proposed terms,
+subject to the final partnership agreement" applies only to the rows that
+still need it, with a count when the stamp is mixed. Overstating and
+understating are both costly on the one document that leaves the firm.
+
+**Three of the five remain genuinely open** (2, 4, 5) — and per CLAUDE.md
+decision 7, two of those have exactly one implemented value with the
+alternative raising, so they deliberately get no form field. The LP net IRR
+is closer to decision-grade than it was, and still not there.
 
 Build with these as **named parameters carrying the defaults above**, and print
 the resolved assumption set next to every LP net IRR we display. That converts a
@@ -425,6 +460,21 @@ two disagree, the built document wins. What changed:
   a Calibri width model that raises `InvestorSummaryOverflow` rather than
   shrinking anything. An opt-in `soffice` test re-validates the calibration.
   Read that module's docstring for the conditions under which it is wrong.
+  **CLOSED 2026-08-09.** "Opt-in" meant "never ran": the test skips when
+  LibreOffice is absent, installing LibreOffice needs root, and the dev box
+  has no passwordless sudo. A CI runner does, so the calibration now runs in
+  a dedicated `page-budget` job (`libreoffice-writer` + `poppler-utils` +
+  Carlito, the metric-compatible Calibri clone) with `CIM_REQUIRE_SOFFICE=1`
+  turning the skip into a FAILURE — without that, an apt-get that installed
+  nothing would leave the job green having validated nothing.
+  **The never-run test was also broken**, which is the point of the
+  exercise: `raw.count(b"/Type /Page")` also matches `/Type /Pages`, the
+  page-tree root, so it returned N+1 and could only ever have passed on a
+  one-page document. It is now `pdf_page_count` with a negative lookahead,
+  `pdfinfo` is preferred over it wherever poppler exists, and four
+  parametrized cases unit-test the counter directly — those run everywhere,
+  so the half most likely to be wrong is covered even where the renderer
+  cannot be.
 
 The download button IS wired (migration `0006`, `DOWNLOAD_KINDS` entry,
 conditional button), so the deferral recorded here on 2026-08-02 is closed.
@@ -466,6 +516,56 @@ prospect-discussion document with a plain "not an offer to sell securities"
 legend, and route the final wording past GC before any external distribution.
 The build is not blocked; the distribution is.
 
+**Status 2026-08-09 — the engineering side is CLOSED; the legal sign-off is
+the operator's and remains OPEN.** Two preconditions were already met before
+this change: the legend ships, and the assumption stamp now distinguishes what
+the LPA actually says from what the build assumed (see E4 below). **GC sign-off
+has not been sought** — it is an operator action, not a code change, and no
+amount of further building discharges it.
+
+What changed is that the gate stopped being prose. It lived in this paragraph
+and in a comment above `_SUMMARY_LEGEND` — the two places the analyst clicking
+"Investor Summary (.docx)" will never look. It is now state:
+
+- `config.INVESTOR_SUMMARY_GC_CLEARED` (False). Deliberately NOT
+  settings-page editable — a legal clearance is not a per-deal underwriting
+  assumption, and an analyst must not be able to clear it from the screen
+  that edits cap rates. A test asserts it never enters the override
+  registry, which is derived live from config and could otherwise sweep it
+  in.
+- While False, `_GC_PENDING_NOTICE` renders on the document's own first
+  line, charged to the page budget like every other block. **On the page,
+  not only on screen**: the failure this guards is a file already detached
+  from the app — attached to an email, sitting in a data room — and a
+  caveat beside the download button is invisible the moment the .docx
+  moves.
+- The download button turns amber and carries the caveat, pointing at the
+  review packet.
+- `docs/gc-review-investor-summary.md` is that packet: what the document is,
+  why it needs counsel, the exact wording proposed for clearance, the
+  specific questions, a sign-off table to fill in, and the re-review
+  triggers that put it back in front of counsel.
+
+Flipping the flag to True removes the notice and the caveat and leaves
+`_SUMMARY_LEGEND`, which is permanent and unconditional in both states.
+**Nothing here is legal advice or a substitute for the sign-off** — it makes
+the gate enforceable and the review cheap, and the review itself is still
+counsel's to do.
+
+One thing to hand GC along with the document, carried over from the LPA-stamp
+work: the caveat sentence beneath the LP net figures is now conditional, not
+fixed. It reads "proposed terms, subject to the final partnership agreement"
+only for conventions still unconfirmed, and says so by count when the stamp is
+mixed. That wording is exactly the kind of thing GC will want to set, so route
+the three variants in `memo_writer._is_assumption_stamp`, not just the
+document. It is question 7 in the review packet.
+
+**The 2-page guarantee is no longer unvalidated.** This paragraph used to
+record that `soffice` was absent here and the Calibri calibration had never
+been re-checked. It now runs in CI's `page-budget` job — see the note under
+"Replaced: assert the page count" above — and its first real execution
+confirmed the document renders to exactly 2 pages.
+
 **Acceptance.** Renders to exactly 2 pages with the longest realistic deal
 (longest property name, all three scenarios populated, 3 risks at maximum
 message length) — assert the page count, do not eyeball it. Every number on the
@@ -475,6 +575,15 @@ second source of truth. Degrades cleanly when the levered layer is absent.
 ---
 
 ## T. Transparency consolidation — one assumptions register, no shadow defaults
+
+**A pattern worth naming, since it has now happened twice.** In Categories 2
+and 5 the shipped answer was to REGISTER a family of divergent values behind
+an AST guard rather than collapse it to one number — the three age ladders
+and the nine occupancy numbers. Both read as half-finished against the scope
+text, and neither is: this item's own **Out of scope** clause excludes
+"Re-underwriting any default", and deciding which of three age ladders is
+correct is exactly that. A third such family should expect the same
+treatment rather than a reconciliation.
 
 **Why.** The 2026-08-01 audit of valuation/modeling literals found roughly
 fifty hard-coded assumptions outside [config.py](../config.py). The most
@@ -498,7 +607,7 @@ oracle" discipline applied to the whole pipeline.
 
 **Scope.**
 
-1. **Category 1 — kill the duplicates.** `analysis/risks.py` NOI step-up
+1. **Category 1 — kill the duplicates.** ~~`analysis/risks.py` NOI step-up
    0.15 → `GATES["max_noi_step_up"]`; the population literals in
    `analysis/market.py` and `risks.py` → `GATES["population_3mi"]`; the four
    hard-coded 5%-of-EGR management-fee targets in `analysis/financials.py`
@@ -507,22 +616,70 @@ oracle" discipline applied to the whole pipeline.
    caption → `SOLVER_TARGET_IRR` / `GATES["min_irr_5yr"]`;
    `model/value_add_model.py` imports `COERCED_SCENARIOS` instead of
    re-declaring it. Gate names and risk strings become f-strings over the
-   config values, so labels cannot drift from the tests they describe.
-2. **`analysis/value_add.py` consolidation** — an entire assumptions layer
+   config values, so labels cannot drift from the tests they describe.~~ —
+   **DONE**, PR #40 (`88aaf74`). Every named duplicate now reads from
+   config: `GATES["max_noi_step_up"]` at `analysis/risks.py:195,200` (test
+   and label both); `GATES["population_3mi"]` across `analysis/market.py`
+   and `risks.py`, with the narrative tiers moved to `POPULATION_TIERS` /
+   `OCCUPANCY_TIERS`; `MGMT_FEE_TARGET_PCT` behind the one resolver
+   `analysis/financials.py:26 resolve_mgmt_fee_target`, called from both
+   `financials.py:333` and `value_add.py:182`; `cfg.GATES["min_irr_5yr"]` +
+   `cfg.IRR_STRONG_THRESHOLD` at `output/memo_writer.py:1002-1009` and
+   `output/excel_writer.py:498-518`; `COERCED_SCENARIOS` declared once at
+   `analysis/valuation.py:32`.
+   **Two literals in the touched files deliberately survive**, and both
+   would look like misses to a later reader: the HHI `50_000` at
+   `analysis/market.py:67,89` is a different quantity that happens to equal
+   the population gate (pinned apart by
+   `test_the_hhi_thresholds_are_not_the_population_gate`), and the
+   rent-premium `0.15` at `analysis/risks.py:381` is a different quantity
+   that happens to equal the NOI step-up. That coincidence of value is
+   exactly what made the original duplicates hazardous, so the separation
+   is asserted rather than left to be re-noticed.
+2. **`analysis/value_add.py` consolidation** — ~~an entire assumptions layer
    with no config home: the occupancy-target policy, spread-recovery
    haircut, ECRI trigger/impact, ancillary thresholds, and the renovation
    cost schedule with its age triggers become `VALUE_ADD_ASSUMPTIONS` /
    `RENOVATION_COST` config sections (its `EXPENSE_BENCHMARKS` import sits
-   unused today). The three divergent building-age taxonomies
+   unused today).~~ — **DONE**, PR #46 (`fa36cfb`).
+   `config.py:442 VALUE_ADD_ASSUMPTIONS` holds the occupancy target, the
+   spread-recovery share, the four ECRI keys and the three ancillary keys;
+   `config.py:491 RENOVATION_COST` holds the five capex items with their
+   age triggers, rendered in declaration order at
+   `analysis/value_add.py:215-224`. The dead `EXPENSE_BENCHMARKS` import is
+   gone, guarded at `tests/test_config_single_source.py:1179`.
+   Settings-editability is split on purpose: `VALUE_ADD_ASSUMPTIONS` is a
+   `_PATCHED_DICTS` entry (`webapp/services.py:203`), `RENOVATION_COST` is
+   explicitly excluded as presentation-only (`webapp/services.py:184-189`).
+   **The age half shipped differently from this clause, and the difference
+   is the point.** ~~The three divergent building-age taxonomies
    (value_add 20/15/10, physical 5/15/30, risks 25) reconcile to one
-   schedule.
-3. **Model-layer hard-codes.** Solver brackets → one `SOLVER_BOUNDS` config
+   schedule.~~ They were **REGISTERED, not reconciled** —
+   `config.py:567 ASSET_AGE_LADDERS` names all three
+   (`registry.AGE_BANDS`, `RENOVATION_COST`, `RISK_TRIGGERS`) with an AST
+   guard (`test_no_age_threshold_survives_as_a_bare_literal`) forbidding a
+   fourth from appearing as a bare literal, and a completeness guard beside
+   it. This is the same call Category 5 later made on the nine occupancy
+   numbers, for the same reason: each ladder answers a different
+   underwriting question (when is a building due for renovation vs. how
+   does its age band a comp vs. when does age become a risk trigger), and
+   collapsing them to one schedule is re-underwriting — which this item's
+   own **Out of scope** explicitly excludes. A reader holding to the
+   original wording should call this DONE-with-deviation, not DONE.
+3. **Model-layer hard-codes.** ~~Solver brackets → one `SOLVER_BOUNDS` config
    pair used by both solvers (today static and value-add disagree: NOI/0.03
    vs NOI/0.02); sensitivity-grid axes → `SENSITIVITY_GRID`; `registry.py`'s
    `DEFAULT_EXPENSE_RATIO` / `EXPENSE_RATIO_CLAMP` move to config and
    reconcile with `EXPENSE_BENCHMARKS["opex_revenue_ratio"]` — one statement
    of the default, the clamp bounds, and their relation to the benchmark
-   band.
+   band.~~ — **DONE**, PR #47 (`d6e851e`); the paragraph below this one
+   carries the detail. Two anchors it does not: the single bracket helper
+   is `model/solver.py:114 solver_price_bracket`, pinned by
+   `test_all_three_solvers_bisect_the_same_bracket`, and
+   `registry.py:95 EXPENSE_RATIO_LIMITS` is what remains in `registry.py`
+   after the move — the sanctioned "registry's non-valuation constants"
+   carve-out that this item's own acceptance criterion names, so it is not
+   a literal the sweep should later flag.
    ~~the frozen import-time `SOLVER_TARGET_IRR` binding in
    `model/solver.py` resolves at call time, and the `engine.py` truthiness
    guard becomes `is not None` so a 0.0 target is passable~~ — **DONE**,
@@ -530,7 +687,18 @@ oracle" discipline applied to the whole pipeline.
    target-IRR setting was editable. Both unlevered solvers resolve through
    `model.solver.resolve_target_irr`; three truthiness guards (`engine.py`
    plus the resolution and the stamp-popping guard in `webapp/services.py`)
-   now key on `is None`. The rest of this category is untouched.
+   now key on `is None`.
+   The rest of this category is **DONE** too, in PR #47 — this sentence
+   used to read "the rest of this category is untouched" and was left
+   stale when that PR shipped. `SOLVER_BOUNDS` is now one bracket for all
+   three solvers (static and levered stopped at a 3% implied entry cap,
+   value-add at 2%, and nothing recorded that they differed; resolved at
+   the wider 2%); `SENSITIVITY_GRID` replaced the eighteen literal
+   offsets with span + step, byte-for-byte; and `registry`'s
+   `DEFAULT_EXPENSE_RATIO` / `EXPENSE_RATIO_CLAMP` became
+   `config.EXPENSE_RATIO`, with the clamp DERIVED from the
+   `opex_revenue_ratio` band widened by a named tolerance rather than
+   declared as a second pair.
 4. **Loud fallbacks.** One `assumption_fill_log`: any fallback that fires
    (~~occupancy,~~ market rent, mgmt fee, entry cap) records (field, value
    used, source key) and surfaces in the results UI and the memo appendix.
@@ -597,6 +765,31 @@ oracle" discipline applied to the whole pipeline.
    override / CIM datum / fallback + flag) rendered as a memo section —
    E2's assumption stamp extended to the whole model, and the transparency
    requirement made auditable in one place.
+   **DONE.** `analysis/assumptions.py` is the register; memo **Appendix
+   B** is the section, with the workbook's Inputs sheet and a collapsed
+   Summary-tab panel beside it. All five provenances in the clause above
+   are implemented as a closed vocabulary with the model's own
+   precedence, one row per assumption carrying the winner and `was`
+   carrying what it displaced.
+   Three things the clause did not anticipate:
+   - **It is Appendix B, not a rewrite of Appendix A.** B contains the
+     fill log's rows (as provenance `fallback`), so "auditable in one
+     place" holds — an auditor who reads only B has seen everything. A
+     stays because it answers a sharper question, and nine invented
+     numbers inside a hundred and forty do not read as an answer to it.
+   - **It is two tables, not one.** B.1 lists only what a human or a
+     fallback produced (typically 10-20 rows); B.2 is the full ~130-row
+     register. Neither omits anything: a "defaults suppressed for
+     brevity" appendix asks the reader to trust that absence means
+     default, which is the act of faith this item exists to end.
+   - **`MARKET_CAP_RATES` reports its resolved anchor, not its twelve
+     cells.** Eleven of them moved nothing, and "every number that moved
+     an output" excludes them by its own wording. It is the sole entry in
+     `NOT_IN_REGISTER`, and the exemption is only honest because the cell
+     that DID move is reported with the class and age band it was looked
+     up by.
+   Membership is CI-enforced rather than curated — see the acceptance
+   note below.
 
 **Out of scope.** `output/template_writer.py` (item E3b). The Python↔XLSM
 formula-parity harness (E3b stretch). Re-underwriting any default — this
@@ -615,7 +808,24 @@ threshold), tests.
   moves; every later delta is enumerated and argued in its PR.
 - A grep/AST sweep finds no numeric modeling literals outside `config.py`
   and `registry.py`'s non-valuation constants — enforced by a CI test, not
-  by inspection.
+  by inspection. **DONE**, PR #59 — `tests/test_literal_sweep.py`.
+  ~~STILL OPEN — the one acceptance criterion not met.~~ That text was
+  written by PR #54 and closed by PR #59 two hours later; it is corrected
+  here rather than deleted, because "the doc claimed something the code
+  disproved" is the exact defect this whole item exists to remove, and it
+  is worth one line to record that the item's own paperwork was the last
+  place it happened.
+  The sweep exempts by KIND (unit conversions, `round()` args, subscript
+  indices, identifier-ish dict keys, and the RHS of any module-level
+  UPPER_SNAKE assignment) and falls back to an allowlist keyed by
+  `(module, value)` where every entry carries a reason. The five
+  per-family guards in `tests/test_config_single_source.py` deliberately
+  REMAIN: they name their family and fail with a message about it, where
+  the sweep can only say "line 180". Backstop, not replacement.
+  **One gap survives and is stated rather than implied:** the sweep
+  covers `analysis/` and `model/`, not `output/`, whose literals are
+  overwhelmingly layout. A NEW modeling literal appearing in
+  `memo_writer` or `excel_writer` is therefore still unguarded.
 - Override round-trip: for each formerly-duplicated key, a ConfigOverride
   delta changes every output the audit found divergent (step-up flag,
   population gate and labels, memo recommendation threshold, sensitivity
@@ -627,6 +837,25 @@ threshold), tests.
   refuses the deal instead of producing a fill-log entry).
 - The memo appendix lists every assumption its own run used, with
   provenance — an IC reviewer can audit every number in one place.
+  **MET** (Category 6). Appendix B, ~130 rows, split into what a human
+  chose and the full register. What makes the completeness claim hold is
+  not the appendix but
+  `test_every_settings_editable_key_is_in_the_register_or_declared_out`:
+  it walks `override_key_registry()`, which is derived LIVE from
+  config.py, so a new editable constant appears there the moment it is
+  declared and FAILS until somebody registers it or writes down why it is
+  exempt. A second guard covers the levered constants
+  (`DEBT_TERMS`, `WATERFALL_TERMS`, `AM_FEE_PCT`, ...), which are per-deal
+  only and so absent from that registry — the first guard's silence about
+  a key is not permission to omit a number that moves every levered
+  figure in the memo. A third holds `CIM_FIELDS` against the assumptions
+  page's own input list, so a new box cannot appear on the form and
+  silently miss the appendix.
+  Both entry points disclose the same register: a CLI run has no
+  `ConfigOverride` table and no assumptions page, so its provenances are
+  `config` / `cim` / `fallback` only, and that is pinned by a test rather
+  than left to drift — Category 4 shipped exactly that asymmetry once,
+  with the fill log reaching none of the CLI's three writers.
 
 ---
 

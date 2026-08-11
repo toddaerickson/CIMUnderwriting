@@ -290,6 +290,38 @@ def test_upload_validation(client, operator, deals_dir):
 
 
 @pytest.mark.django_db
+def test_upload_rejects_non_pdf_wearing_a_pdf_name(client, operator, deals_dir):
+    """The extension is the uploader's claim; the header is the fact.
+
+    Without the magic-byte check this saved a deal folder and failed
+    later on the extraction thread, where the reason ('not a PDF') is no
+    longer attached to the field that caused it."""
+    from webapp.models import Deal
+    disguised = SimpleUploadedFile(
+        "expo.pdf", b"PK\x03\x04 this is really a zip",
+        content_type="application/pdf")
+    resp = client.post("/analyze/", {"cim": disguised})
+    assert resp.status_code == 422
+    assert b"not a PDF" in resp.content
+    assert Deal.objects.count() == 0
+
+
+@pytest.mark.django_db
+def test_upload_accepts_real_pdf_header_after_the_probe(client, operator,
+                                                        deals_dir, fake_extract):
+    """The header probe must rewind: reading the first bytes and failing
+    to seek(0) would truncate every saved CIM by 5 bytes."""
+    from webapp.models import Deal
+    body = b"%PDF-1.4 real body bytes"
+    client.post("/analyze/", {"cim": SimpleUploadedFile(
+        "expo.pdf", body, content_type="application/pdf")})
+    deal = Deal.objects.get()
+    saved = os.path.join(deal.deal_dir, "inputs", "expo.pdf")
+    with open(saved, "rb") as fh:
+        assert fh.read() == body
+
+
+@pytest.mark.django_db
 def test_upload_slug_collision_gets_v2(client, operator, deals_dir, fake_extract,
                                        monkeypatch):
     from webapp import services

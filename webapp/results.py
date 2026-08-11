@@ -89,6 +89,46 @@ def fill_log_context(r) -> dict:
                            "label": f.label} for f in rows]}
 
 
+def register_context(r) -> dict:
+    """Assumption register → template rows (item T Category 6).
+
+    Third sibling of `checks_context` and `fill_log_context`, and the
+    widest of the three: the check register asks whether the inputs are
+    self-consistent, the fill log which of them the CIM never supplied,
+    and this one where EVERY number came from.
+
+    Two row lists off one register rather than two passes over the data,
+    because they must never disagree about which rows are which. Ordering
+    comes from `assumptions.collect`, which grouped them when the run was
+    recorded — re-sorting here would give a stored run and a live one two
+    different orders for the same register.
+    """
+    import dataclasses
+
+    from analysis import assumptions
+
+    rows = assumptions.from_dicts(r.get("assumption_register") or [])
+
+    def _row(a):
+        return {"key": a.key, "group": a.group, "label": a.label,
+                "value": assumptions.format_value(a),
+                "source": a.provenance_label,
+                "chosen": a.chosen,
+                # `was` renders through the SAME formatter as `value`, by
+                # swapping the field on a copy: it is the same quantity in
+                # the same unit, and a second rendering path is how one of
+                # them ends up printing 0.8 where the other prints 80%.
+                "was": (assumptions.format_value(
+                    dataclasses.replace(a, value=a.was))
+                    if a.was is not None else ""),
+                "detail": a.detail}
+
+    all_rows = [_row(a) for a in rows]
+    return {"register_rows": all_rows,
+            "register_chosen": [row for row in all_rows if row["chosen"]],
+            "register_counts": assumptions.summarize(rows)}
+
+
 def _metric_rows(block, metrics):
     rows = []
     for label, key, fmt in metrics:

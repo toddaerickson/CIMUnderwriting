@@ -3,9 +3,18 @@
 ## What this guarantees, and what it does not
 
 python-docx does not paginate. It emits OOXML; the RENDERER decides where
-pages break. So "assert the page count" cannot be done in this repo —
-`soffice`/`libreoffice` are not installed and adding one is a heavyweight
-dependency for a single assertion.
+pages break. So "assert the page count" cannot be done in the library
+itself, and LibreOffice is too heavy to make a dependency of every test
+run — installing it needs root, which the dev box does not have.
+
+It is now a dependency of exactly ONE CI job. `.github/workflows/test.yml`
+has a `page-budget` job that installs `libreoffice-writer`,
+`poppler-utils` and Carlito, then runs
+`tests/test_investor_summary.py::test_real_render_is_two_pages` with
+`CIM_REQUIRE_SOFFICE=1` so a failed install fails the job instead of
+skipping it green. That job is what re-validates everything below against
+a renderer; the rest of the suite can only check that this module's
+arithmetic is self-consistent, never that it models the right thing.
 
 The answer is to **constrain Word's layout rather than predict it**. The
 writer pins page geometry, uses named styles with EXACTLY line spacing,
@@ -27,9 +36,7 @@ content exceeds the page.
 
 The bucket widths are deliberately over-wide, so the estimate errs toward
 declaring overflow that would not have happened rather than passing a
-document that overflows. `tests/test_investor_summary.py` carries an
-opt-in `soffice` render-and-count that is the only thing which
-re-validates the calibration.
+document that overflows.
 """
 
 import math

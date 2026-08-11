@@ -45,6 +45,49 @@ POPULATION_TIERS = {
     "strong_density": 100_000,     # top narrative tier — "strong demand driver"
 }
 
+# ── Median-household-income narrative tiers ─────────────────────────
+#
+# The same lane as POPULATION_TIERS: these GRADE a trade area's income,
+# they do not pass or fail a deal. No gate reads them.
+#
+# They were four bare literals across two functions in `analysis/market.py`
+# and they did not agree with each other: the narrative graded at
+# 75k/50k while the positives/negatives list graded at 65k/45k, so the
+# same deal could read "middle-income, adequate purchasing power" in one
+# paragraph and "below-average household income" in the next. Naming them
+# does not reconcile that — `narrative_*` and `signal_*` stay separate
+# because a three-band prose grade and a two-sided positive/negative
+# signal are different questions — but it makes the disagreement visible
+# and overridable instead of buried.
+#
+# `adequate` (50_000) EQUALS `GATES["population_3mi"]` by coincidence of
+# value only. They are unrelated quantities and
+# `test_the_hhi_thresholds_are_not_the_population_gate` exists to keep a
+# later edit from "consolidating" them.
+HHI_TIERS = {
+    "narrative_affluent": 75_000,   # "supports premium pricing"
+    "narrative_adequate": 50_000,   # "adequate purchasing power"; also hhi_adequate
+    "signal_above_average": 65_000,  # risk-list positive
+    "signal_below_average": 45_000,  # risk-list negative
+}
+
+# ── Risk-register trigger thresholds ────────────────────────────────
+#
+# When `analysis/risks.py` RAISES a risk, and at what severity. Like the
+# tiers above these grade rather than gate — no deal passes or fails on
+# them — but they were bare literals inside three separate `if`
+# statements, which is the shape the 2026-08-01 audit was written about.
+#
+# `replacement_premium_high` (0.15) EQUALS `GATES["max_noi_step_up"]` by
+# coincidence of value only; they are unrelated quantities, and that
+# coincidence is precisely what made the pre-Category-1 duplicates
+# hazardous. Keep them apart.
+RISK_TRIGGERS_THRESHOLDS = {
+    "bear_irr_floor": 0.05,             # bear IRR below this raises a risk
+    "scenario_spread_wide": 0.08,       # base-minus-bear spread above this is "wide"
+    "replacement_premium_high": 0.15,   # premium to replacement cost: High vs Medium
+}
+
 # ── Occupancy narrative tiers ───────────────────────────────────────
 #
 # NARRATIVE tiers, not screens — the same lane as POPULATION_TIERS above.
@@ -880,6 +923,32 @@ WATERFALL_TERMS = {
     "catch_up": False,              # scoped out; True raises
 }
 
+# ── Which LPA questions have actually been read (item E4) ───────────
+# The five conventions above shipped as BUILD DEFAULTS — plausible
+# choices standing in for a document nobody had opened. `model.waterfall.
+# assumption_stamp` prints all five beside every LP net IRR, and the rule
+# is that a stamped figure is a labeled assumption, not a decision-grade
+# number.
+#
+# This dict is the difference between the two. A key here means the LPA
+# was read on that question and the value above is what it says — so the
+# stamp can stop calling it "proposed". A question NOT here stays open,
+# and the default is FAILING-open: adding a convention to WATERFALL_TERMS
+# without adding it here leaves it correctly labelled as an assumption
+# rather than silently inheriting someone else's confirmation.
+#
+# The value is the date the operator confirmed it, kept because "who
+# said so and when" is the whole content of a confirmation. Do not add a
+# key here from a plan doc, a design note, or an inference — only from
+# the executed partnership agreement.
+LPA_CONFIRMED = {
+    # Operator confirmed 2026-08-09: the pref compounds annually. This is
+    # the question worth the most — the design doc measured ~19% of GP
+    # promote riding on it — and confirming it MOOTS `ordering` for free,
+    # since ROC-before-pref only moves a dollar when the pref is simple.
+    "pref_compounding": "2026-08-09",
+}
+
 # ── Asset-Management Fee (item E3a) ─────────────────────────────────
 # The GP's 1% annual management fee. Charged ABOVE the waterfall — it
 # reduces distributable cash before the LP/GP split — which is open LPA
@@ -915,6 +984,48 @@ AM_FEE_BASE = "invested_equity"     # the only base implemented; others raise
 # GP_AM_FEE_RATE and GP_PROMOTE_PCT in item E3b.
 GP_ENTITY_NAME = os.environ.get("GP_NAME", "Marathon CRE")
 LP_ENTITY_NAME = "LP Group"
+
+# ── General Counsel gate on the investor summary (item G) ───────────
+# The LP-facing summary is the one document this pipeline produces that
+# is written FOR someone outside the firm, which edges it toward
+# securities marketing. Item G recorded that the build is not blocked but
+# the DISTRIBUTION is, behind the operator's General Counsel — and then
+# left that gate living in a backlog paragraph and a code comment, which
+# are the two places the analyst clicking "Investor Summary (.docx)"
+# will never look.
+#
+# This flag is that gate, as state rather than prose. While it is False
+# the document carries a notice on its own first line and the download
+# button carries a caveat; flipping it to True removes both and leaves
+# `_SUMMARY_LEGEND`, which is permanent and unconditional either way.
+#
+# **Flip this only on a real sign-off**, and record who cleared what and
+# when in `docs/gc-review-investor-summary.md` — a boolean with no
+# audit trail behind it is worth less than the comment it replaced. The
+# wording GC reviews is `_SUMMARY_LEGEND` plus the section headings
+# enumerated in that document; changing either after clearance puts the
+# document back in front of counsel.
+#
+# Deliberately NOT settings-page editable and NOT a _PATCHED_DICTS entry:
+# a legal clearance is not a per-deal underwriting assumption, and an
+# analyst must not be able to clear it from the same screen that edits
+# cap rates.
+#
+# ── SET TO True ON 2026-08-09 UNDER AN ASSUMED CLEARANCE ────────────
+# Operator direction: proceed as though counsel approves. This is an
+# ASSUMED approval, not an obtained one — no lawyer has read the
+# document, and `docs/gc-review-investor-summary.md` records it that way
+# rather than as a sign-off, so a later reader cannot mistake it for one.
+# Every question in that packet now carries an asterisk footnoting
+# "not legal advice", for the same reason.
+#
+# What this actually changed: the pre-clearance notice no longer renders
+# on the document's first line. `_SUMMARY_LEGEND` is unconditional and
+# still does — it is the half that says what the document is, where the
+# notice only said who had not yet read it. The re-review triggers in
+# the packet still apply, and a real clearance should replace this
+# comment rather than sit alongside it.
+INVESTOR_SUMMARY_GC_CLEARED = True
 
 # ── XLSM Underwriting Template Inputs (item E3b) ────────────────────
 # Assumptions the .xlsm underwriting template asks for that the Python

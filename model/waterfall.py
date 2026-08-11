@@ -472,15 +472,52 @@ def _irr(cash_flows):
     return float(irr)
 
 
+#: What the `status` on a stamp row means. Three states, not two, because
+#: "we read the LPA and it says this" and "this cannot move a dollar given
+#: something else we read" are different claims, and collapsing them would
+#: let a moot question borrow a confirmation it never received.
+STATUS_CONFIRMED = "confirmed"   # the LPA was read on this question
+STATUS_MOOT = "moot"             # cannot change the number, given a confirmation
+STATUS_OPEN = "open"             # still a build default standing in for the LPA
+
+
+def _stamp_status(key, terms):
+    """`confirmed` / `moot` / `open` for one stamp row.
+
+    Reads `config.LPA_CONFIRMED` live rather than at import, so a run
+    under `_patched_config` sees the same answer the rest of the model
+    does. Unknown keys fall through to `open` — the safe direction, since
+    a convention that quietly inherited someone else's confirmation would
+    print as settled while still being a guess.
+    """
+    if key in (getattr(cfg, "LPA_CONFIRMED", None) or {}):
+        return STATUS_CONFIRMED
+    # `ordering` only moves a dollar when the pref is simple. Once the
+    # compounding question is CONFIRMED to be compounding, ROC-before-pref
+    # versus pref-first is arithmetically inert — so it is moot, not
+    # confirmed. Nobody read the LPA's ordering clause; it just stopped
+    # mattering. If compounding is merely defaulted, this stays open.
+    if (key == "ordering"
+            and terms.pref_compounding != COMPOUNDING_SIMPLE
+            and "pref_compounding" in (getattr(cfg, "LPA_CONFIRMED", None) or {})):
+        return STATUS_MOOT
+    return STATUS_OPEN
+
+
 def assumption_stamp(terms: WaterfallTerms) -> list:
-    """The five open LPA questions and how this run answered them.
+    """The five LPA questions, how this run answered them, and whether
+    anyone has actually read the document on each.
 
     The scope contract's rule: "Do not let an LP net IRR leave the
-    building without its stamp." Every one of these still changes the
-    number, so a displayed LP net IRR is a labeled assumption, not a
-    decision-grade figure, until the LPA is read.
+    building without its stamp." Each row carries a `status` —
+    `confirmed` (the LPA was read; `config.LPA_CONFIRMED` records when),
+    `moot` (cannot move the number given a confirmation elsewhere), or
+    `open` (a build default standing in for the document). A figure whose
+    stamp is all-`open` is a labeled assumption; one with confirmations is
+    that much closer to decision-grade, and the reader is entitled to see
+    which.
     """
-    return [
+    rows = [
         {"key": "pref_compounding",
          "question": "Pref simple or compounded, and at what frequency",
          "value": terms.pref_compounding,
@@ -515,6 +552,11 @@ def assumption_stamp(terms: WaterfallTerms) -> list:
                   f"LP-attributable residual "
                   f"({1 - terms.gp_coinvest_pct:.0%} of it)"},
     ]
+    for row in rows:
+        row["status"] = _stamp_status(row["key"], terms)
+        if row["status"] == STATUS_CONFIRMED:
+            row["confirmed_on"] = cfg.LPA_CONFIRMED[row["key"]]
+    return rows
 
 
 def run_waterfall(contributions, distributions,

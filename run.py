@@ -149,7 +149,8 @@ def stage_valuate(ctx: AnalysisContext):
     """[4/7] Run valuation scenarios and [5/7] solve max offer prices."""
     logger.info("\n[4/7] Running valuation scenarios...")
     from model.returns_model import build_returns_model
-    from model.solver import solve_max_price, solve_max_price_value_add
+    from model.solver import (solve_max_price, solve_max_price_levered,
+                              solve_max_price_value_add)
     from model.value_add_model import detect_value_add, run_value_add_scenarios
 
     if ctx.expense_ratio:
@@ -190,6 +191,13 @@ def stage_valuate(ctx: AnalysisContext):
     ctx.scenario_results = model["scenarios"]
     ctx.sensitivity = model["sensitivity"]
     ctx.sources_uses = model["sources_uses"]
+    # `build_returns_model` sizes the loan and runs the waterfall on every
+    # call — these two keys were computed and thrown away here, which is
+    # the whole of the CLI's levered gap. Keeping them costs nothing and
+    # the assumption stamp rides along inside `levered`, so no surface can
+    # print an LP net IRR the stamp does not cover.
+    ctx.debt = model["debt"]
+    ctx.levered = model["levered"]
 
     # Log static scenario summary
     logger.info("  Static DCF Scenarios:")
@@ -242,6 +250,26 @@ def stage_valuate(ctx: AnalysisContext):
             discount = (ctx.asking_price - mp) / ctx.asking_price
             logger.info("  Discount to asking: %.1f%%", discount * 100)
 
+    # The levered max offer (item E4). A SECOND max price, not a
+    # replacement: `max_offer` above is solved to the unlevered target the
+    # primary gate is read against, this one to the fund's LP NET target
+    # after debt service, the AM fee and the promote. Deliberately NOT
+    # passed a target here — `solve_max_price_levered` resolves
+    # `config.SOLVER_TARGET_LP_NET_IRR` itself, and handing it the
+    # unlevered target would quietly re-price the levered answer. Same
+    # reasoning as engine.py's comment at its own call site.
+    ctx.levered_max_offer = solve_max_price_levered(
+        adjusted_ttm_noi=ctx.adjusted_noi,
+        capex=ctx.capex,
+        expense_ratio=ctx.expense_ratio,
+        market_cap=ctx.market_cap,
+    )
+    lev_mp = ctx.levered_max_offer.get("max_price")
+    if lev_mp:
+        logger.info("  Levered max price: $%s (target LP net IRR: %.1f%%)",
+                    f"{lev_mp:,.0f}",
+                    ctx.levered_max_offer.get("target_irr", 0) * 100)
+
     if ctx.va_results:
         ctx.va_max_offer = solve_max_price_value_add(
             cim_data=ctx.cim_data,
@@ -272,6 +300,23 @@ def stage_gates_and_risks(ctx: AnalysisContext):
         ctx.risk_analysis = ctx._analyze_risks()
         del ctx._analyze_risks
 
+    # Model error-check register (item A) — evaluated ONCE, exactly as
+    # engine.run_analysis does it, then handed to all three writers. It
+    # runs HERE and not in stage_valuate because `va_results` is one of
+    # its inputs and only exists after the value-add pass above. This was
+    # the last engine-only payload: without it the CLI's memo skipped the
+    # "Model Checks" block, the workbook skipped the Checks sheet, and a
+    # $1 property-tax line — the exact defect item A was built to catch —
+    # was flagged on the web path and silent on this one.
+    from analysis import checks as model_checks
+    _check_results = model_checks.run_checks(model_checks.input_from_cim(
+        ctx.cim_data, ctx.financial_analysis, ctx.physical_analysis,
+        ctx.scenario_results, ctx.sources_uses,
+        va_results=ctx.va_results, market_cap=ctx.market_cap,
+        debt=ctx.debt))
+    ctx.checks = model_checks.to_dicts(_check_results)
+    ctx.check_summary = model_checks.summarize(_check_results)
+
     # Assembled ONCE, here, exactly as engine.run_analysis does it, and
     # then handed to all three writers below — the CLI's memo, workbook
     # and LP summary must disclose the same assumptions the web app's do
@@ -284,6 +329,22 @@ def stage_gates_and_risks(ctx: AnalysisContext):
         market_cap=ctx.market_cap,
         va_results=ctx.va_results,
         expense_ratio=ctx.expense_ratio))
+
+    # The assumption register (item T Category 6), assembled the same way
+    # and for the same reason. No `config_deltas`, `deal_overrides` or
+    # `cim_snapshot` are passed because a CLI run HAS none — there is no
+    # settings table and no assumptions page here — so every number
+    # resolves to the model default, the CIM, or a logged fallback. That
+    # is the honest answer for this entry point, and
+    # `test_a_cli_register_never_claims_a_settings_or_deal_override`
+    # pins it so a later edit cannot quietly invent a provenance the CLI
+    # cannot have.
+    from analysis import assumptions as model_assumptions
+    ctx.assumption_register = model_assumptions.to_dicts(
+        model_assumptions.collect(
+            cim_data=ctx.cim_data,
+            fill_log=ctx.assumption_fill_log,
+            market_cap=ctx.market_cap))
 
 
 def stage_output(ctx: AnalysisContext, comp_db):
@@ -308,6 +369,11 @@ def stage_output(ctx: AnalysisContext, comp_db):
         va_max_offer=ctx.va_max_offer,
         sources_uses=ctx.sources_uses,
         assumption_fill_log=ctx.assumption_fill_log,
+        assumption_register=ctx.assumption_register,
+        checks=ctx.checks,
+        levered=ctx.levered,
+        debt=ctx.debt,
+        levered_max_offer=ctx.levered_max_offer,
         output_dir=ctx.output_dir,
     )
     logger.info("  Memo: %s", ctx.memo_path)
@@ -332,6 +398,9 @@ def stage_output(ctx: AnalysisContext, comp_db):
             gate_summary=ctx.gate_summary,
             sources_uses=ctx.sources_uses,
             assumption_fill_log=ctx.assumption_fill_log,
+            check_summary=ctx.check_summary,
+            levered=ctx.levered,
+            debt=ctx.debt,
             output_dir=ctx.output_dir,
         )
         logger.info("  Investor summary: %s", ctx.investor_summary_path)
@@ -349,6 +418,8 @@ def stage_output(ctx: AnalysisContext, comp_db):
         va_max_offer=ctx.va_max_offer,
         sources_uses=ctx.sources_uses,
         assumption_fill_log=ctx.assumption_fill_log,
+        assumption_register=ctx.assumption_register,
+        checks=ctx.checks,
         output_dir=ctx.output_dir,
     )
     logger.info("  Model: %s", ctx.excel_path)

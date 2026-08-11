@@ -336,6 +336,8 @@ def analyze(request):
         errors.append("A CIM PDF is required.")
     elif not cim.name.lower().endswith(".pdf"):
         errors.append("The CIM must be a .pdf file.")
+    elif not services.looks_like_pdf(cim):
+        errors.append("The CIM is named .pdf but its contents are not a PDF.")
     optional = {}
     for key, label in (("rent_roll", "Rent roll"), ("financials", "Financials")):
         f = request.FILES.get(key)
@@ -444,6 +446,10 @@ def deal_detail(request, pk):
         "show_progress": state in ("running", "failed") and latest and
                          latest.pk != (done_run.pk if done_run else None),
         "run_failed": state == "failed",
+        # Item G's distribution gate. Read at request time via `cfg.` so
+        # flipping the flag takes effect on the next page load rather
+        # than on the next restart.
+        "gc_cleared": cfg.INVESTOR_SUMMARY_GC_CLEARED,
     }
     if done_run:
         r = done_run.result_json or {}
@@ -487,6 +493,10 @@ def deal_detail(request, pk):
             # fill log says which of them the CIM never supplied (item T
             # Category 4).
             ctx.update(results_ctx.fill_log_context(r))
+            # ...and the register says where every OTHER number came
+            # from, which is the question the two above leave open (item
+            # T Category 6).
+            ctx.update(results_ctx.register_context(r))
             ctx.update(results_ctx.capital_context(r))
         elif tab == "returns":
             ctx.update(results_ctx.returns_context(r))
