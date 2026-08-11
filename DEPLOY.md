@@ -76,9 +76,10 @@ remain open at cutover. Neither blocks go-live (single allowlisted user, HTTPS
 enforced by Render + `SECURE_SSL_REDIRECT`), but they are decisions, not
 oversights — close them shortly after the cutover proves stable:
 
-- **HSTS + `check --deploy`**: set `SECURE_HSTS_SECONDS` (start small, e.g.
-  3600, before committing to a long max-age) in the production settings block,
-  and add `python manage.py check --deploy` to CI so regressions surface.
+- **`check --deploy`**: add `python manage.py check --deploy` to CI so
+  regressions surface. (The HSTS half of this item shipped in PR #51 —
+  `SECURE_HSTS_SECONDS = 31536000` at `cimweb/settings.py:140`, with preload
+  deliberately off; only the CI check remains open.)
 - **`/admin/` exposure decision**: the Django admin is reachable on the public
   host, gated by the same allowlisted login. Decide: keep it (operator
   convenience — the runbook's verification step uses it), or restrict it.

@@ -11,14 +11,20 @@ the items shipped in the sequence they did. Each item got its own
 `docs/superpowers/plans/<date>-<slug>.md` as it reached the front of the queue —
 this file is the scope contract, not the build plan.
 
-Item T's six categories closed in PRs #40, #46, #47, #49, #50 and this one; the
-one acceptance criterion still OPEN across the whole file is the general
-numeric-literal sweep under item T (see its Acceptance list), which the four
-targeted AST guards approximate but do not discharge.
+Item T's six categories closed in PRs #40, #46, #47, #49, #50 and this one.
+~~The one acceptance criterion still OPEN across the whole file is the general
+numeric-literal sweep under item T~~ — that sweep closed in PR #59 (and PR #64
+extended it into `output/`); for a while this header said OPEN while the
+Acceptance list below said DONE, and the self-contradiction is corrected here
+rather than deleted because a file disagreeing with itself is the same defect
+class this item existed to remove.
 
 Only the five items the operator selected are scoped here (a, b, d, e, g of the
-triage). Items c (property-tax millage), f (exit-cap comp panel) and h (CapEx
-input toggle) stay in the loose queue.
+triage). Items c (property-tax millage) and f (exit-cap comp panel) stay in the
+loose queue. Item h (CapEx input toggle) was listed loose but actually shipped
+folded into item D — the CapEx basis toggle lives at `webapp/forms.py`
+(`CAPITAL_KEYS` / `capex_basis`) and `engine.py:355-375`; see
+`docs/superpowers/plans/2026-07-31-item-d-sources-uses.md`.
 
 Item T (transparency consolidation) joined 2026-08-01, sourced from a
 hard-coded-assumptions audit of the pipeline rather than the TSM triage. Its
@@ -479,10 +485,11 @@ two disagree, the built document wins. What changed:
 The download button IS wired (migration `0006`, `DOWNLOAD_KINDS` entry,
 conditional button), so the deferral recorded here on 2026-08-02 is closed.
 
-Still open: the CLI's copy carries no LP net IRR — `AnalysisContext` has
-never held a `levered`/`debt` payload and `run.py` never computes one. That
-is a pre-existing CLI gap the IC memo shares, not something this item
-introduced.
+~~Still open: the CLI's copy carries no LP net IRR~~ — closed by PR #55:
+`AnalysisContext` now carries `debt` / `levered` / `levered_max_offer`
+(`context.py:58-69`) and `run.py` computes and prints them
+(`run.py:194-200,253-271`), so the CLI's memo and investor summary render the
+same levered payload the web path does.
 
 **Why.** [output/memo_writer.py](../output/memo_writer.py) produces a
 10-section internal IC memo. There is no condensation for anyone outside the
@@ -527,7 +534,11 @@ What changed is that the gate stopped being prose. It lived in this paragraph
 and in a comment above `_SUMMARY_LEGEND` — the two places the analyst clicking
 "Investor Summary (.docx)" will never look. It is now state:
 
-- `config.INVESTOR_SUMMARY_GC_CLEARED` (False). Deliberately NOT
+- `config.INVESTOR_SUMMARY_GC_CLEARED` (True since PR #61 — under an
+  **ASSUMED** approval on the operator's direction, 2026-08-09, not a real
+  GC review; the sign-off table in `docs/gc-review-investor-summary.md`
+  names the reviewer as "none — assumed" and a real review REPLACES that
+  row). Deliberately NOT
   settings-page editable — a legal clearance is not a per-deal underwriting
   assumption, and an analyst must not be able to clear it from the screen
   that edits cap rates. A test asserts it never enters the override
@@ -822,10 +833,15 @@ threshold), tests.
   per-family guards in `tests/test_config_single_source.py` deliberately
   REMAIN: they name their family and fail with a message about it, where
   the sweep can only say "line 180". Backstop, not replacement.
-  **One gap survives and is stated rather than implied:** the sweep
+  **One gap survives and is stated rather than implied:** the main sweep
   covers `analysis/` and `model/`, not `output/`, whose literals are
-  overwhelmingly layout. A NEW modeling literal appearing in
-  `memo_writer` or `excel_writer` is therefore still unguarded.
+  overwhelmingly layout. PR #64 narrowed the `output/` gap by SHAPE:
+  comparison-shaped literals there (a threshold deciding what a document
+  says) are now swept by
+  `test_no_threshold_comparison_hides_in_the_output_layer`, ratcheted
+  from zero. A NEW non-comparison modeling literal in `memo_writer` or
+  `excel_writer` — one hiding in a constructor or arithmetic rather than
+  a comparison — remains the stated residual gap.
 - Override round-trip: for each formerly-duplicated key, a ConfigOverride
   delta changes every output the audit found divergent (step-up flag,
   population gate and labels, memo recommendation threshold, sensitivity

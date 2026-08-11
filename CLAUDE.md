@@ -434,4 +434,8 @@ output/
 ```
 pip install -r requirements.txt
 ```
-Requires: pdfplumber, python-docx, openpyxl, numpy-financial
+`requirements.txt` is the authority. The pipeline needs pdfplumber,
+python-docx, openpyxl, numpy-financial; the web app (the primary interface)
+additionally needs the pinned Django stack — Django, django-allauth,
+django-environ, django-htmx, whitenoise, gunicorn, psycopg — plus
+pytest/pytest-django for the suite.
