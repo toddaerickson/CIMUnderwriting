@@ -155,9 +155,23 @@ if not DEBUG:
 # deploy warning fails the build. Exactly one check is silenced:
 # security.W021 flags SECURE_HSTS_PRELOAD not being True, and preload is
 # off ON PURPOSE — see the one-way-door comment above. Nothing else may
-# join this list without the same kind of recorded reason. In particular
-# W009 (weak SECRET_KEY) stays live because it checks the real key at
-# deploy time; CI satisfies it with a 50+ char throwaway key instead.
+# join this list without the same kind of recorded reason.
+#
+# W009 (weak SECRET_KEY) deliberately stays LIVE, but be precise about
+# what that buys, because the obvious assumption is wrong: `check
+# --deploy` runs ONLY in CI, against CI's own throwaway key. Nothing in
+# the deploy path runs it, so W009 never vets the production key. It is
+# kept live so that a future weak key cannot slip in unnoticed, and CI
+# satisfies it with a 50+ character throwaway rather than silencing it
+# for every environment at once.
+#
+# One consequence worth knowing before it surprises someone: running
+# `manage.py check --deploy` ON THE RENDER HOST reports W009. Render's
+# `generateValue` mints a base64-encoded 256-bit key — 44 characters —
+# and W009's threshold is a flat 50-character length heuristic, which
+# that key fails while carrying far more entropy than the heuristic is
+# proxying for. It is a false alarm, not a weak key. Do not "fix" it by
+# silencing W009 here; that would also silence the real case.
 SILENCED_SYSTEM_CHECKS = ["security.W021"]
 
 # Deliberately NOT set here — Django already supplies them, and restating

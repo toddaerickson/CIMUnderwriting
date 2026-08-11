@@ -82,6 +82,18 @@ Both are now closed:
   past. Exactly one check is silenced — `security.W021`, because HSTS
   preload is off on purpose (a one-way door); the reason is recorded next
   to `SILENCED_SYSTEM_CHECKS` in `cimweb/settings.py`.
+
+  **Scope, so nobody over-reads it:** that check runs in CI, against CI's
+  own throwaway key. Nothing in the Render build or start command runs
+  `check --deploy`, so it never vets the production secret.
+
+  **If you run `manage.py check --deploy` in the Render shell, expect
+  `security.W009`.** It is a false alarm. Render's `generateValue` mints a
+  base64-encoded 256-bit key — 44 characters — and W009 is a flat
+  50-character length heuristic, which that key fails while carrying far
+  more entropy than the heuristic proxies for. Do not silence W009 to make
+  it go away: that would also silence the case where a genuinely weak key
+  gets set by hand.
 - **`/admin/` exposure**: decided (operator, 2026-08-10) — env-gated.
   `ADMIN_ENABLED` (default: `DEBUG`) controls whether `cimweb/urls.py`
   mounts the admin at all. Off means 404, not a redirect, so a probe of

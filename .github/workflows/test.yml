@@ -49,10 +49,13 @@ jobs:
     # cimweb/settings_test.py for pytest.
     #
     # The key is padded past 50 characters because `check --deploy` below
-    # raises security.W009 for anything shorter — and W009 must stay LIVE
-    # (it checks the real key at deploy time; Render's generateValue key
-    # passes it), so the throwaway key satisfies the check rather than the
-    # check being silenced.
+    # raises security.W009 for anything shorter. W009 is satisfied rather
+    # than silenced, because silencing it in settings.py would silence it
+    # everywhere — including for a genuinely weak key someone sets later.
+    # What W009 does NOT do is vet production: nothing in the deploy path
+    # runs `check --deploy` (Render's build is pip/collectstatic/migrate),
+    # so in this pipeline W009 only ever sees this throwaway key. See the
+    # SILENCED_SYSTEM_CHECKS note in cimweb/settings.py.
     env:
       DJANGO_SECRET_KEY: ci-only-key-never-deployed-padded-well-past-fifty-characters-for-w009
     steps:
