@@ -43,8 +43,28 @@
 - [x] Render (done) — blueprint merged; production cutover follows the DEPLOY.md runbook
 - [x] Authentication — Django allowlisted login (`ALLOWED_EMAILS`) replaced the Cloudflare Tunnel + Access plan
 - [ ] Custom domain
-- [ ] Post-cutover hardening (deferred from PR #2 review): `SECURE_HSTS_SECONDS`
-      + `manage.py check --deploy` in CI; decide `/admin/` exposure (see DEPLOY.md)
+- [ ] Post-cutover hardening (deferred from PR #2 review): `manage.py check
+      --deploy` in CI; decide `/admin/` exposure (see DEPLOY.md). The third
+      piece of that deferral, `SECURE_HSTS_SECONDS`, shipped in PR #51
+      (`cimweb/settings.py:140` — 31536000, preload deliberately off)
+
+### Operator actions (not code)
+
+These cannot be discharged by building anything; they are recorded here so the
+non-code items have one home:
+
+- [ ] Read LPA sections for the three still-open waterfall questions
+      (`accrual_base`, `am_fee_treatment`, `catch_up`) and add dated entries to
+      `config.LPA_CONFIRMED`. Note: for each of these three, the alternative
+      reading RAISES in code today — if the LPA disagrees with the shipped
+      default, that becomes real implementation work, not a config edit.
+- [ ] Real GC review of the LP investor summary. The current clearance is an
+      ASSUMED approval (operator direction 2026-08-09, marked as such on every
+      surface); a real review REPLACES the assumed row in
+      `docs/gc-review-investor-summary.md`.
+- [ ] Quarterly restore drill (Neon PITR + disk snapshot — see DEPLOY.md; a
+      backup that's never been restored is a hope, not a backup).
+- [ ] Custom domain (also tracked under Web Deployment above).
 
 ### Model Integrity & Capital Structure
 
@@ -60,10 +80,14 @@ one number that document exists to avoid.
 the duplicated constants (#40), the value-add assumptions layer (#46), the
 model-layer hard-codes (#47), loud fallbacks — the assumption fill log (#49),
 occupancy becomes a required input (#50), and the assumption register with its
-memo Appendix B. One acceptance criterion remains open: a general CI sweep for
-numeric modeling literals outside `config.py`. Four targeted AST guards exist
-(age ladders, occupancy levels, fabricated NOI, one-square-foot NRSF); each
-catches its own family, and nothing yet catches a fifth.
+memo Appendix B. The last acceptance criterion — a general CI sweep for numeric
+modeling literals outside `config.py` — closed in PR #59
+(`tests/test_literal_sweep.py`: exemption by KIND plus an allowlist where every
+entry carries a reason), and PR #64 extended it to comparison-shaped literals
+in `output/`. The per-family AST guards in `tests/test_config_single_source.py`
+deliberately remain as backstops — they name which family broke, where the
+sweep can only cite a line (see `docs/scoped-backlog.md`, item T Acceptance,
+for the full record including what the sweep still does not cover).
 
 - [x] **A.** Model error-check register (`analysis/checks.py`) — generalize the
       lone Revenue−Expenses=NOI identity into 11 checks (unit-mix reconciliation,

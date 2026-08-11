@@ -32,3 +32,9 @@ EXTRACT_USE_THREAD = False
 
 # Same reasoning as EXTRACT_USE_THREAD: analysis runs inline in tests.
 ANALYSIS_USE_THREAD = False
+
+# The admin gate defaults to DEBUG, and settings.py reads the developer's
+# .env — without this pin the suite's URLconf would depend on which
+# machine it runs on. Pinned OFF; the enabled state is exercised by
+# flipping the setting and reloading cimweb.urls (tests/test_admin_gate.py).
+ADMIN_ENABLED = False
