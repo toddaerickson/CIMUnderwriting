@@ -112,3 +112,51 @@ if not DEBUG:
     SESSION_COOKIE_SECURE = True
     CSRF_COOKIE_SECURE = True
     SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
+    # HSTS: tell browsers to only ever reach this host over HTTPS. Prod-only
+    # (inside `not DEBUG`) so a plain-HTTP dev host is never pinned. Render
+    # terminates TLS at the edge and forwards the X-Forwarded-Proto header
+    # SECURE_PROXY_SSL_HEADER reads, so the HSTS header is emitted correctly.
+    SECURE_HSTS_SECONDS = 31_536_000            # 1 year
+    SECURE_HSTS_INCLUDE_SUBDOMAINS = True
+    SECURE_HSTS_PRELOAD = True
+
+# These two are already the Django 5.1 defaults; set explicitly so a security
+# review sees the intent rather than silence. Safe in every environment.
+SECURE_CONTENT_TYPE_NOSNIFF = True
+SECURE_REFERRER_POLICY = "same-origin"
+
+# Password strength for the allauth set/change-password flows. bootstrap_operator
+# seeds accounts via set_password(), which bypasses these validators, so the
+# operator-seed path is unaffected.
+AUTH_PASSWORD_VALIDATORS = [
+    {"NAME": "django.contrib.auth.password_validation.UserAttributeSimilarityValidator"},
+    {"NAME": "django.contrib.auth.password_validation.MinimumLengthValidator"},
+    {"NAME": "django.contrib.auth.password_validation.CommonPasswordValidator"},
+    {"NAME": "django.contrib.auth.password_validation.NumericPasswordValidator"},
+]
+
+# Web-app logging. The CLI keeps its own file audit trail via
+# log_config.setup_logging(); the web process logs to stdout instead (12-factor
+# — Render captures stdout, and a FileHandler would fight the ephemeral disk).
+LOGGING = {
+    "version": 1,
+    "disable_existing_loggers": False,
+    "formatters": {
+        "verbose": {
+            "format": "%(asctime)s %(levelname)-5s [%(name)s] %(message)s",
+            "datefmt": "%Y-%m-%d %H:%M:%S",
+        },
+    },
+    "handlers": {
+        "console": {"class": "logging.StreamHandler", "formatter": "verbose"},
+    },
+    # The console handler lives on root; the app loggers below only set a level
+    # and propagate up to it. No per-logger handler (avoids double-emit) and no
+    # propagate=False (which would hide records from pytest's caplog, since it
+    # captures via propagation to the root logger).
+    "root": {"handlers": ["console"], "level": "INFO"},
+    "loggers": {
+        "django": {"level": "INFO"},
+        "cim_analyst": {"level": "INFO"},
+    },
+}

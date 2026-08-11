@@ -14,6 +14,12 @@ STORAGES = {
 # via IS_PROD.
 SECURE_SSL_REDIRECT = False
 
+# settings.py also enables HSTS whenever DEBUG is falsy. The test client talks
+# plain HTTP, so HSTS headers are never emitted anyway, but we clear it here for
+# parity with the SSL-redirect override above — the test env asserts no
+# production-only transport rule leaks into a view-level assertion.
+SECURE_HSTS_SECONDS = 0
+
 # Extraction runs inline: a daemon thread opens its own connection to the
 # shared in-memory test DB and its writes commit outside the test
 # transaction (same reasoning as managertools' COACHING_ENABLED note —
