@@ -186,12 +186,18 @@ def test_no_environment_reads_outside_the_template_path():
 
 # ── Synthetic workbook ───────────────────────────────────────────────
 
-# Formulas copied verbatim from template_uw.xlsm. The writer must
-# overwrite the first two with values; the third proves the tier rows
-# chain to H258 and so collapse to a single hurdle.
-REAL_K181_FORMULA = "=+K180+0.005"
-REAL_H258_FORMULA = '=IF(H64>0,0.08,IF(H64=0,0.06,"n/a"))'
-REAL_H259_FORMULA = "=+H258"
+# Formulas copied verbatim from Self-Storage-Acquisition-Model v1.3.
+# The writer must overwrite the first with a value; the second is the
+# ONLY chained hurdle in v1.3 (v1.2 chained three), which is why the
+# writer now writes the pref into H249/H250/H251 individually.
+REAL_K174_FORMULA = "=K173+0.5%"
+REAL_H252_FORMULA = "=H251"
+#: v1.3's shipped hurdle literal. The writer overwrites it, and a test
+#: proves it does — an 8% pref would otherwise pass by coincidence.
+REAL_SHIPPED_HURDLE = 0.08
+#: E128 — "Concessions Avg. Length", which v1.3's other-income formulas
+#: reuse as their annualization divisor.
+REAL_E128_PERIOD = 13
 
 
 def build_stub_template(path):
@@ -199,14 +205,23 @@ def build_stub_template(path):
 
     Shared with `tests/test_web_runs.py`, which drives the real
     `engine.run_analysis` against it.
+
+    Carries the v1.3 shape markers as well as the cells under test:
+    `_assert_template_shape` refuses to write into a workbook whose
+    labels are not v1.3's, so a stub without them would fail every
+    behavior test — which is exactly the protection the guard is for.
     """
     wb = openpyxl.Workbook()
     ws = wb.active
     ws.title = "Underwriting"
     wb.create_sheet("Summary")
-    ws["K181"] = REAL_K181_FORMULA
-    ws["H258"] = REAL_H258_FORMULA
-    ws["H259"] = REAL_H259_FORMULA
+    for address, label in template_writer._SHAPE_MARKERS.items():
+        ws[address] = label
+    ws["K174"] = REAL_K174_FORMULA
+    ws["H250"] = REAL_SHIPPED_HURDLE
+    ws["H251"] = REAL_SHIPPED_HURDLE
+    ws["H252"] = REAL_H252_FORMULA
+    ws["E128"] = REAL_E128_PERIOD
     wb.save(path)
     wb.close()
     return path
@@ -234,9 +249,9 @@ class _CIM:
     def __init__(self, **kwargs):
         defaults = dict(
             property_name="Test Storage", address="1 Main St", city="Abilene",
-            acreage=4.0, year_built=2005, asking_price=10_000_000,
+            state="TX", acreage=4.0, year_built=2005, asking_price=10_000_000,
             physical_occupancy=0.92, nrsf=50_000, other_income=25_000,
-            mgmt_fee_pct=None, capex_estimate=0,
+            total_units=None, mgmt_fee_pct=None, capex_estimate=0,
             unit_mix=[_Unit("10x10", 100, 100, 95.0)],
         )
         defaults.update(kwargs)
@@ -245,6 +260,7 @@ class _CIM:
 
 
 FINANCIALS = {"adjusted_ttm_noi": {"analyst_adjusted_noi": 650_000},
+              "income_analysis": {"egr": 1_200_000},
               "expense_analysis": {"lines": []}}
 
 
@@ -287,13 +303,13 @@ def test_debt_block_equals_resolved_debt_terms(tmp_path, stub_template):
     cells = _generate(tmp_path, debt_terms=terms,
                       sources_uses={"ltv": 0.62})
 
-    assert cells["F73"] == terms.term_years * 12 == 120
-    assert cells["G73"] == terms.io_months == 0
-    assert cells["H73"] == terms.amort_years * 12 == 300
-    assert cells["I73"] == terms.all_in_rate() == 0.0625
+    assert cells["F74"] == terms.term_years * 12 == 120
+    assert cells["G74"] == terms.io_months == 0
+    assert cells["H74"] == terms.amort_years * 12 == 300
+    assert cells["I74"] == terms.all_in_rate() == 0.0625
     # H64 is the run's own leverage, not a hardcoded all-equity 0.
-    assert cells["H64"] == 0.62
-    assert cells["H65"] == 0        # we model no junior/mezz tranche
+    assert cells["H65"] == 0.62
+    assert cells["H66"] == 0        # we model no junior/mezz tranche
 
 
 def test_debt_block_survives_an_overridden_rate(tmp_path, stub_template):
@@ -304,18 +320,18 @@ def test_debt_block_survives_an_overridden_rate(tmp_path, stub_template):
                                 "term_years": 7, "io_months": 24})
     cells = _generate(tmp_path, debt_terms=terms)
 
-    assert cells["I73"] == 0.075
-    assert cells["H73"] == 360
-    assert cells["F73"] == 84
-    assert cells["G73"] == 24
+    assert cells["I74"] == 0.075
+    assert cells["H74"] == 360
+    assert cells["F74"] == 84
+    assert cells["G74"] == 24
 
 
 def test_no_sources_uses_leaves_the_block_all_equity(tmp_path, stub_template):
     """The CLI path, and any deal that never sized. Terms still land, so
     flipping LTC in Excel gives the terms the app would have used."""
     cells = _generate(tmp_path, sources_uses=None)
-    assert cells["H64"] == 0
-    assert cells["I73"] == resolve_debt_terms().all_in_rate()
+    assert cells["H65"] == 0
+    assert cells["I74"] == resolve_debt_terms().all_in_rate()
 
 
 def test_waterfall_block_equals_resolved_waterfall_terms(tmp_path,
@@ -326,15 +342,37 @@ def test_waterfall_block_equals_resolved_waterfall_terms(tmp_path,
     terms = resolve_waterfall_terms()
     cells = _generate(tmp_path, waterfall_terms=terms, am_fee_pct=cfg.AM_FEE_PCT)
 
-    assert cells["H59"] == terms.gp_coinvest_pct == 0.10
-    assert cells["G254"] == cfg.AM_FEE_PCT == 0.01
-    for row in ("I259", "I260", "I261"):
+    assert cells["H60"] == terms.gp_coinvest_pct == 0.10
+    assert cells["G245"] == cfg.AM_FEE_PCT == 0.01
+    for row in ("I250", "I251", "I252"):
         assert cells[row] == terms.promote_split == 0.20
-    # H258's IF(H64>0, 0.08, ...) formula is replaced by a value; the
-    # tier rows chain to it, so all four hurdles are the one pref.
-    assert cells["H258"] == terms.pref_rate == 0.08
-    assert cells["H259"] == REAL_H259_FORMULA
-    assert cells["C253"] == cfg.GP_ENTITY_NAME
+    # v1.3 does NOT chain H250/H251 to H249 — they ship as their own
+    # literals — so the pref must reach all three. Only H252 chains,
+    # and it is left alone.
+    for row in ("H249", "H250", "H251"):
+        assert cells[row] == terms.pref_rate == 0.08
+    assert cells["H252"] == REAL_H252_FORMULA
+    assert cells["C244"] == cfg.GP_ENTITY_NAME
+
+
+def test_the_pref_reaches_every_unchained_hurdle_row(tmp_path,
+                                                     stub_template):
+    """The v1.2→v1.3 trap, pinned as a red test.
+
+    v1.2 chained H259-H261 to H258, so one write set every hurdle. v1.3
+    ships H250/H251 as independent 0.08 literals. A writer that still
+    wrote only the first row would pass every test at the DEFAULT pref —
+    the shipped literal and the fund's rate both being 8% — and silently
+    produce a multi-hurdle workbook for any deal that moved it. So this
+    asserts at a pref that is not 8%.
+    """
+    terms = resolve_waterfall_terms({"pref_rate": 0.09})
+    cells = _generate(tmp_path, waterfall_terms=terms)
+    for row in ("H249", "H250", "H251"):
+        assert cells[row] == 0.09, (
+            f"{row} kept the template's shipped hurdle — v1.3 does not "
+            f"chain the tier rows, so each must be written")
+    assert REAL_SHIPPED_HURDLE == 0.08          # the coincidence guarded
 
 
 def test_waterfall_carries_a_per_deal_coinvest(tmp_path, stub_template):
@@ -342,7 +380,7 @@ def test_waterfall_carries_a_per_deal_coinvest(tmp_path, stub_template):
     co-invest must not print a 10/90 waterfall next to a 25/75 stack."""
     terms = resolve_waterfall_terms(capital_structure={"gp_coinvest_pct": 0.25})
     cells = _generate(tmp_path, waterfall_terms=terms)
-    assert cells["H59"] == 0.25
+    assert cells["H60"] == 0.25
 
 
 def test_growth_ladder_is_scenario_driven(tmp_path, stub_template):
@@ -352,11 +390,11 @@ def test_growth_ladder_is_scenario_driven(tmp_path, stub_template):
     cells = _generate(tmp_path, scenario_results=_scenarios(
         rev_cagr_yr1_3=0.04, rev_cagr_yr4_5=0.035, exp_growth=0.028))
 
-    for row in (101, 102, 103):                      # revenue rows
+    for row in (102, 103, 104):                      # revenue rows
         assert cells[f"C{row}"] == 0                 # year 1: in-place
         assert cells[f"D{row}"] == cells[f"E{row}"] == 0.04    # years 2-3
         assert cells[f"F{row}"] == cells[f"G{row}"] == cells[f"H{row}"] == 0.035
-    for row in (104, 105, 106):                      # expense rows
+    for row in (105, 106, 107):                      # expense rows
         assert cells[f"C{row}"] == 0
         for col in "DEFGH":
             assert cells[f"{col}{row}"] == 0.028
@@ -366,22 +404,99 @@ def test_stabilized_vacancy_complements_the_scenario(tmp_path, stub_template):
     """Was a standing 0.10 behind a dead if/else — the one value in the
     block that matched neither the workbook's own default nor the model."""
     cells = _generate(tmp_path, scenario_results=_scenarios(stabilized_occ=0.88))
-    assert cells["I146"] == 0.12
-    assert cells["G146"] == pytest.approx(0.08)   # 1 - 0.92 physical
+    assert cells["I139"] == 0.12
+    assert cells["G139"] == pytest.approx(0.08)   # 1 - 0.92 physical
 
 
 def test_credit_loss_and_bank_fees_come_from_config(tmp_path, stub_template):
     inputs = cfg.XLSM_TEMPLATE_INPUTS
     cells = _generate(tmp_path)
-    assert cells["G147"] == inputs["credit_loss_in_place"]
-    assert cells["I147"] == inputs["credit_loss_stabilized"]
-    assert cells["G155"] == inputs["bank_fee_pct_in_place"]
-    assert cells["I155"] == inputs["bank_fee_pct_stabilized"]
+    assert cells["G140"] == inputs["credit_loss_in_place"]
+    assert cells["I140"] == inputs["credit_loss_stabilized"]
+
+    # v1.3 states the bank/merchant fee per UNIT, where config states it
+    # as a % of EGR. Same assumption, converted — not the percentage
+    # dropped into a dollar cell.
+    units = 100                       # the fixture's one unit type
+    egr = FINANCIALS["income_analysis"]["egr"]
+    assert cells["G148"] == round(inputs["bank_fee_pct_in_place"] * egr / units, 2)
+    assert cells["I148"] == round(
+        inputs["bank_fee_pct_stabilized"] * egr / units, 2)
+
+
+def test_bank_fee_row_is_left_alone_without_an_egr(tmp_path, stub_template,
+                                                   caplog):
+    """No EGR means no conversion, and a percentage written into a
+    per-unit dollar cell would be off by four orders of magnitude while
+    looking like a filled-in workbook."""
+    with caplog.at_level("WARNING"):
+        cells = _generate(tmp_path, financial_analysis={
+            "adjusted_ttm_noi": {"analyst_adjusted_noi": 650_000},
+            "expense_analysis": {"lines": []}})
+    assert cells.get("G148") is None
+    assert any("bank/merchant fee" in r.message for r in caplog.records)
 
 
 def test_benchmark_band_drives_the_capital_reserve(tmp_path, stub_template):
+    """The band is $/NRSF/yr; v1.3's row is $/unit/yr."""
     cells = _generate(tmp_path)
-    assert cells["I164"] == cfg.EXPENSE_BENCHMARKS["cap_reserve"][0]
+    band_psf = cfg.EXPENSE_BENCHMARKS["cap_reserve"][0]
+    assert cells["I157"] == round(band_psf * 50_000 / 100, 2)
+    assert cells["G157"] == 0        # no in-place reserve line in a CIM
+
+
+def test_operating_expenses_are_written_per_unit_not_per_sf(tmp_path,
+                                                            stub_template):
+    """**The conversion that separates v1.3 from v1.2.**
+
+    v1.2's rows multiplied by square footage; v1.3's multiply by the
+    unit count (`J143 = (...)*$C$126`). Writing the old $/SF figure into
+    the new cell overstates the expense by SF-per-unit — about 100x on
+    this fixture — and every error-check in the workbook still reports
+    "OK", so nothing downstream would catch it. Asserted against the
+    dollars, not against a ratio, so it cannot pass by cancellation.
+    """
+    financials = dict(FINANCIALS)
+    financials["expense_analysis"] = {"lines": [
+        {"benchmark_key": "payroll", "cim_value": 60_000,
+         "adjusted_value": 75_000}]}
+    cells = _generate(tmp_path, financial_analysis=financials)
+
+    assert cells["G144"] == 600.0     # 60,000 / 100 units
+    assert cells["I144"] == 750.0     # 75,000 / 100 units
+    # The $/SF number this replaced, for the record: 60,000 / 50,000 NRSF.
+    assert cells["G144"] != 1.2
+
+
+def test_opex_block_is_left_alone_when_the_cim_has_no_unit_count(
+        tmp_path, stub_template, caplog):
+    """No unit count means no per-unit basis. The block keeps the
+    template's own defaults — zero-filling would print a property with
+    no operating expenses, which is a worse claim than a visibly generic
+    one."""
+    with caplog.at_level("WARNING"):
+        cells = _generate(tmp_path, cim=_CIM(unit_mix=[], total_units=None))
+    assert cells.get("G144") is None
+    assert any("operating-expense" in r.message for r in caplog.records)
+
+
+def test_other_income_is_converted_to_the_per_unit_period_basis(
+        tmp_path, stub_template):
+    """v1.3: `J132 = (...)*$C$126*(12/$E$128)`.
+
+    The annual total must be divided by units AND by the periods-per-
+    year the workbook's own E128 implies, or other income lands
+    (units x 12/E128) times too large. E128 is read from the workbook
+    rather than assumed, which is what makes the product tie back.
+    """
+    cells = _generate(tmp_path, cim=_CIM(other_income=26_000))
+    periods = 12 / REAL_E128_PERIOD
+    assert cells["G132"] == round(26_000 / (100 * periods), 2)
+    assert cells["I132"] == cells["G132"]
+    # And it ties: the workbook's own formula reproduces the input.
+    assert cells["G132"] * 100 * periods == pytest.approx(26_000, rel=1e-3)
+    # The template's other example lines are cleared, not left standing.
+    assert cells["G133"] == 0 and cells["I136"] == 0
 
 
 def test_the_mgmt_fee_follows_the_resolved_target_not_the_band(
@@ -400,27 +515,27 @@ def test_the_mgmt_fee_follows_the_resolved_target_not_the_band(
     to prove which one the cell actually follows.
     """
     cells = _generate(tmp_path, mgmt_fee_target_pct=0.02)
-    assert cells["G157"] == 0.02
-    assert cells["I157"] == 0.02
-    assert cells["G157"] != cfg.EXPENSE_BENCHMARKS["mgmt_fee_pct"][1]
+    assert cells["G150"] == 0.02
+    assert cells["I150"] == 0.02
+    assert cells["G150"] != cfg.EXPENSE_BENCHMARKS["mgmt_fee_pct"][1]
 
     # Unset, it falls back to the config default (which IS the band high
     # today — asserted against the target, not the band).
     cells = _generate(tmp_path)
-    assert cells["G157"] == cfg.MGMT_FEE_TARGET_PCT
+    assert cells["G150"] == cfg.MGMT_FEE_TARGET_PCT
 
     # A CIM that states its own rate still wins over either.
     cells = _generate(tmp_path, cim=_CIM(mgmt_fee_pct=0.045),
                       mgmt_fee_target_pct=0.02)
-    assert cells["G157"] == 0.045
+    assert cells["G150"] == 0.045
 
 
 def test_capex_timing_comes_from_config(tmp_path, stub_template):
     inputs = cfg.XLSM_TEMPLATE_INPUTS
     cells = _generate(tmp_path, cim=_CIM(capex_estimate=250_000), capex=250_000)
-    assert cells["K30"] == 250_000
-    assert cells["E30"] == inputs["capex_start_month"]
-    assert cells["F30"] == inputs["capex_duration_months"]
+    assert cells["K25"] == 250_000
+    assert cells["E25"] == inputs["capex_start_month"]
+    assert cells["F25"] == inputs["capex_duration_months"]
 
 
 def test_missing_occupancy_warns_and_uses_the_config_assumption(
@@ -430,7 +545,7 @@ def test_missing_occupancy_warns_and_uses_the_config_assumption(
         cells = _generate(tmp_path, cim=_CIM(physical_occupancy=None))
 
     assumed = cfg.XLSM_TEMPLATE_INPUTS["assumed_physical_occupancy"]
-    assert cells["G146"] == pytest.approx(1 - assumed)
+    assert cells["G139"] == pytest.approx(1 - assumed)
     assert any("Physical occupancy missing" in r.message
                for r in caplog.records)
 
@@ -445,26 +560,26 @@ def test_thin_deal_does_not_invent_a_cap_rate(tmp_path, stub_template, caplog):
         cells = _generate(tmp_path, cim=thin, scenario_results=None,
                           financial_analysis={})
 
-    assert cells["K180"] is None                     # never written
-    assert cells["K181"] == REAL_K181_FORMULA        # formula untouched
+    assert cells["K173"] is None                     # never written
+    assert cells["K174"] == REAL_K174_FORMULA        # formula untouched
     assert any("no entry cap" in r.message for r in caplog.records)
 
 
 def test_resolved_exit_cap_overwrites_the_entry_plus_50bp_formula(
         tmp_path, stub_template):
     cells = _generate(tmp_path)
-    assert cells["K180"] == 0.0625
-    assert cells["K181"] == 0.0685
+    assert cells["K173"] == 0.0625
+    assert cells["K174"] == 0.0685
 
 
 def test_defaults_resolve_without_any_terms_passed(tmp_path, stub_template):
     """`run.py` passes no terms at all. Config must be the whole resolved
     set on that path, not a crash and not a literal."""
     cells = _generate(tmp_path)
-    assert cells["I73"] == cfg.DEBT_TERMS["rate"]
-    assert cells["H258"] == cfg.WATERFALL_TERMS["pref_rate"]
-    assert cells["H59"] == cfg.GP_COINVEST_PCT
-    assert cells["G254"] == cfg.AM_FEE_PCT
+    assert cells["I74"] == cfg.DEBT_TERMS["rate"]
+    assert cells["H249"] == cfg.WATERFALL_TERMS["pref_rate"]
+    assert cells["H60"] == cfg.GP_COINVEST_PCT
+    assert cells["G245"] == cfg.AM_FEE_PCT
 
 
 # ── The divergence disclosures (settled 2026-08-10) ──────────────────
@@ -483,7 +598,7 @@ def test_divergence_disclosures_land_in_the_workbook(tmp_path,
     # rejected the gross-up (2026-08-10), reaffirming the recorded
     # stance — dollars that tie by printing a rate the fund does not
     # charge trade a visible discrepancy for a hidden one.
-    assert cells["G254"] == cfg.AM_FEE_PCT
+    assert cells["G245"] == cfg.AM_FEE_PCT
 
 
 def _disclosure_texts(ws):
@@ -608,26 +723,40 @@ def test_real_template_still_has_the_cells_the_stub_claims(monkeypatch):
     wb = openpyxl.load_workbook(REAL_TEMPLATE, keep_vba=True)
     try:
         ws = wb["Underwriting"]
-        assert ws["K181"].value == REAL_K181_FORMULA
-        assert ws["H258"].value == REAL_H258_FORMULA
-        assert ws["H259"].value == REAL_H259_FORMULA
-        # The tier rows chain upward, which is what collapses four
-        # hurdles into the single one model.waterfall implements.
-        assert ws["H260"].value == "=+H259"
-        assert ws["H261"].value == "=H260"
+        assert ws["K174"].value == REAL_K174_FORMULA
+        # The v1.3 shape markers the writer refuses to proceed without.
+        for address, label in template_writer._SHAPE_MARKERS.items():
+            assert ws[address].value == label, (
+                f"{address} reads {ws[address].value!r} — this template "
+                f"is not the v1.3 the cell map was calibrated against")
+        # Only H252 chains; H250/H251 are their own literals, which is
+        # why the writer writes the pref into every hurdle row.
+        assert ws["H252"].value == REAL_H252_FORMULA
+        assert ws["H250"].value == REAL_SHIPPED_HURDLE
+        assert ws["H251"].value == REAL_SHIPPED_HURDLE
         # Growth ladder row labels, so the revenue/expense split is real.
-        assert ws["B101"].value == "In-Place Rent"
-        assert ws["B103"].value == "Other Income"
-        assert ws["B104"].value == "OpEx (Excl. Taxes)"
-        assert ws["B106"].value == "CapEx"
-        # H64 is loan / Total Uses, which is what makes sources_uses["ltv"]
+        assert ws["B102"].value == "In-Place Rent"
+        assert ws["B104"].value == "Other Income"
+        assert ws["B105"].value == "OpEx (Excl. Taxes)"
+        assert ws["B107"].value == "CapEx"
+        # H65 is loan / Total Uses, which is what makes sources_uses["ltv"]
         # the right thing to write there.
-        assert ws["K64"].value == "=H64*$K$55"
+        assert ws["K65"].value == "=H65*$K$56"
         # The AM fee's base really is LP equity, not invested equity —
         # the residual mismatch the module docstring stamps.
-        assert ws["H254"].value == (
-            '=IF(G253="% of EGR",G254*K148/12,K60*G254/12)')
-        assert ws["K60"].value == "=($K$55-$K$66)*H60"
+        assert ws["H245"].value == (
+            '=IF(G244="% of EGR",G245*K141/12,K61*G245/12)')
+        assert ws["K61"].value == "=($K$56-$K$67)*H61"
+        # **The unit basis.** These formulas are the whole reason the
+        # writer converts to per-unit dollars: C126 is the unit count,
+        # E128 the other-income period divisor. If either changes shape
+        # again, every expense in the workbook is wrong by a factor
+        # nothing else would report.
+        assert ws["J143"].value == "=((1-$E$126)*G143+$E$126*I143)*$C$126"
+        assert ws["J132"].value == (
+            "=((1-$E$126)*G132+$E$126*I132)*$C$126*(12/$E$128)")
+        assert ws["C126"].value == "=SUM(C112:C125)"
+        assert isinstance(ws["E128"].value, (int, float))
         # The PREFERRED disclosure rows should be blank and unmerged in
         # the real workbook. This is now a drift report, not a load-
         # bearing guarantee: `_free_disclosure_cells` verifies its target

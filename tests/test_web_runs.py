@@ -259,15 +259,15 @@ def test_engine_end_to_end_writes_the_template_with_resolved_terms(
         ws = wb["Underwriting"]
         # The per-deal overrides reached the workbook, not config's
         # 6.25% / 10yr / 8% pref / 1% fee.
-        assert ws["I73"].value == 0.077
-        assert ws["F73"].value == 84
-        assert ws["H258"].value == 0.09
-        assert ws["G254"].value == 0.015
+        assert ws["I74"].value == 0.077
+        assert ws["F74"].value == 84
+        assert ws["H249"].value == 0.09
+        assert ws["G245"].value == 0.015
         # Leverage is on by default (E3a), so the run sized a loan and
         # the workbook is not all-equity.
-        assert ws["H64"].value == pytest.approx(
+        assert ws["H65"].value == pytest.approx(
             result.sources_uses["ltv"], abs=1e-6)
-        assert ws["H64"].value > 0
+        assert ws["H65"].value > 0
     finally:
         wb.close()
 
