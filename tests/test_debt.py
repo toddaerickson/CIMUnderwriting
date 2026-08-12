@@ -23,12 +23,18 @@ PIPELINE'S.** It capitalizes YEAR 6 NOI, faithfully reproducing the
 design doc, and that is about 3% higher than what
 `analysis.valuation.project_cash_flows` produces — the projection
 capitalizes the terminal hold year's OWN (year-5) NOI. Both are
-deliberate and CLAUDE.md's design-decisions block records the split.
-This module is allowed the design doc's convention because it tests the
-debt layer in ISOLATION and never calls the canonical projection. Item
-E3a, which does wire the two together, pins the trailing convention in
-`tests/test_levered.py`. If you are here because a levered number looks
-3% off, that is this, and it is not a bug in the debt math.
+deliberate; the split now has a config name — `EXIT_NOI_CONVENTION`
+(decision 5, settled 2026-08-10, default "trailing") — and this
+module's year-6 oracle is the FORWARD convention in a single-rate
+fixture. Note it is NOT the same arithmetic as the implemented forward
+branch, which steps revenue and expenses at their separate rates; same
+convention, its own fixture, so do not expect the two to tie to the
+cent. This module is allowed the design doc's convention because it
+tests the debt layer in ISOLATION and never calls the canonical
+projection. Item E3a, which does wire the two together, pins the
+trailing default in `tests/test_levered.py`. If you are here because a
+levered number looks 3% off, that is this, and it is not a bug in the
+debt math.
 """
 
 import pytest
