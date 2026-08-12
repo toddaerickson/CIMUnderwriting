@@ -40,7 +40,7 @@
 | `CIM_DEALS_DIR` | Deal folders root | Fixed in `render.yaml`: `/data/deals` (on the disk) |
 | `COMP_DB_PATH` | Comp SQLite DB path | Fixed in `render.yaml`: `/data/cim_comps.db` (on the disk) |
 | `CIM_OVERRIDES_DIR` | Per-deal override JSONs | Fixed in `render.yaml`: `/data/overrides` (on the disk) |
-| `UW_TEMPLATE_PATH` | Blank XLSM underwriting template | Fixed in `render.yaml`: `/data/template_uw.xlsm` (on the disk — the file is gitignored via `*.xlsm`, so it never ships in the build; transferred in runbook step 5) |
+| `UW_TEMPLATE_PATH` | Blank XLSM underwriting template — **must be Self-Storage-Acquisition-Model v1.3**; `output/template_writer.py`'s cell map is calibrated to it and `_assert_template_shape` refuses to write into anything else (v1.2 moved rows AND changed expenses from $/SF to $/unit) | Fixed in `render.yaml`: `/data/template_uw.xlsm` (on the disk — the file is gitignored via `*.xlsm`, so it never ships in the build; transferred in runbook step 5) |
 | `ADMIN_ENABLED` | Mounts `/admin/` (unmounted = 404) | Fixed in `render.yaml`: `false`. Flip to `1` temporarily for runbook step 7's verification, remove after. Defaults to `DEBUG` when unset, so dev boxes with `DEBUG=true` get it automatically |
 | `PYTHON_VERSION` | Render Python runtime pin | Fixed in `render.yaml`: `3.12.6` |
 

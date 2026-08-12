@@ -409,6 +409,7 @@ class _FakeCIM:
         self.unit_mix = [_FakeUnit()]
         self.ttm_noi = 300_000
         self.asking_price = 4_000_000
+        self.state = "TX"          # v1.3's K9; v1.2 left the cell blank
 
 
 VA_FIN = {"expense_analysis": {"total_adjusted_expenses": 250_000}}
@@ -488,7 +489,7 @@ def test_template_sale_month_follows_hold_years():
     cim.property_name = cim.address = cim.city = ""
     cim.acreage = cim.year_built = None
     _write_property_description(ws, cim, hold_years=7)
-    assert ws["D182"] == 84
+    assert ws["D175"] == 84
 
 
 def test_template_acquisition_cost_lands_in_the_acquisition_block():
@@ -504,11 +505,13 @@ def test_template_acquisition_cost_lands_in_the_acquisition_block():
                                          "disposition_cost_pct": 0.015})
     assert ws["K23"] == 4_000_000
     assert ws["K24"] == pytest.approx(40_000, abs=1e-6)
-    assert ws["B24"] == "Acquisition Closing Costs"
+    # v1.3 ships row 24 already labelled "Closing Costs", so the writer
+    # no longer supplies the label — only the number.
 
 
 def test_template_selling_cost_is_wired_not_hardcoded():
-    """K182 was a hardcoded 3.5%. F254 — what the scope contract pointed
+    """K175 was a hardcoded 5%. The waterfall's disposition FEE — what
+    the scope contract pointed
     at — is the GP disposition FEE and correctly stays 0; writing the
     broker cost there would have double-counted against this cell."""
     from output.template_writer import _write_reversion
@@ -517,7 +520,7 @@ def test_template_selling_cost_is_wired_not_hardcoded():
                                       {"analyst_adjusted_noi": 300_000}},
                      costs={"acquisition_closing_pct": 0.01,
                             "disposition_cost_pct": 0.02})
-    assert ws["K182"] == 0.02
+    assert ws["K175"] == 0.02
 
 
 # ── 6b. The IRR gate must not claim a hold it did not measure ────────
