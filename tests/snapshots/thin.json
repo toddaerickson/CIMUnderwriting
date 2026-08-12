@@ -2762,7 +2762,7 @@
           "v": "20.0%"
         },
         "C207": {
-          "v": "contributed"
+          "v": "committed"
         },
         "C208": {
           "v": "above_waterfall"
@@ -3523,6 +3523,9 @@
         "A38": {
           "v": "Promote on 100% of residual or LP-attributable only"
         },
+        "A39": {
+          "v": "GP catch-up tier above the pref"
+        },
         "A4": {
           "v": "All-In Rate"
         },
@@ -3605,7 +3608,7 @@
           "v": "8.00% pref, annually compounded"
         },
         "B35": {
-          "v": "Contributed / unreturned capital"
+          "v": "Committed capital (all committed equity funds at close, so this equals contributed/unreturned)"
         },
         "B36": {
           "v": "Return of capital first (presentation only: the pref compounds, so no dollar moves)"
@@ -3615,6 +3618,9 @@
         },
         "B38": {
           "v": "20% promote on the LP-attributable residual (90% of it)"
+        },
+        "B39": {
+          "v": "No GP catch-up"
         },
         "B4": {
           "v": 0.0625
@@ -3889,6 +3895,9 @@
         "A44": {
           "v": "Promote on 100% of residual or LP-attributable only"
         },
+        "A45": {
+          "v": "GP catch-up tier above the pref"
+        },
         "A5": {
           "v": "Iterations"
         },
@@ -3977,7 +3986,7 @@
           "v": "8.00% pref, annually compounded"
         },
         "B41": {
-          "v": "Contributed / unreturned capital"
+          "v": "Committed capital (all committed equity funds at close, so this equals contributed/unreturned)"
         },
         "B42": {
           "v": "Return of capital first (presentation only: the pref compounds, so no dollar moves)"
@@ -3987,6 +3996,9 @@
         },
         "B44": {
           "v": "20% promote on the LP-attributable residual (90% of it)"
+        },
+        "B45": {
+          "v": "No GP catch-up"
         },
         "B5": {
           "v": 4
@@ -4532,7 +4544,7 @@
         "Occupancy: 88.0% physical / N/A economic",
         "TARGET RETURN",
         "Leverage effect: +523 bps (accretive). Debt is accretive to the LP at the modelled terms.",
-        "LP net returns are computed under: 8.00% pref, annually compounded - Contributed / unreturned capital - Return of capital first (presentation only: the pref compounds, so no dollar moves) - Above the waterfall (deal expense) - 1.00% of invested equity, measured at the start of each period - 20% promote on the LP-attributable residual (90% of it). 1 of 5 confirmed against the executed partnership agreement, 1 made moot by it; the rest are proposed terms, subject to it.",
+        "LP net returns are computed under: 8.00% pref, annually compounded - Committed capital (all committed equity funds at close, so this equals contributed/unreturned) - Return of capital first (presentation only: the pref compounds, so no dollar moves) - Above the waterfall (deal expense) - 1.00% of invested equity, measured at the start of each period - 20% promote on the LP-attributable residual (90% of it) - No GP catch-up. 4 of 6 confirmed against the executed partnership agreement, 1 made moot by it; the rest are proposed terms, subject to it.",
         "Investment Thesis",
         "* Occupancy Improvement: Increase physical occupancy from 88.0% to 93% through improved marketing and ECRI program.",
         "Key Metrics",
@@ -4804,14 +4816,15 @@
         "Senior loan $2,730,000 at 6.2%, 25-year amortization, 0 months IO, 10-year term. Sized off the base case at the lesser of LTV, DSCR and debt yield; bound by Max LTV at 65.0% LTV, 1.86x Year-1 DSCR and 14.7% debt yield. The SAME loan is carried through all three scenarios \u2014 sizing per scenario would hand the bear case a smaller loan and flatten the downside it exists to show.",
         "Levered Assumptions",
         "8.00% pref, annually compounded \u2014 Pref simple or compounded, and at what frequency",
-        "Contributed / unreturned capital \u2014 Accrual base: contributed/unreturned or committed",
+        "Committed capital (all committed equity funds at close, so this equals contributed/unreturned) \u2014 Accrual base: contributed/unreturned or committed",
         "Return of capital first (presentation only: the pref compounds, so no dollar moves) \u2014 Return of capital before pref, or pref first",
         "Above the waterfall (deal expense) \u2014 1.00% of invested equity, measured at the start of each period \u2014 AM fee above the waterfall or netted from LP",
         "20% promote on the LP-attributable residual (90% of it) \u2014 Promote on 100% of residual or LP-attributable only",
+        "No GP catch-up \u2014 GP catch-up tier above the pref",
         "Maximum Offer Price",
         "At a target 10% base case unlevered IRR, the maximum offer price is $5,143,814 (implied entry cap: 7.4%).",
         "At a target 15% LP NET IRR \u2014 after debt service, the asset-management fee and the GP promote \u2014 the maximum offer price is $4,672,796 (implied entry cap: 8.2%). At that price the deal supports $3,037,317 of senior debt (63.9% LTV, bound by Max LTV) and requires $1,712,580 of equity.",
-        "This price is computed on the levered assumption set stated under Levered Returns above: 8.00% pref, annually compounded; Contributed / unreturned capital; Return of capital first (presentation only: the pref compounds, so no dollar moves); Above the waterfall (deal expense) \u2014 1.00% of invested equity, measured at the start of each period; 20% promote on the LP-attributable residual (90% of it).",
+        "This price is computed on the levered assumption set stated under Levered Returns above: 8.00% pref, annually compounded; Committed capital (all committed equity funds at close, so this equals contributed/unreturned); Return of capital first (presentation only: the pref compounds, so no dollar moves); Above the waterfall (deal expense) \u2014 1.00% of invested equity, measured at the start of each period; 20% promote on the LP-attributable residual (90% of it); No GP catch-up.",
         "7. Value-Add Opportunities",
         "Identified 3 revenue enhancement opportunities. Estimated total annual NOI uplift: $42,194. 5 capital improvement item(s) identified for evaluation.",
         "8. Risk Analysis",
@@ -6245,7 +6258,7 @@
           [
             "Debt & Waterfall",
             "Pref Accrual Base",
-            "contributed",
+            "committed",
             "model default"
           ],
           [

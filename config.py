@@ -911,25 +911,48 @@ DEBT_TERMS = {
                               # exit fee; bridge paper is where this bites
 }
 
+# ── Preferred return: two rates, chosen by the capital stack ────────
+# The fund charges a different pref depending on whether the deal is
+# levered (operator, 2026-08-12, reading the LPA). Two constants rather
+# than one key in WATERFALL_TERMS below, because a key there would be a
+# THIRD answer to the same question and the stale one would win on
+# whichever path read the dict first — the two-constants-disagreeing
+# failure design decision 9 paid for once already.
+#
+# `model.waterfall.resolve_pref_rate` is THE resolver; every surface
+# reads it rather than these names, and it takes the deal's INTENT to
+# lever (its resolved `max_ltv`), never the loan the sizer produced —
+# an outcome-driven pref would step mid-bisection inside
+# `solve_max_price_levered` and break the monotonicity decision 8
+# guards. A per-deal override on the assumptions page still wins.
+PREF_RATE_LEVERED = 0.08
+PREF_RATE_UNLEVERED = 0.06
+
 # ── Waterfall Terms (item E2) ───────────────────────────────────────
-# Defaults for model.waterfall.WaterfallTerms — ONE tier: an 8%
-# preferred return on unreturned capital, then a 20% promoted interest
-# to the GP on the residual. Operator fund terms, recorded in
-# docs/levered-waterfall-design.md. No catch-up, no clawback, no second
-# hurdle; the tier COUNT is a scope decision, not a setting.
+# Defaults for model.waterfall.WaterfallTerms — ONE tier: a preferred
+# return on committed capital (the two rates above), then a 20%
+# promoted interest to the GP on the residual. Operator fund terms,
+# recorded in docs/levered-waterfall-design.md. No catch-up, no
+# clawback, no second hurdle; the tier COUNT is a scope decision, not a
+# setting.
 #
 # `gp_coinvest_pct` is deliberately NOT a key here. It lives in the
 # capital block above as GP_COINVEST_PCT, because
 # model.returns_model.resolve_capital_structure already reads it for the
 # Sources & Uses stack — a second copy is exactly the silent divergence
-# the single-source-of-truth rule forbids.
+# the single-source-of-truth rule forbids. `pref_rate` is absent for the
+# same class of reason — see the block above.
 #
-# Four of these five values are open LPA questions (docs/scoped-backlog.md
-# item E). They ship as stamped defaults: model.waterfall.assumption_stamp
-# renders the resolved set, and no LP net IRR is displayed without it.
-# `accrual_base="committed"` and `am_fee_treatment="netted_from_lp"` are
-# real market conventions this module does NOT implement and will raise
-# on, rather than quietly running the default.
+# After the 2026-08-12 reading only `promote_basis` (LPA question 5) is
+# still a build default; the rest are confirmed below. They ship stamped
+# either way: model.waterfall.assumption_stamp renders the resolved set,
+# and no LP net IRR is displayed without it.
+# `am_fee_treatment="netted_from_lp"` is a real market convention this
+# module does NOT implement and will raise on, rather than quietly
+# running the default. `accrual_base` no longer raises on either value —
+# the LPA says "committed", and under this model's cash-flow
+# construction that is the same accrual as "contributed", proven by test
+# rather than asserted.
 #
 # Out of _PATCHED_DICTS for the reason recorded above the capital block:
 # a patched dict is mutated in place for one deal's run, so anything
@@ -939,17 +962,16 @@ DEBT_TERMS = {
 #
 # WIRED BY ITEM E3a via model.levered.build_levered_returns.
 WATERFALL_TERMS = {
-    "pref_rate": 0.08,
     "pref_compounding": "annual",   # "annual" | "simple" — ~19% of promote
     "ordering": "roc_first",        # only bites when the pref is simple
     "promote_split": 0.20,          # GP share of the LP-attributable residual
-    "accrual_base": "contributed",  # contributed/unreturned, not committed
+    "accrual_base": "committed",    # the LPA's word; == contributed here
     "am_fee_treatment": "above_waterfall",   # a deal expense, charged by E3
     "catch_up": False,              # scoped out; True raises
 }
 
 # ── Which LPA questions have actually been read (item E4) ───────────
-# The five conventions above shipped as BUILD DEFAULTS — plausible
+# The conventions above shipped as BUILD DEFAULTS — plausible
 # choices standing in for a document nobody had opened. `model.waterfall.
 # assumption_stamp` prints all five beside every LP net IRR, and the rule
 # is that a stamped figure is a labeled assumption, not a decision-grade
@@ -972,6 +994,28 @@ LPA_CONFIRMED = {
     # promote riding on it — and confirming it MOOTS `ordering` for free,
     # since ROC-before-pref only moves a dollar when the pref is simple.
     "pref_compounding": "2026-08-09",
+    # Operator confirmed 2026-08-12, reading the LPA on three questions
+    # in one sitting. Two of them name the value the build had already
+    # guessed; one does not.
+    #
+    #   accrual_base — the LPA says COMMITTED capital, where the build
+    #     had assumed contributed/unreturned. It does NOT move a number:
+    #     the operator's reading of the clauses (committed == funded at
+    #     close, a later call accrues from its own date, the base falls
+    #     as capital is returned) describes the accrual this model
+    #     already ran. The value above changes to the document's word so
+    #     the stamp stops disclosing a base the LPA does not name; see
+    #     the equivalence argument and its precondition in
+    #     model/waterfall.py.
+    #   am_fee_treatment — above the waterfall, as built.
+    #   catch_up — none "at this time", as built. The qualifier is why
+    #     this is a dated confirmation rather than a settled fact.
+    "accrual_base": "2026-08-12",
+    "am_fee_treatment": "2026-08-12",
+    "catch_up": "2026-08-12",
+    # `promote_basis` (LPA question 5 — promote on the LP-attributable
+    # residual, GP co-invest earning pref pari passu) is the LAST open
+    # row. Deliberately absent: nobody has read that clause.
 }
 
 # ── Asset-Management Fee (item E3a) ─────────────────────────────────

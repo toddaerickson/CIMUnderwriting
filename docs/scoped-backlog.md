@@ -317,7 +317,9 @@ the list below were already fixed by #31 and #23 before this item started.
 sequencing dependency on item E). The XLSM writer is a parallel assumptions
 system, and E3a made its literals live contradictions: the app now computes
 levered returns from `DEBT_TERMS` (6.25% / 25-yr / 0-IO / 10-yr) and
-`WATERFALL_TERMS` (8% pref, 20% promote, `GP_COINVEST_PCT` 0.10) while every
+`WATERFALL_TERMS` (20% promote, `GP_COINVEST_PCT` 0.10, plus the pref rate —
+which since 2026-08-12 resolves from `PREF_RATE_LEVERED`/`PREF_RATE_UNLEVERED`
+rather than living in that dict) while every
 XLSM artifact still asserts 6.5% / 360-mo amort / 12-mo IO / 60-mo term
 (lines 201–209), an env-var waterfall (6% GP equity, 1% AM fee, 20% promote —
 lines 450–455), an 8%-or-6% pref formula (H258), terminal cap = entry +
@@ -329,6 +331,16 @@ reserve, a 6.5% entry-cap fallback (421), a 6% mgmt-fee fallback, and CapEx
 timing months 1–6. Two deliverables asserting different terms on the same
 deal is the exact failure mode the audit flagged, and as of E3a it ships in
 production. This is therefore the blocking piece of E3b, not a follow-up.
+
+**One item on that list was not a contradiction — 2026-08-12.** The
+"8%-or-6% pref formula (H258)" was the template being RIGHT: the LPA charges
+8% on levered deals and 6% on unlevered ones, and the app was the side
+carrying a single hard-coded rate. E3b overrode the formula with that single
+rate under rule 2 ("contradictions resolve to config"), which was correct
+procedure applied to a wrong premise — the rule assumes config is the more
+considered artifact, and here the fifteen-year-old workbook was. The app now
+carries both rates and the writer's comment records the reversal. Nothing else
+on the list is disturbed; this is one entry, not a verdict on the item.
 
 Rules:
 
@@ -377,15 +389,38 @@ re-runs the solved price forward through the full levered stack.
 
 **Assumption stamp instead of a block.** The design doc lists 7 LPA
 confirmations. One tier plus the operator's no-clawback term answers two of
-them. Five still change the number and stay open:
+them. Six change the number; after the 2026-08-12 reading exactly ONE is
+still open:
 
-| # | Open question | Build default | Effect if wrong | Status |
-|---|---------------|---------------|-----------------|--------|
+| # | Question | Resolved value | Effect if wrong | Status |
+|---|----------|----------------|-----------------|--------|
 | 1 | Pref simple or compounded, and at what frequency | annually compounded | ~19% swing in GP promote | **CONFIRMED 2026-08-09** |
-| 2 | Accrual base: contributed/unreturned vs committed | contributed/unreturned | material on slow-draw deals | open |
+| 2 | Accrual base: contributed/unreturned vs committed | **committed** | none here — see below | **CONFIRMED 2026-08-12** |
 | 3 | ROC-before-pref or pref-before-ROC | ROC first (only matters if simple) | $81,600 vs $72,000 GP on the doc's fixture | **MOOT** (see below) |
-| 4 | AM fee above the waterfall or netted from LP distributions | above (deal expense) | shifts LP net IRR directly | open |
+| 4 | AM fee above the waterfall or netted from LP distributions | above (deal expense) | shifts LP net IRR directly | **CONFIRMED 2026-08-12** |
 | 5 | Promote on 100% of residual or LP-attributable share only | LP-attributable only | GP overpaid by its co-invest share | open |
+| 6 | GP catch-up tier above the pref | none | GP recovers pref leakage; promote rises | **CONFIRMED 2026-08-12** |
+
+**Question 2 changed the WORD, not the number.** The LPA says committed
+capital. Under the operator's reading of the surrounding clauses — what is
+committed is funded at close, a later call accrues from its own date, and
+the base falls as capital is returned — that describes the accrual the
+model already ran, so 'committed' and 'contributed' are one arithmetic
+here. `test_the_two_accrual_bases_agree_to_the_cent` proves it rather than
+asserting it, and `model/waterfall.py` records the precondition that would
+break the equivalence (an uncalled commitment becoming expressible). The
+stored value changed regardless: a stamp reading "contributed" beside
+terms saying "committed" discloses a base the document does not name.
+
+**Question 6 was not on this list**, because it was filed as a scope
+decision (one tier) rather than an LPA question. It is both, and it now
+carries a stamp row — an LP reading "20% promote on the LP-attributable
+residual" cannot tell from that line whether a catch-up sits above it.
+
+**The pref RATE is two rates**: 8% levered, 6% unlevered (2026-08-12),
+per-deal overridable, keyed on the deal's intent to lever rather than on
+the sized loan. See CLAUDE.md decision 7 — including that this rule
+already existed in the v1.2 XLSM and the writer overrode it as a defect.
 
 **Question 1 is confirmed, and confirming it closed question 3 for free.**
 The operator read the pref clause on 2026-08-09: annually compounded, which
@@ -410,10 +445,10 @@ subject to the final partnership agreement" applies only to the rows that
 still need it, with a count when the stamp is mixed. Overstating and
 understating are both costly on the one document that leaves the firm.
 
-**Three of the five remain genuinely open** (2, 4, 5) — and per CLAUDE.md
-decision 7, two of those have exactly one implemented value with the
-alternative raising, so they deliberately get no form field. The LP net IRR
-is closer to decision-grade than it was, and still not there.
+**As of 2026-08-12 exactly one remains open** (5, `promote_basis`) — and per
+CLAUDE.md decision 7 it has exactly one implemented value with the alternative
+raising, so it deliberately gets no form field. The LP net IRR is decision-grade
+on every axis but that one.
 
 Build with these as **named parameters carrying the defaults above**, and print
 the resolved assumption set next to every LP net IRR we display. That converts a

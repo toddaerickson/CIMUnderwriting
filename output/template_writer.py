@@ -37,10 +37,12 @@ the writer stamps them into the workbook itself
 (`_write_divergence_disclosures`) as well as here:
 
 1. **The pref is an IRR hurdle** (H248 "IRR Hurdle"; the hurdle rows are
-   H249-H252). `model.waterfall` runs an ACCRUAL account on
-   contributed/unreturned capital. Same 8%, different construction, so
-   the promote dollars differ. Writing `pref_rate` into the hurdle rows
-   makes the two agree on the RATE, which is as far as an input cell reaches. A
+   H249-H252). `model.waterfall` runs an ACCRUAL account on unreturned
+   committed capital. Same rate — 8% levered, 6% unlevered, resolved by
+   `model.waterfall.resolve_pref_rate` — but a different construction,
+   so the promote dollars differ. Writing `pref_rate` into the hurdle
+   rows makes the two agree on the RATE, which is as far as an input
+   cell reaches. A
    future edit of the TEMPLATE could swap the hurdle formula for an
    accrual — that is an XLSM edit, not a writer change; until someone
    makes it, the divergence is permanent and disclosed.
@@ -298,9 +300,10 @@ _DISCLOSURE_AM_FEE_CELL = "B266"
 # mechanism are what the reader needs; the rates live in their cells.
 _PREF_DISCLOSURE = (
     "Note: this workbook's pref (H248) is an IRR hurdle; the app's "
-    "waterfall accrues the pref on unreturned capital. Same rate (H249), "
-    "different construction, so promote dollars differ from the memo. "
-    "Not reachable from an input cell; disclosed here instead."
+    "waterfall accrues the pref on unreturned committed capital. Same "
+    "rate (H249), different construction, so promote dollars differ "
+    "from the memo. Not reachable from an input cell; disclosed here "
+    "instead."
 )
 _AM_FEE_DISCLOSURE = (
     "Note: H245 charges the AM fee on LP equity (K61); the app charges "
@@ -1075,10 +1078,22 @@ def _write_waterfall(ws, terms, am_fee_pct: float):
     # Include GP fees in analysis
     ws["I242"] = _YES
 
-    # Preferred return. In v1.2 this overwrote a formula that made the
-    # pref depend on whether the deal was levered — not a term in the
-    # LPA. v1.3 ships plain literals instead, and they are overwritten
-    # for the same reason: the rate is the fund's, not the template's.
+    # Preferred return. **The v1.2 formula this used to call wrong was
+    # right.** It read `IF(H64>0, 0.08, IF(H64=0, 0.06, "n/a"))` — a
+    # pref that depends on whether the deal is levered — and the comment
+    # here dismissed that as "not a term in the LPA". It is exactly a
+    # term in the LPA (operator, 2026-08-12): 8% levered, 6% unlevered.
+    # The template had encoded the fund's terms and this writer overrode
+    # them as a defect.
+    #
+    # Writing a value is still correct, and now for an honest reason:
+    # `terms.pref_rate` already resolved through the same rule via
+    # `model.waterfall.resolve_pref_rate`, off the deal's INTENT to
+    # lever rather than off this workbook's own H65, and a per-deal
+    # override wins over both. So the cell gets the fund's rate for this
+    # deal instead of the workbook's re-derivation of it — which would
+    # otherwise disagree on exactly the deal where the sizer funds $0
+    # against a 65% cap.
     for row in _HURDLE_ROWS:
         ws.cell(row=row, column=_COL_HURDLE).value = terms.pref_rate
 

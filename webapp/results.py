@@ -404,8 +404,9 @@ def levered_context(r) -> dict:
              "dscr": fmt_x(row.get("dscr"))}
             for row in base.get("years") or []],
         # The scope contract's rule: no LP net IRR leaves the building
-        # without its stamp. Five of these are still open LPA questions
-        # and each one changes the number.
+        # without its stamp. Each row changes the number, and the rows
+        # carry their own confirmed/moot/open state — do not restate a
+        # count here, it goes stale the day the operator reads a clause.
         "levered_stamp": [{"question": row.get("question"),
                            "label": row.get("label")}
                           for row in base.get("assumption_stamp") or []],

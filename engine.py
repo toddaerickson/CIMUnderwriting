@@ -425,8 +425,15 @@ def run_analysis(result: AnalysisResult, progress: Callable = None,
         # without `capital_structure=`, a deal edited to 25% would print
         # a stack split 25/75 beside an LP net IRR computed on 10/90.
         resolved_debt_terms = resolve_debt_terms(debt_terms)
+        # `is_levered` picks the pref default — 8% levered, 6% unlevered
+        # (LPA, 2026-08-12). Resolved here rather than inside the model
+        # because this is the one place that holds the deal's debt terms
+        # BEFORE any loan is sized, which is precisely the input
+        # `resolve_pref_rate` requires: the deal's intent to lever, not
+        # the sizer's output.
         resolved_waterfall_terms = resolve_waterfall_terms(
-            waterfall_terms, capital_structure=capital)
+            waterfall_terms, capital_structure=capital,
+            is_levered=resolved_debt_terms.is_levered())
 
         model = build_returns_model(
             adjusted_ttm_noi=result.adjusted_noi,

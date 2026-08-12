@@ -117,12 +117,12 @@ def test_levered_solver_capex_reduces_price():
 def test_levered_solver_carries_its_assumption_stamp():
     """No LP net IRR leaves the building without its stamp — and a max
     offer PRICED off an LP net IRR inherits the rule (CLAUDE.md key
-    design decision 7). Five open LPA questions each move this price."""
+    design decision 7). Six LPA questions each move this price."""
     solved = solve_max_price_levered(adjusted_ttm_noi=300_000)
     stamp = solved["assumption_stamp"]
     assert {row["key"] for row in stamp} == {
         "pref_compounding", "accrual_base", "ordering", "am_fee_treatment",
-        "promote_basis"}
+        "promote_basis", "catch_up"}
     # The AM-fee row must name the rate and base actually charged;
     # without them "net" is unqualified.
     am_fee = next(r for r in stamp if r["key"] == "am_fee_treatment")

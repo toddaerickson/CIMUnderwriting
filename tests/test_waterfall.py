@@ -20,11 +20,13 @@ period k first earns at k+1.
 import pytest
 
 import config as cfg
-from model.waterfall import (ACCRUAL_BASE_COMMITTED, AM_FEE_NETTED_FROM_LP,
+from model.waterfall import (ACCRUAL_BASE_COMMITTED, ACCRUAL_BASE_CONTRIBUTED,
+                             AM_FEE_NETTED_FROM_LP,
                              COMPOUNDING_ANNUAL, COMPOUNDING_SIMPLE,
                              ORDERING_PREF_FIRST, ORDERING_ROC_FIRST,
                              WaterfallTerms, assumption_stamp,
-                             resolve_waterfall_terms, run_waterfall)
+                             resolve_pref_rate, resolve_waterfall_terms,
+                             run_waterfall)
 
 CENT = 0.005          # "to the cent" — half a cent of slack for float noise
 
@@ -737,9 +739,49 @@ def test_a_catch_up_tier_is_refused_not_ignored():
         WaterfallTerms(catch_up=True)
 
 
-def test_a_committed_capital_accrual_base_is_refused():
-    with pytest.raises(NotImplementedError, match="committed"):
-        WaterfallTerms(accrual_base=ACCRUAL_BASE_COMMITTED)
+def test_a_committed_capital_accrual_base_is_accepted():
+    """It used to raise. The operator read the LPA on 2026-08-12 and
+    'committed' is the fund's actual term, so a raise would now reject
+    the truth and accept the guess."""
+    terms = WaterfallTerms(accrual_base=ACCRUAL_BASE_COMMITTED)
+    assert terms.accrual_base == ACCRUAL_BASE_COMMITTED
+
+
+def test_the_two_accrual_bases_agree_to_the_cent():
+    """The equivalence the module claims, checked rather than believed.
+
+    Under the LPA's clauses as the operator read them — committed
+    capital is what is funded at close, a later call accrues from its
+    own date, and the base falls as capital is returned — 'committed'
+    and 'contributed' name one accrual. So every dollar of the design
+    doc's oracle must be identical under both, INCLUDING the shape that
+    could plausibly separate them: a deal with a mid-hold capital call.
+
+    If this test ever fails, the equivalence has stopped holding and the
+    stamp is disclosing a base the model does not run. The likely cause
+    is named in `model/waterfall.py`: an uncalled commitment became
+    expressible.
+    """
+    contributions = [1_000_000.0, 0.0, 250_000.0, 0.0, 0.0, 0.0]
+    distributions = [0.0, 50_000.0, 60_000.0, 70_000.0, 80_000.0, 1_500_000.0]
+
+    def run(base):
+        return run_waterfall(contributions, distributions,
+                             WaterfallTerms(accrual_base=base))
+
+    committed = run(ACCRUAL_BASE_COMMITTED)
+    contributed = run(ACCRUAL_BASE_CONTRIBUTED)
+
+    # The WHOLE result, not a chosen figure: every period row, both
+    # cash-flow series, the promote, the IRRs. A comparison that picked
+    # its own fields could pass while the rows disagreed.
+    assert committed["terms"]["accrual_base"] == ACCRUAL_BASE_COMMITTED
+    assert contributed["terms"]["accrual_base"] == ACCRUAL_BASE_CONTRIBUTED
+    # `terms` and the stamp DO differ — they carry the name. Everything
+    # downstream of the accrual must not.
+    for result in (committed, contributed):
+        del result["terms"], result["assumption_stamp"]
+    assert committed == contributed
 
 
 def test_netting_the_am_fee_from_lp_distributions_is_refused():
@@ -847,10 +889,9 @@ def test_resolve_reads_config_and_applies_overrides():
 
 
 def test_an_omitted_key_means_the_default_and_an_explicit_zero_means_zero():
-    assert resolve_waterfall_terms({}).pref_rate == \
-        cfg.WATERFALL_TERMS["pref_rate"]
-    assert resolve_waterfall_terms({"pref_rate": None}).pref_rate == \
-        cfg.WATERFALL_TERMS["pref_rate"]
+    assert resolve_waterfall_terms({}).pref_rate == cfg.PREF_RATE_LEVERED
+    assert (resolve_waterfall_terms({"pref_rate": None}).pref_rate
+            == cfg.PREF_RATE_LEVERED)
     assert resolve_waterfall_terms({"promote_split": 0}).promote_split == 0.0
 
 
@@ -860,7 +901,7 @@ def test_an_unknown_override_key_is_logged_and_ignored(caplog):
     with caplog.at_level("WARNING", logger="cim_analyst"):
         terms = resolve_waterfall_terms({"second_hurdle": 0.14})
     assert "second_hurdle" in caplog.text
-    assert terms.pref_rate == cfg.WATERFALL_TERMS["pref_rate"]
+    assert terms.pref_rate == cfg.PREF_RATE_LEVERED
 
 
 def test_an_unknown_override_value_still_raises():
@@ -907,15 +948,22 @@ def test_dataclass_defaults_do_not_drift_from_config():
 
     It checks the key SETS as well as the values. Comparing only the
     keys present in both is drift-blind in the direction that matters:
-    delete or rename `pref_rate` in config and the mirrored dataclass
-    default silently becomes the only source of truth, which is exactly
-    the divergence the rule exists to prevent — and it would pass a
+    delete or rename a key in config and the mirrored dataclass default
+    silently becomes the only source of truth, which is exactly the
+    divergence the rule exists to prevent — and it would pass a
     value-only comparison.
+
+    `pref_rate` is exempted from the key-set check and pinned separately
+    BELOW, not dropped: it deliberately has no key in
+    `config.WATERFALL_TERMS` because it resolves from the deal's
+    leverage (8% / 6%), and the dataclass default mirrors the levered
+    rate for direct construction. Exempting it without pinning it is the
+    hole this docstring warns about, so both halves are here.
     """
     import dataclasses
 
     defaults = {f.name: f.default for f in dataclasses.fields(WaterfallTerms)}
-    expected_keys = set(defaults) - {"gp_coinvest_pct"}   # see the test below
+    expected_keys = set(defaults) - {"gp_coinvest_pct", "pref_rate"}
     assert set(cfg.WATERFALL_TERMS) == expected_keys, (
         "config.WATERFALL_TERMS and WaterfallTerms describe different term "
         f"sets — config only: {sorted(set(cfg.WATERFALL_TERMS) - expected_keys)}, "
@@ -928,27 +976,100 @@ def test_dataclass_defaults_do_not_drift_from_config():
         "WaterfallTerms defaults drifted from config.WATERFALL_TERMS "
         f"(field default, config value): {drifted}")
     assert defaults["gp_coinvest_pct"] == cfg.GP_COINVEST_PCT
+    assert defaults["pref_rate"] == cfg.PREF_RATE_LEVERED
 
 
 def test_config_defaults_are_the_operator_fund_terms():
-    """8% pref, 20/80 above it, no catch-up — recorded in
-    docs/levered-waterfall-design.md and in the fund-structure memo."""
-    assert cfg.WATERFALL_TERMS["pref_rate"] == 0.08
+    """8% pref levered and 6% unlevered, 20/80 above it, no catch-up,
+    accruing on committed capital — recorded in
+    docs/levered-waterfall-design.md and in the fund-structure memo, and
+    confirmed against the LPA on 2026-08-12 (all but promote_basis)."""
+    assert cfg.PREF_RATE_LEVERED == 0.08
+    assert cfg.PREF_RATE_UNLEVERED == 0.06
     assert cfg.WATERFALL_TERMS["promote_split"] == 0.20
     assert cfg.WATERFALL_TERMS["catch_up"] is False
+    assert cfg.WATERFALL_TERMS["accrual_base"] == ACCRUAL_BASE_COMMITTED
 
 
 # ── The assumption stamp ────────────────────────────────────────────
 
-def test_every_open_lpa_question_appears_in_the_stamp():
+def test_every_lpa_question_appears_in_the_stamp():
     """"Do not let an LP net IRR leave the building without its stamp."
-    Five open questions, five rows."""
+
+    Six rows since 2026-08-12: `catch_up` joined when the operator
+    confirmed there is none. A confirmed question keeps its row — the
+    stamp discloses what priced the number, not what is still unknown,
+    and dropping answered rows would leave a reader unable to tell a
+    confirmed convention from one nobody thought about.
+    """
     stamp = assumption_stamp(resolve_waterfall_terms())
     assert [row["key"] for row in stamp] == [
         "pref_compounding", "accrual_base", "ordering", "am_fee_treatment",
-        "promote_basis"]
+        "promote_basis", "catch_up"]
     assert all(row["question"] and row["label"] for row in stamp)
     assert _run(ORACLE_1)["assumption_stamp"] == assumption_stamp(ORACLE_1)
+
+
+# ── The pref depends on the capital stack (LPA, 2026-08-12) ─────────
+
+def test_the_pref_default_follows_the_deal_s_leverage():
+    """8% levered, 6% unlevered. Two rates, one resolver."""
+    assert resolve_pref_rate(is_levered=True) == cfg.PREF_RATE_LEVERED
+    assert resolve_pref_rate(is_levered=False) == cfg.PREF_RATE_UNLEVERED
+    assert resolve_waterfall_terms(is_levered=True).pref_rate == 0.08
+    assert resolve_waterfall_terms(is_levered=False).pref_rate == 0.06
+
+
+def test_an_unknown_leverage_resolves_to_the_levered_rate():
+    """`None` is "the caller does not know", and every deal in this app
+    is sized at config.DEBT_TERMS unless it says otherwise (decision 6),
+    so the levered rate is the safe reading. The CLI takes this path."""
+    assert resolve_waterfall_terms().pref_rate == cfg.PREF_RATE_LEVERED
+    assert (resolve_waterfall_terms(is_levered=None).pref_rate
+            == cfg.PREF_RATE_LEVERED)
+
+
+def test_a_per_deal_pref_wins_over_both_defaults():
+    """"The preferred return can be adjusted" — the leverage rule sets
+    the DEFAULT, not a ceiling, and it must not overwrite a deal that
+    named its own rate on either side of the switch."""
+    for is_levered in (True, False):
+        terms = resolve_waterfall_terms({"pref_rate": 0.07},
+                                        is_levered=is_levered)
+        assert terms.pref_rate == 0.07
+
+
+def test_the_pref_reads_config_at_call_time_not_at_import(monkeypatch):
+    """The binding failure this repo has paid for twice —
+    `SOLVER_TARGET_IRR` and `DEFAULT_HOLD_YEARS`. A run under
+    `_patched_config` mutates config in place, and a rate frozen at
+    import would price the waterfall off the wrong one."""
+    monkeypatch.setattr(cfg, "PREF_RATE_UNLEVERED", 0.05)
+    assert resolve_pref_rate(is_levered=False) == 0.05
+    assert resolve_waterfall_terms(is_levered=False).pref_rate == 0.05
+
+
+def test_leverage_is_the_deal_s_intent_not_the_sized_loan():
+    """`DebtTerms.is_levered` reads `max_ltv`, the only switch that turns
+    debt off outright — NOT the loan the sizer produced.
+
+    A deal that names 65% leverage and sizes to $0 on a weak debt yield
+    is still a levered DEAL. Reading the outcome instead would also put
+    a step discontinuity inside `solve_max_price_levered`, which
+    re-sizes the loan at every candidate price — the monotonicity
+    decision 8 guards.
+    """
+    from model.debt import resolve_debt_terms, size_loan
+
+    terms = resolve_debt_terms({"max_ltv": 0.65, "min_debt_yield": 0.50})
+    sized = size_loan(price=10_000_000, y1_noi=300_000, terms=terms)
+    assert sized["loan"] == pytest.approx(600_000)   # debt-yield bound...
+    assert sized["loan"] < 0.65 * 10_000_000         # ...far under the cap
+    assert terms.is_levered() is True    # ...and the deal is still levered
+    assert resolve_debt_terms({"max_ltv": 0}).is_levered() is False
+    # The pref follows the intent, so this deal keeps the levered rate.
+    assert (resolve_waterfall_terms(is_levered=terms.is_levered()).pref_rate
+            == cfg.PREF_RATE_LEVERED)
 
 
 def test_the_stamp_says_when_ordering_is_inert():
@@ -973,10 +1094,27 @@ def test_a_confirmed_question_is_marked_confirmed_and_dated():
 
 
 def test_an_unconfirmed_question_stays_open_and_carries_no_date():
+    """`promote_basis` is the last one nobody has read. When it is
+    confirmed this test needs a different subject, not deletion — the
+    failing-open default is what makes the stamp trustworthy, and it
+    has to keep being exercised by something."""
     row = {r["key"]: r for r in assumption_stamp(ORACLE_1)}
-    for key in ("accrual_base", "am_fee_treatment", "promote_basis"):
-        assert row[key]["status"] == "open", key
-        assert "confirmed_on" not in row[key], key
+    assert row["promote_basis"]["status"] == "open"
+    assert "confirmed_on" not in row["promote_basis"]
+
+
+def test_the_2026_08_12_reading_is_confirmed_and_dated():
+    """Three questions read in one sitting. Two named the value the
+    build had guessed; `accrual_base` did not — the LPA says committed
+    capital, and the stamp now says so too."""
+    row = {r["key"]: r for r in assumption_stamp(resolve_waterfall_terms())}
+    for key in ("accrual_base", "am_fee_treatment", "catch_up"):
+        assert row[key]["status"] == "confirmed", key
+        assert row[key]["confirmed_on"] == cfg.LPA_CONFIRMED[key], key
+    assert "Committed capital" in row["accrual_base"]["label"]
+    # The reader is told the name is the fund's and the arithmetic is
+    # unchanged, rather than being left to wonder which base priced it.
+    assert "equals contributed/unreturned" in row["accrual_base"]["label"]
 
 
 def test_confirming_the_compounding_moots_ordering_rather_than_confirming_it():

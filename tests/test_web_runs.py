@@ -845,7 +845,7 @@ def test_run_payload_carries_the_levered_lens(client, operator, deals_dir,
     # displayed later without recomputing what it assumed.
     assert {r["key"] for r in offer["assumption_stamp"]} == {
         "pref_compounding", "accrual_base", "ordering", "am_fee_treatment",
-        "promote_basis"}
+        "promote_basis", "catch_up"}
     # The unlevered max offer is untouched beside it — second lens, not a
     # replacement.
     assert payload["max_offer"]["max_price"] > 0

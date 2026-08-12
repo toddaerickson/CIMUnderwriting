@@ -770,16 +770,27 @@ def _add_debt_rows(reg, debt_terms, waterfall_terms, am_fee_pct,
     from model.waterfall import resolve_waterfall_terms
     import dataclasses
 
+    from model.waterfall import resolve_pref_rate
+
     resolved_debt = (debt_terms if isinstance(debt_terms, dict)
                      else dataclasses.asdict(resolve_debt_terms(debt_terms)))
+    is_levered = float(resolved_debt.get("max_ltv") or 0.0) > 0.0
     resolved_wf = (waterfall_terms if isinstance(waterfall_terms, dict)
                    else dataclasses.asdict(resolve_waterfall_terms(
-                       waterfall_terms)))
+                       waterfall_terms, is_levered=is_levered)))
     deal_debt = (deal_overrides or {}).get("debt_terms") or {}
     deal_wf = (deal_overrides or {}).get("waterfall_terms") or {}
+    # `pref_rate` has no key in config.WATERFALL_TERMS — it resolves from
+    # the deal's leverage — so the defaults dict is extended with what
+    # THE resolver would have returned for this deal. Without it, a deal
+    # that names its own pref would report `was: None`, which reads as
+    # "this displaced nothing" when it displaced 8% (or 6%). Read from
+    # the resolver, never recomputed here: decision 11's rule.
+    wf_defaults = dict(cfg.WATERFALL_TERMS,
+                       pref_rate=resolve_pref_rate(is_levered))
     for name, resolved, deal_section, defaults in (
             ("DEBT_TERMS", resolved_debt, deal_debt, cfg.DEBT_TERMS),
-            ("WATERFALL_TERMS", resolved_wf, deal_wf, cfg.WATERFALL_TERMS)):
+            ("WATERFALL_TERMS", resolved_wf, deal_wf, wf_defaults)):
         for key, value in resolved.items():
             # `gp_coinvest_pct` rides on the waterfall's resolved dict but
             # belongs to the capital stack, which already reported it. One

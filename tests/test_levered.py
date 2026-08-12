@@ -328,10 +328,10 @@ def test_the_am_fee_stamp_row_carries_the_rate_and_the_base(oracle_a):
     assert "set by the caller" not in row["label"]
     assert row["rate"] == pytest.approx(0.01)
     assert row["base"] == "invested_equity"
-    # The other four questions still get answered.
+    # The other five questions still get answered.
     assert {r["key"] for r in lev["assumption_stamp"]} == {
         "pref_compounding", "accrual_base", "ordering", "am_fee_treatment",
-        "promote_basis"}
+        "promote_basis", "catch_up"}
 
 
 def test_a_shortfall_is_reported_not_swallowed(oracle_c):
@@ -867,6 +867,44 @@ def test_submitting_the_defaults_writes_no_override_rows():
 
 
 @pytest.mark.django_db
+def test_an_unlevered_deal_prefills_the_unlevered_pref_and_stores_no_override():
+    """The pref default follows the deal's leverage — 8% / 6% (LPA,
+    2026-08-12) — and the two halves of the form must agree on which.
+
+    The failure this pins is quiet in both directions. If the prefill
+    kept showing 8% on a deal with no debt, the operator would look at a
+    pref the fund does not charge. If the prefill showed 6% but the
+    override diff still measured against 8%, merely OPENING and saving
+    the page would store 6% as an analyst decision nobody made —
+    freezing this deal against a later change to the rate and claiming
+    an override in `applied_overrides` that was really just the default.
+    """
+    from webapp.forms import build_initial, build_overrides
+    from webapp.models import Deal
+
+    deal = Deal.objects.create(
+        deal_id="lev-unlev", property_name="All Equity",
+        assumption_overrides={"debt_terms": {"max_ltv": 0}})
+
+    initial = build_initial(deal)
+    assert initial["wf_pref_rate"] == pytest.approx(
+        cfg.PREF_RATE_UNLEVERED * 100)
+
+    posted = {k: v for k, v in initial.items()
+              if v is not None and (k.startswith(("debt_", "wf_"))
+                                    or k == "am_fee_pct")}
+    out = build_overrides(_valid(_levered_form(**posted)), QueryDict(""), deal)
+    assert "waterfall_terms" not in out
+    # The deal's own max_ltv=0 is still a real override and must survive.
+    assert out["debt_terms"]["max_ltv"] == 0
+
+
+def _valid(form):
+    assert form.is_valid(), form.errors
+    return form.cleaned_data
+
+
+@pytest.mark.django_db
 def test_unexposed_debt_and_waterfall_keys_survive_a_save():
     """The trap this form's shape creates. Six keys have no field —
     `loan_type`, `index_rate`, `spread`, `accrual_base`,
@@ -1065,10 +1103,10 @@ def test_the_results_lens_renders_the_headline_the_loan_and_the_stamp(oracle_a):
     assert len(ctx["levered_years"]) == 5
     assert ctx["levered_years"][0]["am_fee"] == "$41,600"
 
-    # No LP net IRR leaves the building without its stamp — five of these
-    # are still open LPA questions and each one changes the number.
+    # No LP net IRR leaves the building without its stamp — six rows
+    # since the catch-up confirmation, and each one changes the number.
     stamp = {row["label"] for row in ctx["levered_stamp"]}
-    assert len(ctx["levered_stamp"]) == 5
+    assert len(ctx["levered_stamp"]) == 6
     assert any("of invested equity" in label for label in stamp)
 
 

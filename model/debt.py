@@ -183,6 +183,25 @@ class DebtTerms:
                     "would price a loan nobody offered and report the "
                     "result without complaint.")
 
+    def is_levered(self) -> bool:
+        """Does this deal INTEND to borrow?
+
+        `max_ltv` is the only switch that can turn debt off outright (see
+        the class docstring: a zero cap always applies, while a zero
+        coverage floor merely means the lender imposes no such test), so
+        intent is exactly `max_ltv > 0`.
+
+        **Intent, not outcome, and the caller must not substitute one for
+        the other.** `size_loan` takes the min of three caps, so a deal
+        can name 65% leverage and still size to $0 on a weak debt yield.
+        That deal borrowed nothing, but it is not an unlevered DEAL, and
+        the difference decides the preferred return —
+        `model.waterfall.resolve_pref_rate` reads this and argues the
+        case at length, including why an outcome-driven answer would put
+        a step discontinuity inside `solve_max_price_levered`.
+        """
+        return float(self.max_ltv or 0.0) > 0.0
+
     def all_in_rate(self) -> float:
         """The annual rate actually charged.
 

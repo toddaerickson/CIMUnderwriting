@@ -53,11 +53,16 @@
 These cannot be discharged by building anything; they are recorded here so the
 non-code items have one home:
 
-- [ ] Read LPA sections for the three still-open waterfall questions
-      (`accrual_base`, `am_fee_treatment`, `catch_up`) and add dated entries to
-      `config.LPA_CONFIRMED`. Note: for each of these three, the alternative
-      reading RAISES in code today — if the LPA disagrees with the shipped
-      default, that becomes real implementation work, not a config edit.
+- [x] Read LPA sections for `accrual_base`, `am_fee_treatment` and `catch_up`
+      — **done 2026-08-12**, dated entries in `config.LPA_CONFIRMED`. All three
+      matched the shipped default, so none became implementation work; the
+      reading did add the pref RATE as two numbers (8% levered / 6% unlevered)
+      and moved the catch-up question onto the stamp.
+- [ ] Read the LPA's promote clause — `promote_basis`, the LAST open waterfall
+      question (promote on the LP-attributable residual only, vs on 100% of
+      it). Same shape as the three above: a dated `config.LPA_CONFIRMED` entry
+      if it matches, real implementation work if it does not, because the
+      alternative reading RAISES in code today.
 - [ ] Real GC review of the LP investor summary. The current clearance is an
       ASSUMED approval (operator direction 2026-08-09, marked as such on every
       surface); a real review REPLACES the assumed row in
@@ -110,7 +115,8 @@ upfront, x% promote above a y% pref. No catch-up, no clawback, no tier builder.
 - [x] **E1.** Debt layer — `model/debt.py`, sizing as min(LTV, DSCR, debt-yield)
       with the binding constraint reported; monthly amort roll-forward
 - [x] **E2.** Single-hurdle waterfall — `model/waterfall.py`, deterministic
-      forward loop; 5 LPA questions remain open and ship as named, stamped defaults
+      forward loop; LPA questions ship as named, stamped defaults (5 open at
+      the time; 1 open as of 2026-08-12)
 - [x] **E3.** Levered wiring — assumptions / results / memo / xlsx; unlevered
       screen stays primary, levered is the second lens
 - [x] **E4.** Levered max offer — `solve_max_price_levered` targets a 15%

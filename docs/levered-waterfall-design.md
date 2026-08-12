@@ -16,11 +16,14 @@ E4 solver): `model/debt.py`, `model/waterfall.py`, `model/levered.py`,
 are reproduced in `tests/test_debt.py`. The LPA confirmations at the bottom
 were the original stated blocker and stopped being one (PR #21): they
 ship as named parameters carrying documented defaults, and every LP net IRR is
-displayed with its resolved assumption set. The number is not decision-grade
-until the LPA is actually read.
+displayed with its resolved assumption set. **Most of the LPA has since been
+read** — 2026-08-09 and 2026-08-12; one convention (`promote_basis`) is still
+outstanding, so the number is decision-grade on every axis but that one.
 
-Fund terms assumed (from operator): 8% pref, 20/80 promote above pref, no
-catch-up, ~10% GP co-invest, 1% AM fee, 15% LP **net** IRR target.
+Fund terms (from operator; the pref and the AM-fee placement confirmed against
+the LPA 2026-08-12): pref **8% levered / 6% unlevered**, per-deal adjustable ·
+20/80 promote above pref · no catch-up · ~10% GP co-invest · 1% AM fee **above
+the waterfall** · 15% LP **net** IRR target.
 
 **Scope decision (operator, 2026-07-29): ONE TIER.** GP charges a management
 fee, co-invests capital upfront, and earns an x% promoted interest above a y%
@@ -53,7 +56,10 @@ covenant headroom.
 
 - Pref is cumulative; live conventions: simple vs **annually compounded**
   (most common), on contributed/unreturned capital (standard) vs committed
-  (rare). $100M × 4yr × 8%: $32M simple vs $36.05M compounded.
+  (rare). $100M × 4yr × 8%: $32M simple vs $36.05M compounded. The LPA reading
+  (2026-08-12) landed on the rare one — committed — which in this model is the
+  same arithmetic; see question 2 below for why, and for the precondition that
+  would separate them.
 - Single-asset syndication behaves European-per-deal (return all capital +
   pref before promote). No catch-up → GP never recovers pref leakage; 80/20
   applies to residual only.
@@ -114,18 +120,37 @@ Unlevered screen stays primary; levered + waterfall is a second lens.
 
 ## ⚑ LPA confirmations required (answers change the numbers)
 
-Status 2026-07-29: **6 and 7 are answered** — no clawback, and "15% LP net" means
-net of both the AM fee and the promote (operator fund terms). **1–5 remain open**
-and ship as stamped defaults per [scoped-backlog.md](scoped-backlog.md) item E:
-annually compounded · contributed/unreturned capital · ROC first · AM fee above
-the waterfall · promote on the LP-attributable residual only.
+Status 2026-08-12: **only 5 is still open.** 6 and 7 were answered 2026-07-29;
+1 was read 2026-08-09; 2, 4 and the catch-up question were read 2026-08-12, and
+that confirmation MOOTED 3. The machine-readable version of this list is
+`config.LPA_CONFIRMED` (key → date read) — it, not this paragraph, is what the
+assumption stamp renders from, so a row confirmed here and not there still
+prints as open to an LP.
 
 1. 8% pref: simple or compounded? At what frequency? (moves GP promote ~19%)
-2. Accrual base: contributed/unreturned capital (assumed) or committed?
-3. ROC-vs-pref ordering as written (matters only if simple).
+   — **CONFIRMED 2026-08-09**: annually compounded.
+2. Accrual base: contributed/unreturned capital or committed? — **CONFIRMED
+   2026-08-12**: committed. Under the surrounding clauses (committed equity
+   funds at close, a later call accrues from its own date, the base falls as
+   capital is returned) this is arithmetically the same accrual the model
+   already ran; `test_the_two_accrual_bases_agree_to_the_cent` proves it, and
+   `model/waterfall.py` records the precondition that would separate them.
+   The pref RATE came with it: 8% levered, 6% unlevered, per-deal adjustable.
+3. ROC-vs-pref ordering as written (matters only if simple). — **MOOT**: 1
+   confirmed a compounded pref, under which the ordering cannot move a dollar.
+   Nobody read the clause; it stopped mattering.
 4. 1% AM fee: above the waterfall (deal expense) or netted from LP
-   distributions?
+   distributions? — **CONFIRMED 2026-08-12**: above the waterfall.
 5. GP co-invest: earns pref pari passu, promote on residual net of GP
-   pro-rata share (assumed standard)?
-6. Any clawback/escrow language on interim promote?
-7. "15% LP net IRR": net of both fee and promote (assumed yes)?
+   pro-rata share (assumed standard)? — **OPEN**, and now the only one. A
+   one-line `LPA_CONFIRMED` entry once read; the alternative (promote on 100%
+   of the residual) RAISES rather than silently recomputing, so a disagreeing
+   LPA fails loudly.
+6. Any clawback/escrow language on interim promote? — answered 2026-07-29: no
+   clawback.
+7. "15% LP net IRR": net of both fee and promote? — answered 2026-07-29: yes.
+8. GP catch-up tier above the pref? — **CONFIRMED 2026-08-12**: none. This was
+   not originally on this list (it was filed as a one-tier scope decision), but
+   an LP reading "20% promote above an 8% pref" cannot tell from that line
+   whether a catch-up sits between them, so it now carries a stamp row of its
+   own.

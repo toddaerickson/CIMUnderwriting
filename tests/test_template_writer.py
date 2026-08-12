@@ -577,7 +577,7 @@ def test_defaults_resolve_without_any_terms_passed(tmp_path, stub_template):
     set on that path, not a crash and not a literal."""
     cells = _generate(tmp_path)
     assert cells["I74"] == cfg.DEBT_TERMS["rate"]
-    assert cells["H249"] == cfg.WATERFALL_TERMS["pref_rate"]
+    assert cells["H249"] == cfg.PREF_RATE_LEVERED
     assert cells["H60"] == cfg.GP_COINVEST_PCT
     assert cells["G245"] == cfg.AM_FEE_PCT
 
