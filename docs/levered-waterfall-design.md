@@ -1,9 +1,20 @@
 # Levered returns + preferred-return waterfall — research & design
 
+> **Exit-NOI note (2026-08-10):** this document's oracles capitalize
+> YEAR 6 — the forward convention. The shipped default is
+> `config.EXIT_NOI_CONVENTION = "trailing"` (the terminal hold year's
+> own NOI), and the implemented forward branch steps revenue and
+> expenses at their separate rates, so it is the same convention as
+> these oracles but not the same arithmetic. See CLAUDE.md design
+> decision 5.
+
 Research date: 2026-07-28 (web sources; fixture arithmetic verified in Python).
-Status: DESIGN INPUT — not yet built. Scoped for build as item E in
+Status: BUILT — shipped as items E1–E4 in the order scoped in
 [scoped-backlog.md](scoped-backlog.md) (E1 debt → E2 waterfall → E3 wiring →
-E4 solver). The LPA confirmations at the bottom no longer block the build: they
+E4 solver): `model/debt.py`, `model/waterfall.py`, `model/levered.py`,
+`model/solver.py`. This file remains the design record; its numeric oracles
+are reproduced in `tests/test_debt.py`. The LPA confirmations at the bottom
+were the original stated blocker and stopped being one (PR #21): they
 ship as named parameters carrying documented defaults, and every LP net IRR is
 displayed with its resolved assumption set. The number is not decision-grade
 until the LPA is actually read.

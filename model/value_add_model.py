@@ -20,8 +20,10 @@ from analysis.fills import (EXPENSES_ABSENT, Fill, MARKET_RENT_ABSENT,
                             MissingUnderwritingInput, UNIT_DOLLARS, UNIT_PCT,
                             UNIT_PSF_MO, to_dicts)
 from analysis.valuation import (COERCED_SCENARIOS, resolve_exit_cap,
+                                resolve_exit_noi,
                                 resolve_hold_years, resolve_market_cap,
                                 resolve_transaction_costs)
+import config as cfg
 from config import VALUE_ADD_SCENARIOS, VALUE_ADD_TRIGGERS
 from registry import ScenarioType
 
@@ -191,12 +193,17 @@ def _run_single_va_scenario(name: str, params: dict,
     # Monthly expense growth rate
     monthly_exp_growth = (1 + expense_growth_annual) ** (1 / 12) - 1
 
-    # Build the monthly projection across the hold
+    # Build the monthly projection across the hold — plus ONE more year,
+    # so a forward exit (config.EXIT_NOI_CONVENTION) can capitalize year
+    # N+1 off the SAME ramp and growth formulas instead of a second copy
+    # that can drift. The hold-length slices below are what every other
+    # consumer sees, so under the trailing default nothing moves.
+    projection_months = hold_months + 12
     monthly_revenue = []
     monthly_expenses = []
     monthly_noi = []
 
-    for month in range(hold_months):
+    for month in range(projection_months):
         # Rent ramp: linear from in-place to target over stabilization period
         if month < months_to_stab:
             frac = month / months_to_stab
@@ -215,6 +222,12 @@ def _run_single_va_scenario(name: str, params: dict,
         monthly_revenue.append(rev)
         monthly_expenses.append(exp)
         monthly_noi.append(rev - exp)
+
+    # Year N+1's NOI, then trim every series back to the hold.
+    forward_annual_noi = sum(monthly_noi[hold_months:])
+    monthly_revenue = monthly_revenue[:hold_months]
+    monthly_expenses = monthly_expenses[:hold_months]
+    monthly_noi = monthly_noi[:hold_months]
 
     # Annualize: sum months into years
     annual_revenue = []
@@ -236,9 +249,15 @@ def _run_single_va_scenario(name: str, params: dict,
     if stab_end - stab_start < 12:
         stabilized_annual_noi = stabilized_annual_noi * 12 / (stab_end - stab_start)
 
-    # Exit value = forward NOI (final full year) / exit cap
-    yr5_noi = annual_noi[-1]
-    exit_value = yr5_noi / exit_cap if exit_cap > 0 else 0
+    # Exit NOI per config.EXIT_NOI_CONVENTION — the same selection the
+    # static DCF makes, through the same resolver, so one run cannot
+    # price its two exits on two conventions. (The old comment here
+    # called annual_noi[-1] "forward NOI (final full year)", which was
+    # wrong twice: the final hold year's own NOI is the TRAILING
+    # convention.)
+    exit_noi = resolve_exit_noi(annual_noi[-1], forward_annual_noi)
+    exit_noi_convention = cfg.EXIT_NOI_CONVENTION
+    exit_value = exit_noi / exit_cap if exit_cap > 0 else 0
 
     # Entry cap = Year 1 NOI / asking price
     entry_cap = annual_noi[0] / asking_price if asking_price > 0 else 0
@@ -251,7 +270,7 @@ def _run_single_va_scenario(name: str, params: dict,
     if name in COERCED_SCENARIOS and exit_cap < entry_cap:
         exit_cap = entry_cap
         exit_cap_coerced = True
-        exit_value = yr5_noi / exit_cap if exit_cap > 0 else 0
+        exit_value = exit_noi / exit_cap if exit_cap > 0 else 0
 
     # Disposition costs come out of gross exit value, same rule the static
     # DCF applies (analysis.valuation.project_cash_flows).
@@ -308,6 +327,12 @@ def _run_single_va_scenario(name: str, params: dict,
         "current_occupancy": current_occ,
         "target_occupancy": target_occ,
         "cash_flows": cash_flows,
+        # The NOI actually capitalized, and under which convention. Under
+        # "forward" it is year N+1's — a figure that appears nowhere in
+        # `annual_noi`, so a surface must be able to print it rather than
+        # showing an exit value beside a trailing NOI it does not tie to.
+        "exit_noi": exit_noi,
+        "exit_noi_convention": exit_noi_convention,
         "exit_value": exit_value,
         "disposition_cost": disposition_cost,
         "net_exit_proceeds": net_exit_proceeds,

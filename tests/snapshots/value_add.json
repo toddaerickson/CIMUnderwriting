@@ -1219,7 +1219,7 @@
           "v": "Exit Cap"
         },
         "A115": {
-          "v": "Scenarios"
+          "v": "Exit Cap"
         },
         "A116": {
           "v": "Scenarios"
@@ -1267,7 +1267,7 @@
           "v": "Scenarios"
         },
         "A130": {
-          "v": "Value-Add Scenarios"
+          "v": "Scenarios"
         },
         "A131": {
           "v": "Value-Add Scenarios"
@@ -1316,7 +1316,7 @@
           "v": "Value-Add Scenarios"
         },
         "A145": {
-          "v": "Value-Add Opportunity"
+          "v": "Value-Add Scenarios"
         },
         "A146": {
           "v": "Value-Add Opportunity"
@@ -1352,7 +1352,7 @@
           "v": "Value-Add Opportunity"
         },
         "A156": {
-          "v": "Expense Benchmarks"
+          "v": "Value-Add Opportunity"
         },
         "A157": {
           "v": "Expense Benchmarks"
@@ -1400,7 +1400,7 @@
           "v": "TTM Total Revenue"
         },
         "A170": {
-          "v": "Replacement Cost"
+          "v": "Expense Benchmarks"
         },
         "A171": {
           "v": "Replacement Cost"
@@ -1439,7 +1439,7 @@
           "v": "Replacement Cost"
         },
         "A182": {
-          "v": "Capital Structure"
+          "v": "Replacement Cost"
         },
         "A183": {
           "v": "Capital Structure"
@@ -1451,7 +1451,7 @@
           "v": "Capital Structure"
         },
         "A186": {
-          "v": "Debt & Waterfall"
+          "v": "Capital Structure"
         },
         "A187": {
           "v": "Debt & Waterfall"
@@ -1523,7 +1523,7 @@
           "v": "Debt & Waterfall"
         },
         "A207": {
-          "v": "Narrative Tiers"
+          "v": "Debt & Waterfall"
         },
         "A208": {
           "v": "Narrative Tiers"
@@ -1541,7 +1541,7 @@
           "v": "Narrative Tiers"
         },
         "A212": {
-          "v": "Solver Mechanics"
+          "v": "Narrative Tiers"
         },
         "A213": {
           "v": "Solver Mechanics"
@@ -1562,6 +1562,9 @@
           "v": "Solver Mechanics"
         },
         "A219": {
+          "v": "Solver Mechanics"
+        },
+        "A220": {
           "v": "Solver Mechanics"
         },
         "A23": {
@@ -1853,278 +1856,278 @@
           "v": "Exit Cap Scenario Spread (base)"
         },
         "B115": {
-          "v": "Bear \u2014 Year-1 NOI Bump"
+          "v": "Exit NOI Convention"
         },
         "B116": {
-          "v": "Bear \u2014 Stabilized Occupancy"
+          "v": "Bear \u2014 Year-1 NOI Bump"
         },
         "B117": {
-          "v": "Bear \u2014 Revenue CAGR, Years 1-3"
+          "v": "Bear \u2014 Stabilized Occupancy"
         },
         "B118": {
-          "v": "Bear \u2014 Revenue CAGR, Years 4-5"
+          "v": "Bear \u2014 Revenue CAGR, Years 1-3"
         },
         "B119": {
-          "v": "Bear \u2014 Expense Growth"
+          "v": "Bear \u2014 Revenue CAGR, Years 4-5"
         },
         "B12": {
           "fill": "00FFFFCC",
           "v": 123.08
         },
         "B120": {
-          "v": "Base \u2014 Year-1 NOI Bump"
-        },
-        "B121": {
-          "v": "Base \u2014 Stabilized Occupancy"
-        },
-        "B122": {
-          "v": "Base \u2014 Revenue CAGR, Years 1-3"
-        },
-        "B123": {
-          "v": "Base \u2014 Revenue CAGR, Years 4-5"
-        },
-        "B124": {
-          "v": "Base \u2014 Expense Growth"
-        },
-        "B125": {
-          "v": "Bull \u2014 Year-1 NOI Bump"
-        },
-        "B126": {
-          "v": "Bull \u2014 Stabilized Occupancy"
-        },
-        "B127": {
-          "v": "Bull \u2014 Revenue CAGR, Years 1-3"
-        },
-        "B128": {
-          "v": "Bull \u2014 Revenue CAGR, Years 4-5"
-        },
-        "B129": {
-          "v": "Bull \u2014 Expense Growth"
-        },
-        "B130": {
-          "v": "Bear \u2014 Target Occupancy"
-        },
-        "B131": {
-          "v": "Bear \u2014 Months to Stabilize"
-        },
-        "B132": {
-          "v": "Bear \u2014 Rent Growth to Market"
-        },
-        "B133": {
-          "v": "Bear \u2014 Post-Stabilization Revenue Growth"
-        },
-        "B134": {
           "v": "Bear \u2014 Expense Growth"
         },
-        "B135": {
-          "v": "Base \u2014 Target Occupancy"
+        "B121": {
+          "v": "Base \u2014 Year-1 NOI Bump"
         },
-        "B136": {
-          "v": "Base \u2014 Months to Stabilize"
+        "B122": {
+          "v": "Base \u2014 Stabilized Occupancy"
         },
-        "B137": {
-          "v": "Base \u2014 Rent Growth to Market"
+        "B123": {
+          "v": "Base \u2014 Revenue CAGR, Years 1-3"
         },
-        "B138": {
-          "v": "Base \u2014 Post-Stabilization Revenue Growth"
+        "B124": {
+          "v": "Base \u2014 Revenue CAGR, Years 4-5"
         },
-        "B139": {
+        "B125": {
           "v": "Base \u2014 Expense Growth"
         },
-        "B140": {
-          "v": "Bull \u2014 Target Occupancy"
+        "B126": {
+          "v": "Bull \u2014 Year-1 NOI Bump"
         },
-        "B141": {
-          "v": "Bull \u2014 Months to Stabilize"
+        "B127": {
+          "v": "Bull \u2014 Stabilized Occupancy"
         },
-        "B142": {
-          "v": "Bull \u2014 Rent Growth to Market"
+        "B128": {
+          "v": "Bull \u2014 Revenue CAGR, Years 1-3"
         },
-        "B143": {
-          "v": "Bull \u2014 Post-Stabilization Revenue Growth"
+        "B129": {
+          "v": "Bull \u2014 Revenue CAGR, Years 4-5"
         },
-        "B144": {
+        "B130": {
           "v": "Bull \u2014 Expense Growth"
         },
+        "B131": {
+          "v": "Bear \u2014 Target Occupancy"
+        },
+        "B132": {
+          "v": "Bear \u2014 Months to Stabilize"
+        },
+        "B133": {
+          "v": "Bear \u2014 Rent Growth to Market"
+        },
+        "B134": {
+          "v": "Bear \u2014 Post-Stabilization Revenue Growth"
+        },
+        "B135": {
+          "v": "Bear \u2014 Expense Growth"
+        },
+        "B136": {
+          "v": "Base \u2014 Target Occupancy"
+        },
+        "B137": {
+          "v": "Base \u2014 Months to Stabilize"
+        },
+        "B138": {
+          "v": "Base \u2014 Rent Growth to Market"
+        },
+        "B139": {
+          "v": "Base \u2014 Post-Stabilization Revenue Growth"
+        },
+        "B140": {
+          "v": "Base \u2014 Expense Growth"
+        },
+        "B141": {
+          "v": "Bull \u2014 Target Occupancy"
+        },
+        "B142": {
+          "v": "Bull \u2014 Months to Stabilize"
+        },
+        "B143": {
+          "v": "Bull \u2014 Rent Growth to Market"
+        },
+        "B144": {
+          "v": "Bull \u2014 Post-Stabilization Revenue Growth"
+        },
         "B145": {
-          "v": "Value-Add Trigger: Occupancy Below"
+          "v": "Bull \u2014 Expense Growth"
         },
         "B146": {
-          "v": "Value-Add Trigger: Rent Gap Above"
+          "v": "Value-Add Trigger: Occupancy Below"
         },
         "B147": {
-          "v": "Occupancy Target"
+          "v": "Value-Add Trigger: Rent Gap Above"
         },
         "B148": {
-          "v": "Econ/Physical Spread Recovery"
+          "v": "Occupancy Target"
         },
         "B149": {
-          "v": "ECRI Minimum Occupancy"
+          "v": "Econ/Physical Spread Recovery"
         },
         "B15": {
           "v": 354000
         },
         "B150": {
-          "v": "ECRI EGR Uplift"
+          "v": "ECRI Minimum Occupancy"
         },
         "B151": {
-          "v": "ECRI Increase Range"
+          "v": "ECRI EGR Uplift"
         },
         "B152": {
-          "v": "ECRI Tenant Tenure"
+          "v": "ECRI Increase Range"
         },
         "B153": {
-          "v": "Ancillary Minimum Share"
+          "v": "ECRI Tenant Tenure"
         },
         "B154": {
-          "v": "Ancillary Target Share"
+          "v": "Ancillary Minimum Share"
         },
         "B155": {
-          "v": "Ancillary Revenue Uplift"
+          "v": "Ancillary Target Share"
         },
         "B156": {
-          "v": "Property Taxes"
+          "v": "Ancillary Revenue Uplift"
         },
         "B157": {
-          "v": "Insurance"
+          "v": "Property Taxes"
         },
         "B158": {
-          "v": "Utilities"
+          "v": "Insurance"
         },
         "B159": {
-          "v": "Repairs & Maintenance"
+          "v": "Utilities"
         },
         "B16": {
           "v": 346140
         },
         "B160": {
-          "v": "Advertising"
+          "v": "Repairs & Maintenance"
         },
         "B161": {
-          "v": "Payroll"
+          "v": "Advertising"
         },
         "B162": {
-          "v": "General & Administrative"
+          "v": "Payroll"
         },
         "B163": {
-          "v": "Management Fee (band)"
+          "v": "General & Administrative"
         },
         "B164": {
-          "v": "Capital Reserve"
+          "v": "Management Fee (band)"
         },
         "B165": {
-          "v": "Total OpEx"
+          "v": "Capital Reserve"
         },
         "B166": {
-          "v": "OpEx / Revenue Ratio"
+          "v": "Total OpEx"
         },
         "B167": {
-          "v": "Pro-Forma Management Fee"
+          "v": "OpEx / Revenue Ratio"
         },
         "B168": {
-          "v": "Assumed OpEx / Revenue"
+          "v": "Pro-Forma Management Fee"
         },
         "B169": {
-          "v": "Clamp Tolerance"
+          "v": "Assumed OpEx / Revenue"
         },
         "B17": {
           "v": 672000
         },
         "B170": {
-          "v": "Self-Storage Drive-Up \u2014 hard cost"
+          "v": "Clamp Tolerance"
         },
         "B171": {
-          "v": "Self-Storage Drive-Up \u2014 site work"
+          "v": "Self-Storage Drive-Up \u2014 hard cost"
         },
         "B172": {
-          "v": "Self-Storage Enclosed \u2014 hard cost"
+          "v": "Self-Storage Drive-Up \u2014 site work"
         },
         "B173": {
-          "v": "Self-Storage Enclosed \u2014 site work"
+          "v": "Self-Storage Enclosed \u2014 hard cost"
         },
         "B174": {
-          "v": "Boat/RV Enclosed \u2014 hard cost"
+          "v": "Self-Storage Enclosed \u2014 site work"
         },
         "B175": {
-          "v": "Boat/RV Enclosed \u2014 site work"
+          "v": "Boat/RV Enclosed \u2014 hard cost"
         },
         "B176": {
-          "v": "Boat/RV Covered \u2014 hard cost"
+          "v": "Boat/RV Enclosed \u2014 site work"
         },
         "B177": {
-          "v": "Boat/RV Covered \u2014 site work"
+          "v": "Boat/RV Covered \u2014 hard cost"
         },
         "B178": {
-          "v": "Boat/RV Open Parking \u2014 hard cost"
+          "v": "Boat/RV Covered \u2014 site work"
         },
         "B179": {
-          "v": "Boat/RV Open Parking \u2014 site work"
+          "v": "Boat/RV Open Parking \u2014 hard cost"
         },
         "B18": {
           "v": 318000
         },
         "B180": {
-          "v": "Soft Costs"
+          "v": "Boat/RV Open Parking \u2014 site work"
         },
         "B181": {
-          "v": "Developer Profit"
+          "v": "Soft Costs"
         },
         "B182": {
-          "v": "CapEx Basis"
+          "v": "Developer Profit"
         },
         "B183": {
-          "v": "Operating Reserve"
+          "v": "CapEx Basis"
         },
         "B184": {
-          "v": "Operating Reserve Basis"
+          "v": "Operating Reserve"
         },
         "B185": {
-          "v": "GP Co-Invest"
+          "v": "Operating Reserve Basis"
         },
         "B186": {
-          "v": "Interest Rate"
+          "v": "GP Co-Invest"
         },
         "B187": {
-          "v": "Index Rate"
+          "v": "Interest Rate"
         },
         "B188": {
-          "v": "Spread"
+          "v": "Index Rate"
         },
         "B189": {
-          "v": "Amortization"
+          "v": "Spread"
         },
         "B19": {
           "v": 880000
         },
         "B190": {
-          "v": "Interest-Only Period"
+          "v": "Amortization"
         },
         "B191": {
-          "v": "Loan Term"
+          "v": "Interest-Only Period"
         },
         "B192": {
-          "v": "Maximum LTV"
+          "v": "Loan Term"
         },
         "B193": {
-          "v": "Minimum DSCR"
+          "v": "Maximum LTV"
         },
         "B194": {
-          "v": "Minimum Debt Yield"
+          "v": "Minimum DSCR"
         },
         "B195": {
-          "v": "Origination Fee"
+          "v": "Minimum Debt Yield"
         },
         "B196": {
-          "v": "Exit Fee"
+          "v": "Origination Fee"
         },
         "B197": {
-          "v": "Loan Type"
+          "v": "Exit Fee"
         },
         "B198": {
-          "v": "Preferred Return"
+          "v": "Loan Type"
         },
         "B199": {
-          "v": "Pref Compounding"
+          "v": "Preferred Return"
         },
         "B2": {
           "fill": "00FFFFCC",
@@ -2134,66 +2137,69 @@
           "v": 651000
         },
         "B200": {
-          "v": "Distribution Ordering"
+          "v": "Pref Compounding"
         },
         "B201": {
-          "v": "Promote"
+          "v": "Distribution Ordering"
         },
         "B202": {
-          "v": "Pref Accrual Base"
+          "v": "Promote"
         },
         "B203": {
-          "v": "AM Fee Treatment"
+          "v": "Pref Accrual Base"
         },
         "B204": {
-          "v": "GP Catch-Up"
+          "v": "AM Fee Treatment"
         },
         "B205": {
-          "v": "Asset Management Fee"
+          "v": "GP Catch-Up"
         },
         "B206": {
-          "v": "AM Fee Base"
+          "v": "Asset Management Fee"
         },
         "B207": {
-          "v": "Preferred 3-Mile Density"
+          "v": "AM Fee Base"
         },
         "B208": {
-          "v": "Strong 3-Mile Density"
+          "v": "Preferred 3-Mile Density"
         },
         "B209": {
-          "v": "Over-Occupied Threshold"
+          "v": "Strong 3-Mile Density"
         },
         "B21": {
           "v": 21000
         },
         "B210": {
-          "v": "Strong Occupancy"
+          "v": "Over-Occupied Threshold"
         },
         "B211": {
-          "v": "Healthy Occupancy"
+          "v": "Strong Occupancy"
         },
         "B212": {
-          "v": "Bracket: Cheap Entry Cap"
+          "v": "Healthy Occupancy"
         },
         "B213": {
-          "v": "Bracket: Dear Entry Cap"
+          "v": "Bracket: Cheap Entry Cap"
         },
         "B214": {
-          "v": "Bracket: Zero-NOI Low Price"
+          "v": "Bracket: Dear Entry Cap"
         },
         "B215": {
-          "v": "Bracket: Zero-NOI High Price"
+          "v": "Bracket: Zero-NOI Low Price"
         },
         "B216": {
-          "v": "Sensitivity: Price Span"
+          "v": "Bracket: Zero-NOI High Price"
         },
         "B217": {
-          "v": "Sensitivity: Price Step"
+          "v": "Sensitivity: Price Span"
         },
         "B218": {
-          "v": "Sensitivity: Exit Cap Span"
+          "v": "Sensitivity: Price Step"
         },
         "B219": {
+          "v": "Sensitivity: Exit Cap Span"
+        },
+        "B220": {
           "v": "Sensitivity: Exit Cap Step"
         },
         "B25": {
@@ -2471,318 +2477,321 @@
           "v": "0 bps"
         },
         "C115": {
-          "v": "0.0%"
+          "v": "trailing"
         },
         "C116": {
-          "v": "82.0%"
+          "v": "0.0%"
         },
         "C117": {
-          "v": "1.5%"
+          "v": "82.0%"
         },
         "C118": {
           "v": "1.5%"
         },
         "C119": {
-          "v": "3.0%"
+          "v": "1.5%"
         },
         "C120": {
-          "v": "5.0%"
+          "v": "3.0%"
         },
         "C121": {
-          "v": "88.0%"
+          "v": "5.0%"
         },
         "C122": {
-          "v": "2.5%"
+          "v": "88.0%"
         },
         "C123": {
           "v": "2.5%"
         },
         "C124": {
-          "v": "3.0%"
+          "v": "2.5%"
         },
         "C125": {
-          "v": "10.0%"
+          "v": "3.0%"
         },
         "C126": {
-          "v": "93.0%"
+          "v": "10.0%"
         },
         "C127": {
-          "v": "4.0%"
+          "v": "93.0%"
         },
         "C128": {
-          "v": "3.5%"
+          "v": "4.0%"
         },
         "C129": {
-          "v": "3.0%"
+          "v": "3.5%"
         },
         "C130": {
-          "v": "85.0%"
+          "v": "3.0%"
         },
         "C131": {
-          "v": "30 mo"
-        },
-        "C132": {
           "v": "85.0%"
         },
+        "C132": {
+          "v": "30 mo"
+        },
         "C133": {
-          "v": "2.0%"
+          "v": "85.0%"
         },
         "C134": {
-          "v": "3.0%"
+          "v": "2.0%"
         },
         "C135": {
-          "v": "88.0%"
+          "v": "3.0%"
         },
         "C136": {
-          "v": "24 mo"
+          "v": "88.0%"
         },
         "C137": {
-          "v": "100.0%"
+          "v": "24 mo"
         },
         "C138": {
-          "v": "3.0%"
+          "v": "100.0%"
         },
         "C139": {
           "v": "3.0%"
         },
         "C140": {
-          "v": "92.0%"
+          "v": "3.0%"
         },
         "C141": {
-          "v": "18 mo"
+          "v": "92.0%"
         },
         "C142": {
-          "v": "100.0%"
+          "v": "18 mo"
         },
         "C143": {
-          "v": "4.0%"
+          "v": "100.0%"
         },
         "C144": {
-          "v": "2.5%"
+          "v": "4.0%"
         },
         "C145": {
-          "v": "85.0%"
+          "v": "2.5%"
         },
         "C146": {
-          "v": "10.0%"
+          "v": "85.0%"
         },
         "C147": {
-          "v": "93.0%"
+          "v": "10.0%"
         },
         "C148": {
-          "v": "50.0%"
+          "v": "93.0%"
         },
         "C149": {
-          "v": "88.0%"
+          "v": "50.0%"
         },
         "C150": {
-          "v": "3.0%"
+          "v": "88.0%"
         },
         "C151": {
-          "v": "8.0% \u2013 10.0%"
-        },
-        "C152": {
-          "v": "6 mo"
-        },
-        "C153": {
-          "v": "5.0%"
-        },
-        "C154": {
-          "v": "5.0% \u2013 8.0%"
-        },
-        "C155": {
           "v": "3.0%"
         },
+        "C152": {
+          "v": "8.0% \u2013 10.0%"
+        },
+        "C153": {
+          "v": "6 mo"
+        },
+        "C154": {
+          "v": "5.0%"
+        },
+        "C155": {
+          "v": "5.0% \u2013 8.0%"
+        },
         "C156": {
-          "v": "$1.20/SF/yr \u2013 $2.50/SF/yr"
+          "v": "3.0%"
         },
         "C157": {
-          "v": "$0.18/SF/yr \u2013 $0.38/SF/yr"
+          "v": "$1.20/SF/yr \u2013 $2.50/SF/yr"
         },
         "C158": {
-          "v": "$0.10/SF/yr \u2013 $0.22/SF/yr"
+          "v": "$0.18/SF/yr \u2013 $0.38/SF/yr"
         },
         "C159": {
-          "v": "$0.18/SF/yr \u2013 $0.36/SF/yr"
+          "v": "$0.10/SF/yr \u2013 $0.22/SF/yr"
         },
         "C160": {
-          "v": "$0.06/SF/yr \u2013 $0.17/SF/yr"
+          "v": "$0.18/SF/yr \u2013 $0.36/SF/yr"
         },
         "C161": {
-          "v": "$0.26/SF/yr \u2013 $0.51/SF/yr"
+          "v": "$0.06/SF/yr \u2013 $0.17/SF/yr"
         },
         "C162": {
-          "v": "$0.09/SF/yr \u2013 $0.18/SF/yr"
+          "v": "$0.26/SF/yr \u2013 $0.51/SF/yr"
         },
         "C163": {
-          "v": "3.0% \u2013 6.0%"
+          "v": "$0.09/SF/yr \u2013 $0.18/SF/yr"
         },
         "C164": {
-          "v": "$0.15/SF/yr \u2013 $0.25/SF/yr"
+          "v": "3.0% \u2013 6.0%"
         },
         "C165": {
-          "v": "$2.22/SF/yr \u2013 $4.57/SF/yr"
+          "v": "$0.15/SF/yr \u2013 $0.25/SF/yr"
         },
         "C166": {
-          "v": "35.0% \u2013 55.0%"
+          "v": "$2.22/SF/yr \u2013 $4.57/SF/yr"
         },
         "C167": {
-          "v": "6.0%"
+          "v": "35.0% \u2013 55.0%"
         },
         "C168": {
-          "v": "40.0%"
+          "v": "6.0%"
         },
         "C169": {
-          "v": "10.0%"
+          "v": "40.0%"
         },
         "C170": {
-          "v": "$55.00/SF \u2013 $85.00/SF"
-        },
-        "C171": {
-          "v": "$5.00/SF \u2013 $12.00/SF"
-        },
-        "C172": {
-          "v": "$90.00/SF \u2013 $130.00/SF"
-        },
-        "C173": {
-          "v": "$5.00/SF \u2013 $12.00/SF"
-        },
-        "C174": {
-          "v": "$45.00/SF \u2013 $70.00/SF"
-        },
-        "C175": {
-          "v": "$8.00/SF \u2013 $15.00/SF"
-        },
-        "C176": {
-          "v": "$15.00/SF \u2013 $30.00/SF"
-        },
-        "C177": {
-          "v": "$6.00/SF \u2013 $12.00/SF"
-        },
-        "C178": {
-          "v": "$4.00/SF \u2013 $10.00/SF"
-        },
-        "C179": {
-          "v": "$0.00/SF \u2013 $0.00/SF"
-        },
-        "C180": {
-          "v": "8.0% \u2013 12.0%"
-        },
-        "C181": {
-          "v": "10.0% \u2013 15.0%"
-        },
-        "C182": {
-          "v": "amount"
-        },
-        "C183": {
-          "v": "0"
-        },
-        "C184": {
-          "v": "amount"
-        },
-        "C185": {
           "v": "10.0%"
         },
+        "C171": {
+          "v": "$55.00/SF \u2013 $85.00/SF"
+        },
+        "C172": {
+          "v": "$5.00/SF \u2013 $12.00/SF"
+        },
+        "C173": {
+          "v": "$90.00/SF \u2013 $130.00/SF"
+        },
+        "C174": {
+          "v": "$5.00/SF \u2013 $12.00/SF"
+        },
+        "C175": {
+          "v": "$45.00/SF \u2013 $70.00/SF"
+        },
+        "C176": {
+          "v": "$8.00/SF \u2013 $15.00/SF"
+        },
+        "C177": {
+          "v": "$15.00/SF \u2013 $30.00/SF"
+        },
+        "C178": {
+          "v": "$6.00/SF \u2013 $12.00/SF"
+        },
+        "C179": {
+          "v": "$4.00/SF \u2013 $10.00/SF"
+        },
+        "C180": {
+          "v": "$0.00/SF \u2013 $0.00/SF"
+        },
+        "C181": {
+          "v": "8.0% \u2013 12.0%"
+        },
+        "C182": {
+          "v": "10.0% \u2013 15.0%"
+        },
+        "C183": {
+          "v": "amount"
+        },
+        "C184": {
+          "v": "0"
+        },
+        "C185": {
+          "v": "amount"
+        },
         "C186": {
-          "v": "6.25%"
+          "v": "10.0%"
         },
         "C187": {
-          "v": "\u2014"
+          "v": "6.25%"
         },
         "C188": {
           "v": "\u2014"
         },
         "C189": {
-          "v": "25 yr"
+          "v": "\u2014"
         },
         "C190": {
-          "v": "0 mo"
+          "v": "25 yr"
         },
         "C191": {
-          "v": "10 yr"
+          "v": "0 mo"
         },
         "C192": {
-          "v": "65.0%"
+          "v": "10 yr"
         },
         "C193": {
-          "v": "1.25"
+          "v": "65.0%"
         },
         "C194": {
-          "v": "10.0%"
+          "v": "1.25"
         },
         "C195": {
-          "v": "1.0%"
-        },
-        "C196": {
-          "v": "0.0%"
-        },
-        "C197": {
-          "v": "senior_fixed"
-        },
-        "C198": {
-          "v": "8.0%"
-        },
-        "C199": {
-          "v": "annual"
-        },
-        "C200": {
-          "v": "roc_first"
-        },
-        "C201": {
-          "v": "20.0%"
-        },
-        "C202": {
-          "v": "contributed"
-        },
-        "C203": {
-          "v": "above_waterfall"
-        },
-        "C204": {
-          "v": "False"
-        },
-        "C205": {
-          "v": "1.0%"
-        },
-        "C206": {
-          "v": "invested_equity"
-        },
-        "C207": {
-          "v": "75,000"
-        },
-        "C208": {
-          "v": "100,000"
-        },
-        "C209": {
-          "v": "95.0%"
-        },
-        "C210": {
-          "v": "90.0%"
-        },
-        "C211": {
-          "v": "85.0%"
-        },
-        "C212": {
-          "v": "20.0%"
-        },
-        "C213": {
-          "v": "2.0%"
-        },
-        "C214": {
-          "v": "$100,000"
-        },
-        "C215": {
-          "v": "$50,000,000"
-        },
-        "C216": {
           "v": "10.0%"
         },
-        "C217": {
-          "v": "2.5%"
-        },
-        "C218": {
+        "C196": {
           "v": "1.0%"
         },
+        "C197": {
+          "v": "0.0%"
+        },
+        "C198": {
+          "v": "senior_fixed"
+        },
+        "C199": {
+          "v": "8.0%"
+        },
+        "C200": {
+          "v": "annual"
+        },
+        "C201": {
+          "v": "roc_first"
+        },
+        "C202": {
+          "v": "20.0%"
+        },
+        "C203": {
+          "v": "contributed"
+        },
+        "C204": {
+          "v": "above_waterfall"
+        },
+        "C205": {
+          "v": "False"
+        },
+        "C206": {
+          "v": "1.0%"
+        },
+        "C207": {
+          "v": "invested_equity"
+        },
+        "C208": {
+          "v": "75,000"
+        },
+        "C209": {
+          "v": "100,000"
+        },
+        "C210": {
+          "v": "95.0%"
+        },
+        "C211": {
+          "v": "90.0%"
+        },
+        "C212": {
+          "v": "85.0%"
+        },
+        "C213": {
+          "v": "20.0%"
+        },
+        "C214": {
+          "v": "2.0%"
+        },
+        "C215": {
+          "v": "$100,000"
+        },
+        "C216": {
+          "v": "$50,000,000"
+        },
+        "C217": {
+          "v": "10.0%"
+        },
+        "C218": {
+          "v": "2.5%"
+        },
         "C219": {
+          "v": "1.0%"
+        },
+        "C220": {
           "v": "0.25%"
         },
         "C66": {
@@ -3241,6 +3250,9 @@
         "D219": {
           "v": "model default"
         },
+        "D220": {
+          "v": "model default"
+        },
         "D66": {
           "v": "Derived From"
         },
@@ -3340,8 +3352,8 @@
         "E112": {
           "v": "Self Storage / aging"
         },
-        "E157": {
-          "v": "regionally adjusted for TX"
+        "E115": {
+          "v": "trailing = terminal hold year's own NOI; forward = year N+1's"
         },
         "E158": {
           "v": "regionally adjusted for TX"
@@ -3358,10 +3370,13 @@
         "E162": {
           "v": "regionally adjusted for TX"
         },
-        "E164": {
+        "E163": {
           "v": "regionally adjusted for TX"
         },
         "E165": {
+          "v": "regionally adjusted for TX"
+        },
+        "E166": {
           "v": "regionally adjusted for TX"
         },
         "E70": {
@@ -5251,7 +5266,7 @@
         "Appendix A. Assumptions Filled From Defaults",
         "The CIM did not state the inputs below. The model used the value in the second column, from the source in the third \u2014 not a figure from this deal. Each one moves the returns in section 6, so an assumption an IC reader disagrees with is an assumption to change on the assumptions page and re-run, not a number to discount by eye.",
         "Appendix B. Assumption Register",
-        "Every number this analysis used, with its source. Of 149 assumptions, 1 came from something other than the model's shipped defaults: 0 entered for this deal, 0 from a dated settings override, and 1 filled in because the CIM did not state a value. Those are listed first. The full register follows \u2014 nothing is omitted from it, so an assumption absent below is an assumption this run did not use.",
+        "Every number this analysis used, with its source. Of 150 assumptions, 1 came from something other than the model's shipped defaults: 0 entered for this deal, 0 from a dated settings override, and 1 filled in because the CIM did not state a value. Those are listed first. The full register follows \u2014 nothing is omitted from it, so an assumption absent below is an assumption this run did not use.",
         "B.1 Assumptions not taken from the model defaults",
         "B.2 Full register"
       ],
@@ -6119,6 +6134,12 @@
             "Exit Cap",
             "Exit Cap Scenario Spread (base)",
             "0 bps",
+            "model default"
+          ],
+          [
+            "Exit Cap",
+            "Exit NOI Convention",
+            "trailing",
             "model default"
           ],
           [

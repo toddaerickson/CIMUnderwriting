@@ -41,6 +41,7 @@
 | `COMP_DB_PATH` | Comp SQLite DB path | Fixed in `render.yaml`: `/data/cim_comps.db` (on the disk) |
 | `CIM_OVERRIDES_DIR` | Per-deal override JSONs | Fixed in `render.yaml`: `/data/overrides` (on the disk) |
 | `UW_TEMPLATE_PATH` | Blank XLSM underwriting template | Fixed in `render.yaml`: `/data/template_uw.xlsm` (on the disk — the file is gitignored via `*.xlsm`, so it never ships in the build; transferred in runbook step 5) |
+| `ADMIN_ENABLED` | Mounts `/admin/` (unmounted = 404) | Fixed in `render.yaml`: `false`. Flip to `1` temporarily for runbook step 7's verification, remove after. Defaults to `DEBUG` when unset, so dev boxes with `DEBUG=true` get it automatically |
 | `PYTHON_VERSION` | Render Python runtime pin | Fixed in `render.yaml`: `3.12.6` |
 
 ## Cutover runbook (after PR 5C merges — operator gates marked ⚑)
@@ -64,24 +65,41 @@ Ship-dark ends here. Railway keeps serving Streamlit until step 8; nothing below
    ```
    Fallback if scp misbehaves: `tar cz deals data/cim_comps.db overrides | ssh <ssh-address> "tar xz -C /data --strip-components=0"` then move `data/cim_comps.db` → `/data/cim_comps.db` in the Render shell. Verify once with a single small file BEFORE cutover day.
 6. **Import + verify data** — Render Shell: `python manage.py import_deals` → imported count matches the folder count; then in the browser: log in → Deal Pipeline shows the legacy deal(s) with downloads → Comps shows 9 rows → Settings loads.
-7. **Full-path verification**: upload a real CIM → extraction completes → assumptions → Save & Run → progress → four result tabs → all three downloads open. Add a test override on Settings (e.g. Solver Target IRR 12%), re-run the deal, confirm the run's gates moved and `applied_overrides` recorded it (visible via `/admin/` or the next results header), then delete the test override.
+7. **Full-path verification**: upload a real CIM → extraction completes → assumptions → Save & Run → progress → four result tabs → all three downloads open. Add a test override on Settings (e.g. Solver Target IRR 12%), re-run the deal, confirm the run's gates moved and `applied_overrides` recorded it (visible via `/admin/` — set `ADMIN_ENABLED=1` in the Render env for this step and **remove it after**; or read the next results header instead and skip the flip), then delete the test override.
 8. ⚑ **Phase gate (operator)**: use the app for a real workflow once. Only after that:
 9. ⚑ **Retire Railway**: delete the CIM_Analyst service (and its volume) in the Railway dashboard.
 10. **Bookkeeping**: update the deploy table row in `~/.claude/CLAUDE.md` → `| CIM_Analyst | Render | push to main | /health/ |`; set a quarterly calendar reminder for the restore drill (Neon PITR + disk snapshot).
 
-## Post-cutover hardening (deferred from the PR #2 review)
+## Post-cutover hardening (deferred from the PR #2 review — closed)
 
-Two security items were explicitly deferred "to Phase 5" in PR #2's review and
-remain open at cutover. Neither blocks go-live (single allowlisted user, HTTPS
-enforced by Render + `SECURE_SSL_REDIRECT`), but they are decisions, not
-oversights — close them shortly after the cutover proves stable:
+Two security items were explicitly deferred "to Phase 5" in PR #2's review.
+Both are now closed:
 
-- **HSTS + `check --deploy`**: set `SECURE_HSTS_SECONDS` (start small, e.g.
-  3600, before committing to a long max-age) in the production settings block,
-  and add `python manage.py check --deploy` to CI so regressions surface.
-- **`/admin/` exposure decision**: the Django admin is reachable on the public
-  host, gated by the same allowlisted login. Decide: keep it (operator
-  convenience — the runbook's verification step uses it), or restrict it.
+- **HSTS + `check --deploy`**: `SECURE_HSTS_SECONDS` shipped in PR #51
+  (`cimweb/settings.py` — 31536000, env-tunable, preload deliberately off),
+  and CI's `test` job now runs `python manage.py check --deploy --fail-level
+  WARNING`, so a NEW deploy warning fails the build instead of scrolling
+  past. Exactly one check is silenced — `security.W021`, because HSTS
+  preload is off on purpose (a one-way door); the reason is recorded next
+  to `SILENCED_SYSTEM_CHECKS` in `cimweb/settings.py`.
+
+  **Scope, so nobody over-reads it:** that check runs in CI, against CI's
+  own throwaway key. Nothing in the Render build or start command runs
+  `check --deploy`, so it never vets the production secret.
+
+  **If you run `manage.py check --deploy` in the Render shell, expect
+  `security.W009`.** It is a false alarm. Render's `generateValue` mints a
+  base64-encoded 256-bit key — 44 characters — and W009 is a flat
+  50-character length heuristic, which that key fails while carrying far
+  more entropy than the heuristic proxies for. Do not silence W009 to make
+  it go away: that would also silence the case where a genuinely weak key
+  gets set by hand.
+- **`/admin/` exposure**: decided (operator, 2026-08-10) — env-gated.
+  `ADMIN_ENABLED` (default: `DEBUG`) controls whether `cimweb/urls.py`
+  mounts the admin at all. Off means 404, not a redirect, so a probe of
+  the production host learns nothing. Production keeps it off; runbook
+  step 7 flips it temporarily for verification. Tests pin both states
+  (`tests/test_admin_gate.py`).
 
 ## Data safety
 

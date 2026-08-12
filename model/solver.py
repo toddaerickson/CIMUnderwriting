@@ -41,9 +41,12 @@ price. Bisection is valid.
 looks fatal and is not.** When `coerce_exit_cap` is in force (base and
 bear), the exit cap is floored at the ENTRY cap, `ttm_noi / price`, which
 FALLS as price rises. So inside that region a higher price buys a lower
-exit cap and a HIGHER exit value — rising by `NOI_terminal / ttm_noi` per
-dollar of price, ≈ 1.14 on a 5-year hold at 3% growth and ≈ 2.84 at 20%.
-That is far more than the ≈ 1.01 the basis rises by, which reads like a
+exit cap and a HIGHER exit value — rising by `NOI_exit / ttm_noi` per
+dollar of price (`NOI_exit` per `config.EXIT_NOI_CONVENTION`; under the
+trailing default that is the terminal year's own NOI, ≈ 1.14 on a 5-year
+hold at 3% growth and ≈ 2.84 at 20%; under forward it is one growth step
+larger, still price-independent, so nothing below changes shape). That
+is far more than the ≈ 1.01 the basis rises by, which reads like a
 guaranteed inversion.
 
 It is not, because the two effects are not measured at the same date.

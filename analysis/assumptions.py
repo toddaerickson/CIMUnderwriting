@@ -675,6 +675,15 @@ def _add_exit_cap_rows(reg, market_cap):
     reg.add("EXIT_CAP_SCENARIO_SPREAD_BPS", G_EXIT,
             cfg.EXIT_CAP_SCENARIO_SPREAD_BPS.get(_base_scenario()),
             unit=UNIT_BPS, label="Exit Cap Scenario Spread (base)")
+    # Which year's NOI the exit capitalizes (decision 5, settled
+    # 2026-08-10) — governs BOTH exit engines. Not settings-editable, so
+    # `override_key_registry()` never demands this row; it is here by the
+    # levered-constants rule (silence is not permission), pinned by its
+    # own test.
+    reg.add("EXIT_NOI_CONVENTION", G_EXIT, cfg.EXIT_NOI_CONVENTION,
+            unit=UNIT_TEXT, label="Exit NOI Convention",
+            detail="trailing = terminal hold year's own NOI; "
+                   "forward = year N+1's")
 
 
 def _base_scenario():

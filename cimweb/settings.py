@@ -43,6 +43,14 @@ DEBUG = env("DEBUG")
 check_secret_key(SECRET_KEY, DEBUG)
 ALLOWED_HOSTS = env("ALLOWED_HOSTS")
 
+# /admin/ is mounted only when this is on (see cimweb/urls.py). Off means
+# the path is never mapped — a 404, not a redirect — so an unauthenticated
+# probe of a production host learns nothing. Defaults to DEBUG: on for a
+# dev box whose .env sets DEBUG=true, off in production unless flipped
+# deliberately (DEPLOY.md runbook step 7 sets ADMIN_ENABLED=1 for the
+# verification pass and removes it after). Operator decision 2026-08-10.
+ADMIN_ENABLED = env.bool("ADMIN_ENABLED", default=DEBUG)
+
 # Comma-separated allowlist of login emails (closed system).
 ALLOWED_EMAILS = [e.strip().lower() for e in env("ALLOWED_EMAILS")]
 
@@ -142,6 +150,29 @@ if not DEBUG:
     # Preload stays OFF: submission to the browser preload list is a
     # one-way door that needs a deliberate act, not a default.
     SECURE_HSTS_PRELOAD = False
+
+# CI runs `check --deploy --fail-level WARNING` (test.yml), so any NEW
+# deploy warning fails the build. Exactly one check is silenced:
+# security.W021 flags SECURE_HSTS_PRELOAD not being True, and preload is
+# off ON PURPOSE — see the one-way-door comment above. Nothing else may
+# join this list without the same kind of recorded reason.
+#
+# W009 (weak SECRET_KEY) deliberately stays LIVE, but be precise about
+# what that buys, because the obvious assumption is wrong: `check
+# --deploy` runs ONLY in CI, against CI's own throwaway key. Nothing in
+# the deploy path runs it, so W009 never vets the production key. It is
+# kept live so that a future weak key cannot slip in unnoticed, and CI
+# satisfies it with a 50+ character throwaway rather than silencing it
+# for every environment at once.
+#
+# One consequence worth knowing before it surprises someone: running
+# `manage.py check --deploy` ON THE RENDER HOST reports W009. Render's
+# `generateValue` mints a base64-encoded 256-bit key — 44 characters —
+# and W009's threshold is a flat 50-character length heuristic, which
+# that key fails while carrying far more entropy than the heuristic is
+# proxying for. It is a false alarm, not a weak key. Do not "fix" it by
+# silencing W009 here; that would also silence the real case.
+SILENCED_SYSTEM_CHECKS = ["security.W021"]
 
 # Deliberately NOT set here — Django already supplies them, and restating
 # them invites drift if the defaults change:
