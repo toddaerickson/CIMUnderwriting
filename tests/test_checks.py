@@ -333,6 +333,67 @@ def test_price_vs_replacement_skips_when_not_comparable():
     assert r.status == C.SKIPPED
 
 
+# ── 14. TTM annualization basis (advisory) ──────────────────────────
+# Item A's deferred check, unblocked by the `ttm_months` field.
+
+def test_ttm_annualization_passes_on_a_full_twelve_months():
+    r = _run("ttm_annualization", ttm_months=12)
+    assert r.status == C.PASS
+    assert r.severity == C.ADVISORY
+
+
+def test_ttm_annualization_fires_on_a_partial_year():
+    r = _run("ttm_annualization", ttm_months=9)
+    assert r.status == C.FAIL
+    assert "9 months" in r.message
+    assert "seasonal" in r.message
+
+
+def test_ttm_annualization_boundary_eleven_fires_twelve_does_not():
+    """The boundary is the assertion that matters: twelve months IS a
+    trailing year, eleven is an annualization."""
+    assert _run("ttm_annualization", ttm_months=11).status == C.FAIL
+    assert _run("ttm_annualization", ttm_months=12).status == C.PASS
+
+
+def test_ttm_annualization_flags_more_than_twelve_as_a_basis_error():
+    """The form bounds the field 1-12, but the register must not trust
+    its callers: a 24 arriving through the API is not a TTM figure."""
+    r = _run("ttm_annualization", ttm_months=24)
+    assert r.status == C.FAIL
+    assert "more than" in r.message
+
+
+def test_ttm_annualization_skips_when_unstated():
+    """None means the CIM did not say — never assumed to be 12, per the
+    occupancy lesson: an invented 12 is exactly the answer that would
+    silence this check."""
+    r = _run("ttm_annualization", ttm_months=None)
+    assert r.status == C.SKIPPED
+
+
+def test_ttm_months_reaches_the_register_from_the_engine_path():
+    """`input_from_cim` is the construction `webapp.services` and the
+    CLI both run — a field it drops is a check that silently skips on
+    every real deal while the unit tests above stay green."""
+    from extract.parser import CIMData
+    inp = C.input_from_cim(CIMData(ttm_months=9))
+    results = {r.id: r for r in C.run_checks(inp)}
+    assert results["ttm_annualization"].status == C.FAIL
+
+
+def test_ttm_months_reaches_the_register_from_the_form_path():
+    """`check_input_from_cleaned` feeds the assumptions form's validation
+    and the htmx preview — the one-surface skip the checks module's own
+    docstring warns about is exactly a field missing HERE while the
+    engine path carries it."""
+    from webapp.forms import check_input_from_cleaned
+    inp = check_input_from_cleaned({"ttm_months": 9})
+    assert inp.ttm_months == 9
+    results = {r.id: r for r in C.run_checks(inp)}
+    assert results["ttm_annualization"].status == C.FAIL
+
+
 # ── Registry mechanics ──────────────────────────────────────────────
 
 def test_registry_ids_are_unique_and_severities_are_valid():

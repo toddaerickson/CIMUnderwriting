@@ -83,6 +83,13 @@ class CIMData:
     ttm_total_revenue: Optional[float] = None
     ttm_total_expenses: Optional[float] = None
     ttm_noi: Optional[float] = None
+    # How many months of ACTUALS the TTM figures annualize from. 12 means
+    # a genuine trailing year; 9 means a partial year scaled up ("T-9
+    # annualized"), which the ttm_annualization check flags for
+    # seasonality risk. None means the CIM did not say — never assumed
+    # to be 12, per the occupancy lesson (decision 9): an invented 12
+    # is precisely the answer that silences the check that needs it.
+    ttm_months: Optional[int] = None
     cim_yr1_noi: Optional[float] = None
     other_income: Optional[float] = None
 
@@ -330,6 +337,79 @@ def _parse_demographics(text: str, data: CIMData):
         data.median_hhi_3mi = _parse_number(m.group(1))
 
 
+# How many months of actuals the TTM figures cover. A month count in a
+# CIM is not automatically THIS month count — the same document quotes
+# lease terms, street-rate windows and momentum figures in months — so
+# extraction is deliberately conservative on three axes, and every one
+# of them exists because a naive version stored a WRONG number rather
+# than merely missing one (review finding, 2026-08-10).
+_TTM_MONTHS_PATTERNS = (
+    r"\bT-?(\d{1,2})\s+annualized\b",
+    r"\b(\d{1,2})\s+months?\s+(?:ending|ended|annualized)\b",
+    r"\btrailing\s+(\d{1,2})[-\s]month",
+)
+
+#: 1. ANCHOR. The count must sit in a sentence that is talking about the
+#: financial statements. "Street rates rose 4% in the 6 months ended
+#: June 30" is a rent-trend sentence, and reading a TTM basis out of it
+#: describes the wrong figure entirely.
+_TTM_MONTHS_ANCHORS = (
+    "noi", "revenue", "income", "expense", "financial", "operating",
+    "actuals", "annualized", "ttm", "egr", "gpr", "cash flow",
+    "p&l", "statement",
+)
+
+#: 2. KNOWN COLLISION. "T3 Annualized Revenue" / "trailing 3-month
+#: revenue" is the MOMENTUM figure — this codebase models it as its own
+#: field (`t3_annualized_revenue`, T3 vs T12) — and it routinely appears
+#: beside a genuine trailing-twelve basis. Matching it set ttm_months=3
+#: on healthy trailing-twelve deals, so the register recorded a false
+#: statement about the CIM and the annualization check fired on a deal
+#: with nothing wrong with it. The collocation is removed before the
+#: patterns run; a T-3 basis stated WITHOUT the word "revenue" still
+#: parses, because a genuine T-3 underwriting basis is exactly what the
+#: check exists to flag.
+_TTM_MOMENTUM_COLLOCATIONS = (
+    r"\bT-?3\s+annualized\s+revenue\b",
+    r"\btrailing\s+3[-\s]month\s+revenue\b",
+)
+
+
+def _extract_ttm_months(text: str) -> Optional[int]:
+    """Months of actuals behind the TTM figures, or None.
+
+    Never invented and never guessed: an annualization check run against
+    a fabricated 12 flags nothing, and one run against a fabricated 9
+    flags a deal that is fine. So this returns None for anything short
+    of a single unambiguous reading, and the analyst enters the value by
+    hand — the same posture `require_underwritable` takes on occupancy.
+
+    3. CONFLICT. If the document supports two different counts, that is
+    not a tie to break by pattern order — pattern priority is how "T3
+    Annualized Revenue" beat an explicit "Trailing 12-month NOI" in the
+    first version. Disagreement means the parser does not know.
+    """
+    for pattern in _TTM_MOMENTUM_COLLOCATIONS:
+        text = re.sub(pattern, " ", text, flags=re.IGNORECASE)
+
+    found = set()
+    for sentence in re.split(r"[.\n]", text):
+        low = sentence.lower()
+        if not any(anchor in low for anchor in _TTM_MONTHS_ANCHORS):
+            continue
+        for pattern in _TTM_MONTHS_PATTERNS:
+            for match in re.finditer(pattern, sentence, re.IGNORECASE):
+                months = int(match.group(1))
+                # Out of range is not a TTM basis at all: "the 24 months
+                # ended" is a two-year statement, and claiming a
+                # ttm_months from it misdescribes the figure this field
+                # exists to qualify.
+                if 1 <= months <= 12:
+                    found.add(months)
+
+    return found.pop() if len(found) == 1 else None
+
+
 def _parse_financials(text: str, tables: list, data: CIMData):
     """Extract income and expense data from text and tables."""
 
@@ -344,6 +424,8 @@ def _parse_financials(text: str, tables: list, data: CIMData):
         if m:
             data.ttm_noi = _parse_number(m.group(1))
             break
+
+    data.ttm_months = _extract_ttm_months(text)
 
     # GPR / Gross Potential Rent
     gpr_pat = r"(?:gross\s+potential\s+(?:rent|revenue)|GPR)[:\s]*\$?\s*([\d,]+(?:\.\d+)?)"

@@ -5,8 +5,8 @@
     "blocking_failed": 0,
     "failed": 5,
     "passed": 8,
-    "skipped": 0,
-    "total": 13
+    "skipped": 1,
+    "total": 14
   },
   "checks": [
     [
@@ -63,6 +63,11 @@
       "sources_uses_ties",
       "blocking",
       "pass"
+    ],
+    [
+      "ttm_annualization",
+      "advisory",
+      "skipped"
     ],
     [
       "unit_mix_gpr",
@@ -890,6 +895,9 @@
           "fill": "00DDF3E4",
           "v": "Sources & Uses ties to DCF basis"
         },
+        "A16": {
+          "v": "TTM annualization basis"
+        },
         "A2": {
           "v": "Check"
         },
@@ -944,6 +952,9 @@
         "B15": {
           "fill": "00DDF3E4",
           "v": "Blocking"
+        },
+        "B16": {
+          "v": "Advisory"
         },
         "B2": {
           "v": "Severity"
@@ -1000,6 +1011,9 @@
           "fill": "00DDF3E4",
           "v": "PASS"
         },
+        "C16": {
+          "v": "SKIPPED"
+        },
         "C2": {
           "v": "Status"
         },
@@ -1055,6 +1069,9 @@
           "fill": "00DDF3E4",
           "v": "Uses, Sources and the DCF basis all equal $6,500,345 (DCF basis $6,464,000 + financing costs $36,345)."
         },
+        "D16": {
+          "v": "The CIM does not state how many months of actuals its TTM figures cover."
+        },
         "D2": {
           "v": "Finding"
         },
@@ -1109,6 +1126,9 @@
         "E15": {
           "fill": "00DDF3E4",
           "v": "sources_uses, scenario_results[*].total_basis"
+        },
+        "E16": {
+          "v": "ttm_months"
         },
         "E2": {
           "v": "Source"
@@ -5110,7 +5130,7 @@
         "1. Investment Summary",
         "Occupancy check: economic occupancy trails physical by 17 pts (91.0% physical vs 74.0% economic). A spread this wide signals revenue leakage \u2014 concessions, delinquency, or in-place rents below street \u2014 and is the primary mismanagement value-add screen. Decompose the spread from the rent roll during diligence.",
         "Model Checks",
-        "5 of 13 integrity checks flagged. Blocking findings were accepted by the analyst with the discrepancy recorded; advisory findings do not stop the model but change how its outputs should be read.",
+        "5 of 14 integrity checks flagged. Blocking findings were accepted by the analyst with the discrepancy recorded; advisory findings do not stop the model but change how its outputs should be read.",
         "1 model input was not stated in the CIM and was filled from a default or a benchmark. Every one is listed with its source in Appendix A; the returns below are computed on them.",
         "Screening Gates",
         "Returns Snapshot (Unlevered)",

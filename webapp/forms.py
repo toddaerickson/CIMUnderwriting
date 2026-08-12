@@ -57,7 +57,8 @@ VA_NON_PCT = {"months_to_stabilize"}
 CIM_CHAR_FIELDS = ["property_name", "address", "city", "state", "msa",
                    "market_verification", "street_rate_trend"]
 CIM_INT_FIELDS = ["year_built", "year_expanded", "total_units",
-                  "population_1mi", "population_3mi", "population_5mi"]
+                  "population_1mi", "population_3mi", "population_5mi",
+                  "ttm_months"]
 CIM_FLOAT_FIELDS = ["acreage", "nrsf", "ss_driveup_sf", "ss_enclosed_sf",
                     "brv_enclosed_sf", "brv_covered_sf", "brv_open_sf",
                     "asking_price", "capex_estimate", "ttm_gpr", "other_income",
@@ -211,7 +212,8 @@ SECTION_INCOME = [
     ("ttm_gpr", "Gross Potential Rent ($)"), ("other_income", "Other Income ($)"),
     ("ttm_egr", "Effective Gross Revenue ($)"), ("ttm_total_revenue", "Total Revenue ($)"),
     ("ttm_total_expenses", "Total Expenses ($)"), ("cim_yr1_noi", "CIM Year 1 NOI ($)"),
-    ("ttm_noi", "TTM NOI ($)"), ("mgmt_fee_pct", "Mgmt Fee (% EGR)"),
+    ("ttm_noi", "TTM NOI ($)"), ("ttm_months", "TTM Months of Actuals"),
+    ("mgmt_fee_pct", "Mgmt Fee (% EGR)"),
 ]
 SECTION_DEMOGRAPHICS = [
     ("population_1mi", "Population 1-mi"), ("population_3mi", "Population 3-mi"),
@@ -269,6 +271,7 @@ def check_input_from_cleaned(cleaned, unit_mix=None) -> checks.CheckInput:
         ttm_total_revenue=cleaned.get("ttm_total_revenue"),
         ttm_total_expenses=cleaned.get("ttm_total_expenses"),
         ttm_noi=cleaned.get("ttm_noi"),
+        ttm_months=cleaned.get("ttm_months"),
         nrsf=cleaned.get("nrsf"),
         unit_mix=tuple(unit_mix or ()),
         physical_occupancy=_pct_decimal(cleaned.get("physical_occupancy")),
@@ -341,6 +344,11 @@ class AssumptionsForm(forms.Form):
         for name in CIM_INT_FIELDS:
             self.fields[name] = forms.IntegerField(
                 required=False, min_value=0, widget=_num())
+        # Bounded 1-12, tighter than the loop's generic floor: a typo'd
+        # 13 would sail past the annualization check's boundary at
+        # twelve, and zero months of actuals is not a reporting basis.
+        self.fields["ttm_months"] = forms.IntegerField(
+            required=False, min_value=1, max_value=12, widget=_num())
         for name in CIM_FLOAT_FIELDS + CIM_PCT_FIELDS:
             self.fields[name] = forms.FloatField(
                 required=False, min_value=0, widget=_num())
