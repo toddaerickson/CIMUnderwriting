@@ -1526,7 +1526,7 @@
           "v": "Debt & Waterfall"
         },
         "A208": {
-          "v": "Narrative Tiers"
+          "v": "Debt & Waterfall"
         },
         "A209": {
           "v": "Narrative Tiers"
@@ -1544,7 +1544,7 @@
           "v": "Narrative Tiers"
         },
         "A213": {
-          "v": "Solver Mechanics"
+          "v": "Narrative Tiers"
         },
         "A214": {
           "v": "Solver Mechanics"
@@ -1565,6 +1565,9 @@
           "v": "Solver Mechanics"
         },
         "A220": {
+          "v": "Solver Mechanics"
+        },
+        "A221": {
           "v": "Solver Mechanics"
         },
         "A23": {
@@ -2152,54 +2155,57 @@
           "v": "AM Fee Treatment"
         },
         "B205": {
-          "v": "GP Catch-Up"
+          "v": "Promote Basis"
         },
         "B206": {
-          "v": "Asset Management Fee"
+          "v": "GP Catch-Up"
         },
         "B207": {
-          "v": "AM Fee Base"
+          "v": "Asset Management Fee"
         },
         "B208": {
-          "v": "Preferred 3-Mile Density"
+          "v": "AM Fee Base"
         },
         "B209": {
-          "v": "Strong 3-Mile Density"
+          "v": "Preferred 3-Mile Density"
         },
         "B21": {
           "v": 21000
         },
         "B210": {
-          "v": "Over-Occupied Threshold"
+          "v": "Strong 3-Mile Density"
         },
         "B211": {
-          "v": "Strong Occupancy"
+          "v": "Over-Occupied Threshold"
         },
         "B212": {
-          "v": "Healthy Occupancy"
+          "v": "Strong Occupancy"
         },
         "B213": {
-          "v": "Bracket: Cheap Entry Cap"
+          "v": "Healthy Occupancy"
         },
         "B214": {
-          "v": "Bracket: Dear Entry Cap"
+          "v": "Bracket: Cheap Entry Cap"
         },
         "B215": {
-          "v": "Bracket: Zero-NOI Low Price"
+          "v": "Bracket: Dear Entry Cap"
         },
         "B216": {
-          "v": "Bracket: Zero-NOI High Price"
+          "v": "Bracket: Zero-NOI Low Price"
         },
         "B217": {
-          "v": "Sensitivity: Price Span"
+          "v": "Bracket: Zero-NOI High Price"
         },
         "B218": {
-          "v": "Sensitivity: Price Step"
+          "v": "Sensitivity: Price Span"
         },
         "B219": {
-          "v": "Sensitivity: Exit Cap Span"
+          "v": "Sensitivity: Price Step"
         },
         "B220": {
+          "v": "Sensitivity: Exit Cap Span"
+        },
+        "B221": {
           "v": "Sensitivity: Exit Cap Step"
         },
         "B25": {
@@ -2747,51 +2753,54 @@
           "v": "above_waterfall"
         },
         "C205": {
-          "v": "False"
+          "v": "promote_then_split"
         },
         "C206": {
-          "v": "1.0%"
+          "v": "False"
         },
         "C207": {
-          "v": "invested_equity"
-        },
-        "C208": {
-          "v": "75,000"
-        },
-        "C209": {
-          "v": "100,000"
-        },
-        "C210": {
-          "v": "95.0%"
-        },
-        "C211": {
-          "v": "90.0%"
-        },
-        "C212": {
-          "v": "85.0%"
-        },
-        "C213": {
-          "v": "20.0%"
-        },
-        "C214": {
-          "v": "2.0%"
-        },
-        "C215": {
-          "v": "$100,000"
-        },
-        "C216": {
-          "v": "$50,000,000"
-        },
-        "C217": {
-          "v": "10.0%"
-        },
-        "C218": {
-          "v": "2.5%"
-        },
-        "C219": {
           "v": "1.0%"
         },
+        "C208": {
+          "v": "invested_equity"
+        },
+        "C209": {
+          "v": "75,000"
+        },
+        "C210": {
+          "v": "100,000"
+        },
+        "C211": {
+          "v": "95.0%"
+        },
+        "C212": {
+          "v": "90.0%"
+        },
+        "C213": {
+          "v": "85.0%"
+        },
+        "C214": {
+          "v": "20.0%"
+        },
+        "C215": {
+          "v": "2.0%"
+        },
+        "C216": {
+          "v": "$100,000"
+        },
+        "C217": {
+          "v": "$50,000,000"
+        },
+        "C218": {
+          "v": "10.0%"
+        },
+        "C219": {
+          "v": "2.5%"
+        },
         "C220": {
+          "v": "1.0%"
+        },
+        "C221": {
           "v": "0.25%"
         },
         "C66": {
@@ -3253,6 +3262,9 @@
         "D220": {
           "v": "model default"
         },
+        "D221": {
+          "v": "model default"
+        },
         "D66": {
           "v": "Derived From"
         },
@@ -3476,7 +3488,7 @@
           "v": "AM fee above the waterfall or netted from LP"
         },
         "A39": {
-          "v": "Promote on 100% of residual or LP-attributable only"
+          "v": "Promote on all capital: before or after the pro-rata split"
         },
         "A4": {
           "v": "All-In Rate"
@@ -3575,7 +3587,7 @@
           "v": "Above the waterfall (deal expense) \u2014 1.00% of invested equity, measured at the start of each period"
         },
         "B39": {
-          "v": "20% promote on the LP-attributable residual (90% of it)"
+          "v": "20% promote on all capital, then the GP's 10% pro-rata share of the remainder"
         },
         "B4": {
           "v": 0.0625
@@ -3851,7 +3863,7 @@
           "v": "AM fee above the waterfall or netted from LP"
         },
         "A44": {
-          "v": "Promote on 100% of residual or LP-attributable only"
+          "v": "Promote on all capital: before or after the pro-rata split"
         },
         "A45": {
           "v": "GP catch-up tier above the pref"
@@ -3953,7 +3965,7 @@
           "v": "Above the waterfall (deal expense) \u2014 1.00% of invested equity, measured at the start of each period"
         },
         "B44": {
-          "v": "20% promote on the LP-attributable residual (90% of it)"
+          "v": "20% promote on all capital, then the GP's 10% pro-rata share of the remainder"
         },
         "B45": {
           "v": "No GP catch-up"
@@ -4943,7 +4955,7 @@
         "Occupancy: 91.0% physical / 74.0% economic  (17-point spread)",
         "TARGET RETURN",
         "Leverage effect: -589 bps (DILUTIVE). Debt is DILUTIVE to the LP at the modelled terms.",
-        "LP net returns are computed under: 8.00% pref, annually compounded - Committed capital (all committed equity funds at close, so this equals contributed/unreturned) - Return of capital first (presentation only: the pref compounds, so no dollar moves) - Above the waterfall (deal expense) - 1.00% of invested equity, measured at the start of each period - 20% promote on the LP-attributable residual (90% of it) - No GP catch-up. 4 of 6 confirmed against the executed partnership agreement, 1 made moot by it; the rest are proposed terms, subject to it.",
+        "LP net returns are computed under: 8.00% pref, annually compounded - Committed capital (all committed equity funds at close, so this equals contributed/unreturned) - Return of capital first (presentation only: the pref compounds, so no dollar moves) - Above the waterfall (deal expense) - 1.00% of invested equity, measured at the start of each period - 20% promote on all capital, then the GP's 10% pro-rata share of the remainder - No GP catch-up. 5 of 6 confirmed against the executed partnership agreement, 1 made moot by it.",
         "Investment Thesis",
         "* Economic occupancy trails physical by 17 points (74.0% against 91.0%) - the asset is full and under-collecting, a management problem rather than a demand problem.",
         "* In-place rents sit 16% below market, closable through the existing tenant base rather than new lease-up.",
@@ -5233,12 +5245,12 @@
         "Committed capital (all committed equity funds at close, so this equals contributed/unreturned) \u2014 Accrual base: contributed/unreturned or committed",
         "Return of capital first (presentation only: the pref compounds, so no dollar moves) \u2014 Return of capital before pref, or pref first",
         "Above the waterfall (deal expense) \u2014 1.00% of invested equity, measured at the start of each period \u2014 AM fee above the waterfall or netted from LP",
-        "20% promote on the LP-attributable residual (90% of it) \u2014 Promote on 100% of residual or LP-attributable only",
+        "20% promote on all capital, then the GP's 10% pro-rata share of the remainder \u2014 Promote on all capital: before or after the pro-rata split",
         "No GP catch-up \u2014 GP catch-up tier above the pref",
         "Maximum Offer Price",
         "At a target 10% base case unlevered IRR, the maximum offer price is $4,529,566 (implied entry cap: 7.6%).",
         "At a target 15% LP NET IRR \u2014 after debt service, the asset-management fee and the GP promote \u2014 the maximum offer price is $4,103,652 (implied entry cap: 8.4%). At that price the deal supports $2,667,374 of senior debt (63.9% LTV, bound by Max LTV) and requires $1,503,988 of equity.",
-        "This price is computed on the levered assumption set stated under Levered Returns above: 8.00% pref, annually compounded; Committed capital (all committed equity funds at close, so this equals contributed/unreturned); Return of capital first (presentation only: the pref compounds, so no dollar moves); Above the waterfall (deal expense) \u2014 1.00% of invested equity, measured at the start of each period; 20% promote on the LP-attributable residual (90% of it); No GP catch-up.",
+        "This price is computed on the levered assumption set stated under Levered Returns above: 8.00% pref, annually compounded; Committed capital (all committed equity funds at close, so this equals contributed/unreturned); Return of capital first (presentation only: the pref compounds, so no dollar moves); Above the waterfall (deal expense) \u2014 1.00% of invested equity, measured at the start of each period; 20% promote on all capital, then the GP's 10% pro-rata share of the remainder; No GP catch-up.",
         "7. Value-Add Opportunities",
         "Identified 4 revenue enhancement opportunities. Identified 3 expense reduction opportunities. Estimated total annual NOI uplift: $201,659. 5 capital improvement item(s) identified for evaluation.",
         "Value-Add Financial Model",
@@ -5279,7 +5291,7 @@
         "Appendix A. Assumptions Filled From Defaults",
         "The CIM did not state the inputs below. The model used the value in the second column, from the source in the third \u2014 not a figure from this deal. Each one moves the returns in section 6, so an assumption an IC reader disagrees with is an assumption to change on the assumptions page and re-run, not a number to discount by eye.",
         "Appendix B. Assumption Register",
-        "Every number this analysis used, with its source. Of 150 assumptions, 1 came from something other than the model's shipped defaults: 0 entered for this deal, 0 from a dated settings override, and 1 filled in because the CIM did not state a value. Those are listed first. The full register follows \u2014 nothing is omitted from it, so an assumption absent below is an assumption this run did not use.",
+        "Every number this analysis used, with its source. Of 151 assumptions, 1 came from something other than the model's shipped defaults: 0 entered for this deal, 0 from a dated settings override, and 1 filled in because the CIM did not state a value. Those are listed first. The full register follows \u2014 nothing is omitted from it, so an assumption absent below is an assumption this run did not use.",
         "B.1 Assumptions not taken from the model defaults",
         "B.2 Full register"
       ],
@@ -6687,6 +6699,12 @@
             "Debt & Waterfall",
             "AM Fee Treatment",
             "above_waterfall",
+            "model default"
+          ],
+          [
+            "Debt & Waterfall",
+            "Promote Basis",
+            "promote_then_split",
             "model default"
           ],
           [

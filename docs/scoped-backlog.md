@@ -290,7 +290,10 @@ debt service plus payoff balance; origination and exit fees. Design-doc oracles
 `pref_compounding`, `promote_split`, `gp_coinvest_pct`, accrual base, ordering);
 `run_waterfall(contributions, distributions, terms)` → per-period LP/GP rows,
 LP net IRR, LP MOIC. GP co-invest is pari passu through the pref; promote is
-computed on the LP-attributable residual only. The 1% AM fee is a cash-flow line
+computed on the LP-attributable residual only — which the LPA's "promote on
+all capital" turns out to MEAN, once the fund's model workbook is consulted
+on which arithmetic that phrase names (question 5 below). The 1% AM fee is a
+cash-flow line
 deducted before the waterfall. Design-doc oracles 1–3.
 
 **E3 — wiring, in two parts.** **E3a ⚑ SHIPPED 2026-08-01** (#32):
@@ -389,8 +392,7 @@ re-runs the solved price forward through the full levered stack.
 
 **Assumption stamp instead of a block.** The design doc lists 7 LPA
 confirmations. One tier plus the operator's no-clawback term answers two of
-them. Six change the number; after the 2026-08-12 reading exactly ONE is
-still open:
+them. Six change the number; after the 2026-08-12 reading NONE is still open:
 
 | # | Question | Resolved value | Effect if wrong | Status |
 |---|----------|----------------|-----------------|--------|
@@ -398,7 +400,7 @@ still open:
 | 2 | Accrual base: contributed/unreturned vs committed | **committed** | none here — see below | **CONFIRMED 2026-08-12** |
 | 3 | ROC-before-pref or pref-before-ROC | ROC first (only matters if simple) | $81,600 vs $72,000 GP on the doc's fixture | **MOOT** (see below) |
 | 4 | AM fee above the waterfall or netted from LP distributions | above (deal expense) | shifts LP net IRR directly | **CONFIRMED 2026-08-12** |
-| 5 | Promote on 100% of residual or LP-attributable share only | LP-attributable only | GP overpaid by its co-invest share | open |
+| 5 | Promote on 100% of residual or LP-attributable share only | **off the top, then pro rata** (`J250`) | LP overpays the promote by `x·c·R` | **CONFIRMED 2026-08-12** |
 | 6 | GP catch-up tier above the pref | none | GP recovers pref leakage; promote rises | **CONFIRMED 2026-08-12** |
 
 **Question 2 changed the WORD, not the number.** The LPA says committed
@@ -412,10 +414,31 @@ break the equivalence (an uncalled commitment becoming expressible). The
 stored value changed regardless: a stamp reading "contributed" beside
 terms saying "committed" discloses a base the document does not name.
 
+**Question 5 is the one that nearly moved money.** The LPA charges the
+promote on ALL capital, which reads two ways that differ by real dollars:
+with `c` the co-invest, `x` the promote and `R` the residual, either
+`x·R` off the top with the remainder split pro rata (GP share
+`x + (1−x)c` = 28%), or the GP's pro-rata slice first and `x·R` charged
+on the whole residual on top (GP share `c + x` = 30%). The `x·c·R`
+between them comes out of the LP.
+**The fund's own model workbook settles it** —
+`Self-Storage-Acquisition-Model-v1.3.xlsm`, `Underwriting!J250 =
+I250+(1-I250)*$J$244` — as the first, which is what the build already
+computed. So NO number moved. The first implementation of this row
+resolved the sentence in code, picked the other reading, and moved every
+levered figure in the repo; the operator's correction was to go to the
+workbook. That is the second time in three days the XLSM has been the
+more considered artifact (the 8%/6% pref rate at `H249` was the first),
+which is a procedure note, not a coincidence: **consult the workbook
+BEFORE resolving an ambiguous LPA sentence in code.**
+Both bases ship — `promote_basis` is this list's only convention with two
+live values — because only one existed before and nothing stated the
+other, which is exactly what let the ambiguity hide.
+
 **Question 6 was not on this list**, because it was filed as a scope
 decision (one tier) rather than an LPA question. It is both, and it now
-carries a stamp row — an LP reading "20% promote on the LP-attributable
-residual" cannot tell from that line whether a catch-up sits above it.
+carries a stamp row — an LP reading "20% promote on the residual" cannot
+tell from that line whether a catch-up sits above it.
 
 **The pref RATE is two rates**: 8% levered, 6% unlevered (2026-08-12),
 per-deal overridable, keyed on the deal's intent to lever rather than on
@@ -445,10 +468,13 @@ subject to the final partnership agreement" applies only to the rows that
 still need it, with a count when the stamp is mixed. Overstating and
 understating are both costly on the one document that leaves the firm.
 
-**As of 2026-08-12 exactly one remains open** (5, `promote_basis`) — and per
-CLAUDE.md decision 7 it has exactly one implemented value with the alternative
-raising, so it deliberately gets no form field. The LP net IRR is decision-grade
-on every axis but that one.
+**As of 2026-08-12 none remains open.** Question 5 was the last, and none of
+the six moved a number — though 5 came within one reading of moving all of
+them. Both promote bases are now implemented and tested (`promote_basis` is
+the one convention on this list with two live values), but it gets no form
+field regardless, because it is a term of the DOCUMENT, identical on every
+deal, and a per-deal dropdown would invite a deal underwritten on a basis the
+LPA does not permit. The LP net IRR is decision-grade on its conventions.
 
 Build with these as **named parameters carrying the defaults above**, and print
 the resolved assumption set next to every LP net IRR we display. That converts a

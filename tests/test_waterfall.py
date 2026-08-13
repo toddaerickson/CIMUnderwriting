@@ -7,9 +7,10 @@ implementation.
 
 Source: oracles 1-3 of `docs/levered-waterfall-design.md`, reproduced to
 the cent (IRRs to four decimal places). All three are the ZERO-co-invest
-case: the $1,000,000 is the LP's, so the LP-attributable residual is the
-whole residual. The shipped 10% co-invest default is derived separately
-in `test_promote_is_charged_on_the_lp_attributable_residual_only`.
+case: with no GP co-invest the two promote bases coincide, since they
+differ by `promote_split x gp_coinvest_pct x residual`. The shipped 10%
+co-invest is derived separately in
+`test_promote_is_charged_on_the_basis_the_lpa_names`.
 
 Three conventions the oracles depend on but never state are pinned by
 their own tests: the accrual is computed on the unreturned capital at the
@@ -24,6 +25,8 @@ from model.waterfall import (ACCRUAL_BASE_COMMITTED, ACCRUAL_BASE_CONTRIBUTED,
                              AM_FEE_NETTED_FROM_LP,
                              COMPOUNDING_ANNUAL, COMPOUNDING_SIMPLE,
                              ORDERING_PREF_FIRST, ORDERING_ROC_FIRST,
+                             PROMOTE_BASIS_PROMOTE_THEN_SPLIT,
+                             PROMOTE_BASIS_SPLIT_THEN_PROMOTE,
                              WaterfallTerms, assumption_stamp,
                              resolve_pref_rate, resolve_waterfall_terms,
                              run_waterfall)
@@ -167,14 +170,18 @@ def test_ordering_moves_a_simple_waterfall_by_nine_thousand_six_hundred():
                                                                 abs=CENT)
 
 
-# ── GP co-invest: pari passu through tier 1, promote on the LP share ─
+# ── GP co-invest: pari passu through tier 1, promote per the LPA ─────
 
-def test_promote_is_charged_on_the_lp_attributable_residual_only():
-    """At the shipped 10% co-invest the residual is unchanged at
-    342,327.09, but only 90% of it is the LP's, so the promote is
-    0.20 x 0.90 x 342,327.0912 = 61,618.88 — not oracle 1's 68,465.42.
-    Charging the promote on 100% of the residual would pay the GP a
-    promote on its own co-invested capital.
+def test_promote_is_charged_on_the_basis_the_lpa_names():
+    """The LPA charges the promote on ALL capital (read 2026-08-12), and
+    the fund's model workbook settles WHICH of the two readings of that
+    phrase is meant: promote off the top, remainder split pro rata.
+    `Underwriting!J250 = I250+(1-I250)*$J$244` — the GP takes
+    0.20 + 0.80 x 0.10 = 28% of the promoted tier.
+
+    At the shipped 10% co-invest that is 0.20 x 0.90 x 342,327.0912 =
+    61,618.88 of promote out of the LP's share, and the residual is
+    unchanged at 342,327.09.
     """
     result = _run(WaterfallTerms(pref_compounding=COMPOUNDING_ANNUAL,
                                  pref_rate=0.08, promote_split=0.20,
@@ -185,6 +192,62 @@ def test_promote_is_charged_on_the_lp_attributable_residual_only():
     assert result["gp"]["distributions"] == pytest.approx(237_618.88, abs=CENT)
     assert result["lp"]["distributions"] == pytest.approx(1_522_381.12,
                                                           abs=CENT)
+    # The workbook's split, reproduced from the result rather than
+    # restated: the GP's share of the residual is x + (1-x)c = 28%.
+    assert ((final["gp_distribution"] - final["tier1_paid"] * 0.10)
+            / final["residual"]) == pytest.approx(0.28, abs=1e-9)
+
+
+def test_the_two_promote_bases_differ_by_the_promote_on_the_co_invest():
+    """The pair, stated in CI, because only one of them existed in the
+    codebase and that is exactly why "the promote is earned on all
+    capital" was briefly implemented as the other one.
+
+    Both are "promote on all capital". They differ in ORDER: the shipped
+    basis takes x·R off the top and splits the rest pro rata (GP 28%);
+    `split_then_promote` gives the GP its pro-rata slice and charges the
+    promote on the whole residual on top (GP 30%). The gap is
+    x·c·R — the promote on the GP's own co-invested dollars — and it
+    comes out of the LP either way it is described.
+    """
+    kw = dict(pref_compounding=COMPOUNDING_ANNUAL, pref_rate=0.08,
+              promote_split=0.20, gp_coinvest_pct=0.10)
+    shipped = _run(WaterfallTerms(**kw))
+    on_top = _run(WaterfallTerms(**kw,
+                                 promote_basis=PROMOTE_BASIS_SPLIT_THEN_PROMOTE))
+    gap = 0.20 * 0.10 * 342_327.0912
+    assert on_top["gp"]["promote"] - shipped["gp"]["promote"] == pytest.approx(
+        gap, abs=CENT)
+    assert shipped["lp"]["distributions"] - on_top["lp"]["distributions"] == \
+        pytest.approx(gap, abs=CENT)
+    assert on_top["gp"]["promote"] == pytest.approx(68_465.42, abs=CENT)
+    # And the GP's residual share under each, which is how the choice
+    # would be read off a term sheet.
+    for result, share in ((shipped, 0.28), (on_top, 0.30)):
+        final = result["periods"][-1]
+        assert ((final["gp_distribution"] - final["tier1_paid"] * 0.10)
+                / final["residual"]) == pytest.approx(share, abs=1e-9)
+
+
+def test_the_promote_falls_as_the_gp_co_invests_more_under_the_shipped_basis():
+    """The mirror of the LP invariance below, and the sharper statement
+    of what `promote_then_split` means: the GP forgoes promote on its own
+    money, so its promote falls as it co-invests more. Under
+    `split_then_promote` it would be a flat 20% of the residual at every
+    co-invest — 68,465.42, oracle 1's zero-co-invest figure — which is
+    the tell that the GP is being promoted on its own capital.
+    """
+    promotes = []
+    for coinvest in (0.0, 0.05, 0.10, 0.25, 0.50):
+        kw = dict(pref_compounding=COMPOUNDING_ANNUAL, pref_rate=0.08,
+                  promote_split=0.20, gp_coinvest_pct=coinvest)
+        promotes.append(_run(WaterfallTerms(**kw))["gp"]["promote"])
+        assert _run(WaterfallTerms(
+            **kw, promote_basis=PROMOTE_BASIS_SPLIT_THEN_PROMOTE
+        ))["gp"]["promote"] == pytest.approx(68_465.42, abs=CENT)
+    assert promotes == sorted(promotes, reverse=True)
+    assert promotes[0] == pytest.approx(68_465.42, abs=CENT)
+    assert promotes[2] == pytest.approx(61_618.88, abs=CENT)
 
 
 def test_gp_rides_tier_one_pari_passu():
@@ -214,12 +277,17 @@ def test_gp_rides_tier_one_pari_passu():
 
 
 def test_lp_returns_are_invariant_to_gp_coinvest():
-    """The property that proves the promote basis is right. With the
-    promote charged on the LP-attributable residual only, the LP's flows
-    scale exactly with its share of the equity — so its IRR and MOIC do
-    not move when the GP co-invests more. Under a promote charged on 100%
-    of the residual they would, and the LP would be quietly paying the
-    GP a promote on the GP's own money.
+    """The property that proves the promote basis is the workbook's. Under
+    `promote_then_split` the LP keeps `R(1-c)(1-x)` against capital of
+    `(1-c)E`, so its flows scale EXACTLY with its share of the equity and
+    its IRR and MOIC do not move when the GP co-invests more.
+
+    Under `split_then_promote` they would: the promote stays a flat 20%
+    of the whole residual while the LP's slice of that residual shrinks,
+    so every extra dollar of GP co-invest costs the LP promote on that
+    dollar. That is asserted here too — strictly falling — because the
+    invariance above is only evidence of a choice if the alternative is
+    shown to break it.
     """
     baseline = _run(WaterfallTerms(pref_compounding=COMPOUNDING_ANNUAL,
                                    **NO_COINVEST))
@@ -231,6 +299,14 @@ def test_lp_returns_are_invariant_to_gp_coinvest():
                                                     abs=1e-9)
         assert result["lp"]["moic"] == pytest.approx(baseline["lp"]["moic"],
                                                      abs=1e-9)
+
+    irrs = [_run(WaterfallTerms(
+        pref_compounding=COMPOUNDING_ANNUAL, pref_rate=0.08,
+        promote_split=0.20, gp_coinvest_pct=c,
+        promote_basis=PROMOTE_BASIS_SPLIT_THEN_PROMOTE))["lp"]["irr"]
+        for c in (0.0, 0.05, 0.10, 0.25, 0.50)]
+    assert all(a > b for a, b in zip(irrs, irrs[1:]))
+    assert irrs[0] == pytest.approx(baseline["lp"]["irr"], abs=1e-9)
 
 
 # ── Accrual timing ──────────────────────────────────────────────────
@@ -462,8 +538,9 @@ def test_the_compounded_split_flips_with_the_ordering_and_moves_no_dollar():
 
 def test_a_promote_survives_a_later_capital_call_and_says_so(caplog):
     """The limit of "no promote until tier 1 is current". A residual
-    distribution in period 2 pays the GP $150,048; a $5,000,000 call in
-    period 3 re-opens tier 1 and the LP ends at 0.39x. With no clawback
+    distribution in period 2 pays the GP $150,048 of promote; a
+    $5,000,000 call in period 3 re-opens tier 1 and the LP ends at
+    0.39x. With no clawback
     the GP keeps the promote — the correct model of the operator's fund
     terms — but a `tier1_current: False` sitting beside a positive
     promote is not a statement, so `unrecovered_promote` makes it one.
@@ -574,7 +651,13 @@ def _two_separate_accounts(contribs, dists, terms):
 
         residual = cash - tier1
         lp_residual = residual * (1.0 - coinvest)
-        promote = lp_residual * terms.promote_split
+        # This reference is independent of `run_waterfall`'s ACCRUAL, not
+        # of the fund's terms — it has to charge the promote on the basis
+        # the LPA names or it would be testing a different waterfall.
+        promote = terms.promote_split * (
+            residual
+            if terms.promote_basis == PROMOTE_BASIS_SPLIT_THEN_PROMOTE
+            else lp_residual)
         books["lp"]["paid"] += lp_residual - promote
         books["gp"]["paid"] += residual - lp_residual + promote
 
@@ -801,6 +884,43 @@ def test_an_unrecognised_convention_raises_instead_of_defaulting():
         WaterfallTerms(accrual_base="invested")
     with pytest.raises(ValueError, match="am_fee_treatment"):
         WaterfallTerms(am_fee_treatment="deferred")
+    with pytest.raises(ValueError, match="promote_basis"):
+        WaterfallTerms(promote_basis="all_capital")
+
+
+def test_the_default_promote_basis_is_the_one_the_workbook_computes():
+    """`Underwriting!J250 = I250+(1-I250)*$J$244` — the fund's own model
+    gives the GP `x + (1-x)c` of the promoted tier, which is
+    `promote_then_split`. Pinned as the DEFAULT, not merely as a
+    supported value, because the LPA sentence reads either way and the
+    workbook is what settles it.
+    """
+    assert WaterfallTerms().promote_basis == PROMOTE_BASIS_PROMOTE_THEN_SPLIT
+    x, c = 0.20, 0.10
+    assert x + (1 - x) * c == pytest.approx(0.28, abs=1e-12)
+    assert c + x == pytest.approx(0.30, abs=1e-12)
+
+
+def test_a_promote_bigger_than_the_lps_residual_share_is_refused():
+    """The joint bound: separately in-range fields that are impossible
+    TOGETHER. Only `split_then_promote` can overrun, since it charges
+    x·R against an LP residual of R(1-c) — so a 50% promote beside a 55%
+    co-invest would drive the LP's own distribution line negative. The
+    shipped basis takes the promote off the top and cannot.
+    """
+    with pytest.raises(ValueError, match="exceeds the LP's share"):
+        WaterfallTerms(promote_basis=PROMOTE_BASIS_SPLIT_THEN_PROMOTE,
+                       promote_split=0.50, gp_coinvest_pct=0.55)
+    # Break-even is legal: the LP's residual is zero, not negative. It is
+    # also where `1.0 - 0.55 == 0.44999999999999996` would refuse a valid
+    # pair, so this case is the guard's float slack under test.
+    ok = WaterfallTerms(promote_basis=PROMOTE_BASIS_SPLIT_THEN_PROMOTE,
+                        promote_split=0.45, gp_coinvest_pct=0.55)
+    assert run_waterfall([1_000_000.0, 0.0], [0.0, 2_000_000.0],
+                         ok)["lp"]["distributions"] > 0
+    # And the shipped basis has no such bound to overrun.
+    WaterfallTerms(promote_basis=PROMOTE_BASIS_PROMOTE_THEN_SPLIT,
+                   promote_split=0.50, gp_coinvest_pct=0.55)
 
 
 def test_out_of_range_rates_and_splits_are_rejected():
@@ -1093,14 +1213,45 @@ def test_a_confirmed_question_is_marked_confirmed_and_dated():
         cfg.LPA_CONFIRMED["pref_compounding"]
 
 
-def test_an_unconfirmed_question_stays_open_and_carries_no_date():
-    """`promote_basis` is the last one nobody has read. When it is
-    confirmed this test needs a different subject, not deletion — the
-    failing-open default is what makes the stamp trustworthy, and it
-    has to keep being exercised by something."""
-    row = {r["key"]: r for r in assumption_stamp(ORACLE_1)}
+def test_a_question_absent_from_lpa_confirmed_stays_open(monkeypatch):
+    """Taking the previous version of this test at its word.
+
+    It read `promote_basis` and said: "when it is confirmed this test
+    needs a different subject, not deletion — the failing-open default
+    is what makes the stamp trustworthy, and it has to keep being
+    exercised by something." It was confirmed on 2026-08-12, and no
+    shipped row is `open` any more. That is precisely when a guarantee
+    stops being tested and starts being believed, so the subject is now
+    SYNTHETIC: drop a key and the row must fall back.
+
+    The property was never about `promote_basis`. It is that a row's
+    status comes from `config.LPA_CONFIRMED` and nowhere else — no
+    default, no inheritance from a neighbour, no memory of a
+    confirmation that has been removed.
+    """
+    confirmed = dict(cfg.LPA_CONFIRMED)
+    confirmed.pop("promote_basis")
+    monkeypatch.setattr(cfg, "LPA_CONFIRMED", confirmed)
+    row = {r["key"]: r for r in assumption_stamp(resolve_waterfall_terms())}
     assert row["promote_basis"]["status"] == "open"
     assert "confirmed_on" not in row["promote_basis"]
+    # Per-key, not per-stamp: its neighbours keep their dates.
+    assert row["accrual_base"]["status"] == "confirmed"
+    assert row["accrual_base"]["confirmed_on"] == "2026-08-12"
+
+
+def test_an_empty_lpa_confirmed_opens_every_row_including_the_moot_one(
+        monkeypatch):
+    """`ordering` is `moot` only BECAUSE `pref_compounding` is
+    confirmed. Remove every confirmation and it must return to `open` —
+    a mootness that outlived its cause would be the stamp claiming a
+    question cannot move the number when nobody has established that.
+    """
+    monkeypatch.setattr(cfg, "LPA_CONFIRMED", {})
+    rows = assumption_stamp(resolve_waterfall_terms())
+    assert len(rows) == 6
+    assert {r["status"] for r in rows} == {"open"}
+    assert not any("confirmed_on" in r for r in rows)
 
 
 def test_the_2026_08_12_reading_is_confirmed_and_dated():

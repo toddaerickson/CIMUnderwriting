@@ -5,6 +5,7 @@ import pytest
 import config as cfg
 from model.solver import (_monotonicity_warning, solve_max_price,
                           solve_max_price_levered)
+from model.waterfall import WaterfallTerms
 from registry import ScenarioType
 
 
@@ -163,7 +164,7 @@ def test_levered_solver_honours_the_deals_gp_coinvest():
                                      gp_coinvest_pct=0.25)
     promote_row = next(r for r in solved["assumption_stamp"]
                        if r["key"] == "promote_basis")
-    assert "75%" in promote_row["label"]      # 1 - 0.25 LP-attributable
+    assert "25%" in promote_row["label"]      # the deal's, not config's 10%
 
 
 def test_levered_max_price_is_invariant_to_gp_coinvest_under_this_promote():
@@ -171,21 +172,21 @@ def test_levered_max_price_is_invariant_to_gp_coinvest_under_this_promote():
     arithmetic rather than a bug — worth pinning because every reader
     expects the opposite.
 
-    Under the shipped convention the promote is charged on the
-    LP-ATTRIBUTABLE residual only, so with `s = 1 - gp_coinvest_pct`:
+    Under the shipped basis the promote comes off the top and the
+    remainder splits pro rata, so with `s = 1 - gp_coinvest_pct`:
 
         lp_contribution = s x contribution
         lp_distribution = s x (tier1 + residual x (1 - promote_split))
 
     Every LP flow carries the same factor `s`, and IRR is scale
     invariant, so it cancels. The LP earns the same RATE on a smaller
-    cheque.
+    cheque, and the price that clears 15% is the same price.
 
-    This is specific to that convention. Open LPA question 5 asks whether
-    the promote should instead be charged on 100% of the residual — under
-    THAT reading `s` no longer factors out and this test should be
-    expected to fail. It failing is a signal the convention moved, which
-    is exactly when someone must look.
+    This is specific to that basis. `split_then_promote` charges
+    `promote_split x residual` regardless of `s` while the LP funds it
+    out of `s x residual`, so `s` stops factoring out and the price
+    falls — asserted below, because a property that holds under one
+    convention only says something if the other is shown to break it.
     """
     at_10 = solve_max_price_levered(adjusted_ttm_noi=300_000,
                                     gp_coinvest_pct=0.10)
@@ -196,6 +197,37 @@ def test_levered_max_price_is_invariant_to_gp_coinvest_under_this_promote():
     # Total equity is GP + LP, so it is invariant too; what moves is only
     # how that equity is split, which the Sources & Uses block owns.
     assert at_10["total_equity"] == at_25["total_equity"]
+
+    # The alternative basis, exercised through the solver rather than
+    # merely supported by it — an unexercised branch is how a convention
+    # one setting away rots.
+    def on_top(coinvest):
+        # The co-invest goes in the TERMS as well as the kwarg: an
+        # explicit `waterfall_terms` bypasses `resolve_waterfall_terms`,
+        # so config's 10/90 would split the promote beside a 25/75 stack
+        # — the exact divergence the solver's own comment warns about,
+        # and it silently flattens this test to an equality.
+        terms = WaterfallTerms(**dict(cfg.WATERFALL_TERMS,
+                                      pref_rate=cfg.PREF_RATE_LEVERED,
+                                      gp_coinvest_pct=coinvest,
+                                      promote_basis="split_then_promote"))
+        return solve_max_price_levered(adjusted_ttm_noi=300_000,
+                                       gp_coinvest_pct=coinvest,
+                                       waterfall_terms=terms)
+
+    was_10, was_25 = on_top(0.10), on_top(0.25)
+    assert was_25["max_price"] < was_10["max_price"]
+    assert was_10["max_price"] - was_25["max_price"] > 25_000
+    # Both still hit the target — it is the PRICE that gave way, which is
+    # what a solver is for. Compared against the TARGET rather than
+    # against each other, and at the solver's own documented 0.1%
+    # precision (decision 8): two bisections that stop at different
+    # prices land on slightly different sides of 15%, and a tolerance
+    # tighter than the solver's would be testing the bisection's
+    # rounding rather than this convention.
+    for solved in (was_10, was_25):
+        assert solved["lp_net_irr"] == pytest.approx(solved["target_irr"],
+                                                     abs=1e-3)
 
 
 # ── Monotonicity: the assumption bisection rests on ──────────────────
