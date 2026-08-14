@@ -293,8 +293,8 @@ LP net IRR, LP MOIC. GP co-invest is pari passu through the pref; promote is
 computed on the LP-attributable residual only — which the LPA's "promote on
 all capital" turns out to MEAN, once the fund's model workbook is consulted
 on which arithmetic that phrase names (question 5 below). The 1% AM fee is a
-cash-flow line
-deducted before the waterfall. Design-doc oracles 1–3.
+cash-flow line deducted before the waterfall, charged on LP equity only
+(question 4b, 2026-08-14). Design-doc oracles 1–3.
 
 **E3 — wiring, in two parts.** **E3a ⚑ SHIPPED 2026-08-01** (#32):
 `model/levered.py`, the seam where the debt layer and the waterfall meet the
@@ -400,6 +400,7 @@ them. Six change the number; after the 2026-08-12 reading NONE is still open:
 | 2 | Accrual base: contributed/unreturned vs committed | **committed** | none here — see below | **CONFIRMED 2026-08-12** |
 | 3 | ROC-before-pref or pref-before-ROC | ROC first (only matters if simple) | $81,600 vs $72,000 GP on the doc's fixture | **MOOT** (see below) |
 | 4 | AM fee above the waterfall or netted from LP distributions | above (deal expense) | shifts LP net IRR directly | **CONFIRMED 2026-08-12** |
+| 4b | AM fee charged on invested equity (GP+LP) or LP equity | **LP equity** | overstates the fee by the co-invest share — 11.1% at c=0.10 | **CONFIRMED 2026-08-14** |
 | 5 | Promote on 100% of residual or LP-attributable share only | **off the top, then pro rata** (`J250`) | LP overpays the promote by `x·c·R` | **CONFIRMED 2026-08-12** |
 | 6 | GP catch-up tier above the pref | none | GP recovers pref leakage; promote rises | **CONFIRMED 2026-08-12** |
 

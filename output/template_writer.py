@@ -29,34 +29,49 @@ test proving it fails when it should. Structural constants — a column
 index, an at-closing zero, the template's own year-1 convention — are
 named once below, which is what makes them reviewable.
 
-## What does not reconcile — SETTLED, and disclosed in the workbook
+## What does not reconcile — down to two narrow things
 
-The XLSM computes its own returns from these inputs, and two of its
-conventions are not ours. Neither is reachable from an input cell, so
-the writer stamps them into the workbook itself
-(`_write_divergence_disclosures`) as well as here:
+The XLSM computes its own returns from these inputs. **Both of the
+divergences this section used to name are gone as of 2026-08-14, and
+neither closed in the app's favour** — which is the part worth
+remembering.
 
-1. **The pref is an IRR hurdle** (H248 "IRR Hurdle"; the hurdle rows are
-   H249-H252). `model.waterfall` runs an ACCRUAL account on unreturned
-   committed capital. Same rate — 8% levered, 6% unlevered, resolved by
-   `model.waterfall.resolve_pref_rate` — but a different construction,
-   so the promote dollars differ. Writing `pref_rate` into the hurdle
-   rows makes the two agree on the RATE, which is as far as an input
-   cell reaches. A
-   future edit of the TEMPLATE could swap the hurdle formula for an
-   accrual — that is an XLSM edit, not a writer change; until someone
-   makes it, the divergence is permanent and disclosed.
-2. **The AM fee is charged on LP equity** (H245 = `K61*G245/12`, and
-   K61 is LP equity). `config.AM_FEE_BASE` is `invested_equity` —
-   GP + LP — so at a 10% GP co-invest the workbook's fee runs ~10%
-   light. The dropdown has no invested-equity option. Grossing the rate
-   up to 1.11% would make the dollars tie while printing a fee rate the
-   fund does not charge, so the true rate is written and the gap is
-   disclosed — REAFFIRMED by the operator 2026-08-10 when this residue
-   was settled. (The gross-up could not even tie in general: the model's
-   fee base rolls forward on a capital call — `model/levered.py` — where
-   the workbook's K61 is fixed at close, so a single compensated rate
-   reproduces the model's dollars only on deals that never call.)
+1. **The pref divergence was never real.** This module claimed the
+   workbook ran an IRR hurdle against our accrual account, "same rate,
+   different construction, so the promote dollars differ". That was read
+   off the LABEL at H248. The mechanism is at ET213 and EX217-EX224:
+   `ET213 = (1+H249)^(1/12)-1`, `EX221 = EX217*$ET$213`,
+   `EX224 = EX217+EX221+EX222-EX223` — a balance, a rate on it, and a
+   roll-forward. That is `model.waterfall`'s tier 1. The `XIRR` at EW225
+   is labelled "LP Cash Flow and IRR Check" and drives nothing.
+   Reproducing the recursion against `run_waterfall` on the design doc's
+   oracle-1 fixture ties LP distributions, GP distributions and the
+   promote to the cent (`tests/test_template_writer.py`).
+   Tiers 2 and 3 are provably dead once the writer puts one rate in
+   H249-H251 — their balance is tier 1's net of tier-1 distributions, so
+   it is zero whenever cash allowed, and they are fed zero remaining cash
+   whenever it did not — so everything above tier 1 lands in tier 4 at
+   `J252`, which is the same 28% split.
+   **What is left is PERIODICITY**: the workbook is monthly, the app is
+   annual. Same rate — twelve compoundings of `(1+r)^(1/12)-1` is exactly
+   `r` — so annual cash ties exactly and only monthly distributions
+   diverge, in the workbook's favour by construction.
+2. **The AM-fee base divergence was real, and the workbook was right.**
+   `G244` is a dropdown reading "% of LP Equity" and
+   `H245 = K61*G245/12` with K61 = LP Equity. The app charged GP+LP from
+   2026-08-01 until 2026-08-14, when the operator settled it: a GP does
+   not charge an asset-management fee on its own co-investment.
+   `config.AM_FEE_BASE` is now `lp_equity` and every levered figure moved
+   — down 11.1% of fee at a 10% co-invest, up in LP net IRR.
+   **What is left is the ROLL-FORWARD**: K61 is fixed at close, the app's
+   base picks up capital called after close. Identical on a deal that
+   never calls; the app is higher on one that does, because the manager
+   is administering the called capital.
+
+Do not "fix" either remainder by editing a value into agreement — that
+trades a visible discrepancy for a hidden one. The gross-up rejected on
+2026-08-10 is the worked example: even compensated, it could not tie in
+general, precisely because of the roll-forward above.
 
 ## What DOES reconcile, and is worth saying
 
@@ -311,24 +326,25 @@ _DISCLOSURE_FIRST_ROW = 265
 #: How far below the preferred row to look before giving up. Bounded so
 #: a disclosure can never wander into an unrelated part of the sheet.
 _DISCLOSURE_SEARCH_ROWS = 12
-_DISCLOSURE_PREF_CELL = "B265"
+_DISCLOSURE_PERIOD_CELL = "B265"
 _DISCLOSURE_AM_FEE_CELL = "B266"
 
 # The strings are static on purpose: interpolating the deal's own rates
 # would put values in prose where no test reconciles them. Direction and
 # mechanism are what the reader needs; the rates live in their cells.
-_PREF_DISCLOSURE = (
-    "Note: this workbook's pref (H248) is an IRR hurdle; the app's "
-    "waterfall accrues the pref on unreturned committed capital. Same "
-    "rate (H249), different construction, so promote dollars differ "
-    "from the memo. Not reachable from an input cell; disclosed here "
-    "instead."
+_PERIODICITY_DISCLOSURE = (
+    "Note: this workbook runs the waterfall MONTHLY and the app runs it "
+    "annually. Same pref construction and same rate, so a deal whose "
+    "cash arrives annually ties exactly; a deal distributing monthly "
+    "accrues less pref here than in the memo, because a distribution is "
+    "credited against the balance in its own month."
 )
 _AM_FEE_DISCLOSURE = (
-    "Note: H245 charges the AM fee on LP equity (K61); the app charges "
-    "invested equity (GP + LP), so this workbook's fee runs light by "
-    "roughly the GP co-invest share. G245 is the fund's true rate, not "
-    "a grossed-up one (operator decision 2026-08-10)."
+    "Note: H245 and the app both charge the AM fee on LP equity (K61) "
+    "as of 2026-08-14 — a GP charges no fee on its own co-invest. One "
+    "difference remains: K61 is fixed at close, while the app's base "
+    "picks up capital called after close, so the app's fee is higher on "
+    "a deal that calls and identical on one that does not."
 )
 
 # Benchmark bands are (low, high) tuples. `_BAND_HIGH` went with the
@@ -1160,19 +1176,27 @@ def _free_disclosure_cells(ws, count: int) -> list:
 
 
 def _write_divergence_disclosures(ws):
-    """Stamp the two structural divergences INTO the workbook.
+    """Stamp the structural divergences INTO the workbook.
 
     Until 2026-08-10 they were recorded only in this module's docstring —
     the one place the analyst reading the workbook will never look. The
-    module docstring carries the full reasoning; these two lines carry
-    the direction and the mechanism to the reader who has only the file.
+    module docstring carries the full reasoning; these lines carry the
+    direction and the mechanism to the reader who has only the file.
     Text only — the AST gate is numeric and untouched by design.
 
-    **Still two, and that was checked rather than assumed.** The
-    2026-08-12 LPA reading looked briefly like it had opened a third on
-    the promote; the workbook's own J250 turned out to state the
-    convention the LPA meant, so the two agree and there is nothing to
-    disclose. See the module docstring.
+    **Both original divergences are GONE as of 2026-08-14, and neither
+    went by being fixed in the app's favour.** The pref one was never
+    real — "IRR Hurdle" at H248 is a LABEL, and the mechanism at
+    ET213/EX217-EX224 is the same accrual account the app runs, so the
+    disclosure was telling readers of an LP-adjacent deliverable
+    something false for four days. The AM-fee one was real, and the
+    workbook was right: the app now charges the fee on LP equity too.
+
+    Two lines still ship, because two narrower things remain true and a
+    reader with only the file still needs them: this workbook is
+    MONTHLY where the app is annual, and its fee base is static at close
+    where the app's rolls forward on capital calls. Both are stated in
+    the direction they cut.
 
     The target cells are CHECKED, not assumed (see `_DISCLOSURE_COL`):
     this writer runs against a proprietary workbook nobody who chose the
@@ -1180,13 +1204,14 @@ def _write_divergence_disclosures(ws):
     being right. Worst case here is a missing note and a loud warning;
     the alternative was a corrupted workbook or no workbook at all.
     """
-    disclosures = (_PREF_DISCLOSURE, _AM_FEE_DISCLOSURE)
+    disclosures = (_PERIODICITY_DISCLOSURE, _AM_FEE_DISCLOSURE)
     cells = _free_disclosure_cells(ws, len(disclosures))
     if len(cells) < len(disclosures):
         logger.warning(
             "No free rows for the XLSM divergence disclosures near row %d "
-            "(column B) — the workbook is written WITHOUT them. The pref "
-            "and AM-fee divergences still apply; see the module docstring "
+            "(column B) — the workbook is written WITHOUT them. The "
+            "periodicity and AM-fee-base differences still apply; see the "
+            "module docstring "
             "in output/template_writer.py, and move "
             "_DISCLOSURE_FIRST_ROW to a blank area of the template.",
             _DISCLOSURE_FIRST_ROW)

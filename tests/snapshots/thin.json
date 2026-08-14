@@ -2783,7 +2783,7 @@
           "v": "1.0%"
         },
         "C212": {
-          "v": "invested_equity"
+          "v": "lp_equity"
         },
         "C213": {
           "v": "75,000"
@@ -3575,19 +3575,19 @@
           "v": "Bear"
         },
         "B18": {
-          "v": 0.12283
+          "v": 0.123612
         },
         "B19": {
-          "v": 1.644986
+          "v": 1.648813
         },
         "B2": {
           "v": 2730000
         },
         "B20": {
-          "v": 91055.061899
+          "v": 92680.544493
         },
         "B21": {
-          "v": 76965
+          "v": 69268.5
         },
         "B22": {
           "v": 0
@@ -3626,7 +3626,7 @@
           "v": "Return of capital first (presentation only: the pref compounds, so no dollar moves)"
         },
         "B37": {
-          "v": "Above the waterfall (deal expense) \u2014 1.00% of invested equity, measured at the start of each period"
+          "v": "Above the waterfall (deal expense) \u2014 1.00% of LP equity, measured at the start of each period"
         },
         "B38": {
           "v": "20% promote on all capital, then the GP's 10% pro-rata share of the remainder"
@@ -3656,16 +3656,16 @@
           "v": "Base"
         },
         "C18": {
-          "v": 0.17045
+          "v": 0.171202
         },
         "C19": {
-          "v": 1.961512
+          "v": 1.965338
         },
         "C20": {
-          "v": 205472.747689
+          "v": 207098.230283
         },
         "C21": {
-          "v": 76965
+          "v": 69268.5
         },
         "C22": {
           "v": 0
@@ -3695,16 +3695,16 @@
           "v": "Bull"
         },
         "D18": {
-          "v": 0.346763
+          "v": 0.347388
         },
         "D19": {
-          "v": 3.778945
+          "v": 3.782772
         },
         "D20": {
-          "v": 840317.096227
+          "v": 841942.578821
         },
         "D21": {
-          "v": 76965
+          "v": 69268.5
         },
         "D22": {
           "v": 0
@@ -3716,55 +3716,55 @@
           "v": "AM Fee"
         },
         "D27": {
-          "v": 15393
+          "v": 13853.7
         },
         "D28": {
-          "v": 15393
+          "v": 13853.7
         },
         "D29": {
-          "v": 15393
+          "v": 13853.7
         },
         "D30": {
-          "v": 15393
+          "v": 13853.7
         },
         "D31": {
-          "v": 15393
+          "v": 13853.7
         },
         "E26": {
           "v": "Levered CF"
         },
         "E27": {
-          "v": 170434.511664
+          "v": 171973.811664
         },
         "E28": {
-          "v": 179812.999664
+          "v": 181352.299664
         },
         "E29": {
-          "v": 189405.853104
+          "v": 190945.153104
         },
         "E30": {
-          "v": 199217.828217
+          "v": 200757.128217
         },
         "E31": {
-          "v": 2508786.867067
+          "v": 2510326.167067
         },
         "F26": {
           "v": "Distribution"
         },
         "F27": {
-          "v": 170434.511664
+          "v": 171973.811664
         },
         "F28": {
-          "v": 179812.999664
+          "v": 181352.299664
         },
         "F29": {
-          "v": 189405.853104
+          "v": 190945.153104
         },
         "F30": {
-          "v": 199217.828217
+          "v": 200757.128217
         },
         "F31": {
-          "v": 2508786.867067
+          "v": 2510326.167067
         },
         "G26": {
           "v": "Capital Call"
@@ -3959,10 +3959,10 @@
           "v": 0.08192
         },
         "B27": {
-          "v": 0.149993
+          "v": 0.15073
         },
         "B28": {
-          "v": 1.85547
+          "v": 1.859296
         },
         "B3": {
           "v": 0.1
@@ -4004,7 +4004,7 @@
           "v": "Return of capital first (presentation only: the pref compounds, so no dollar moves)"
         },
         "B43": {
-          "v": "Above the waterfall (deal expense) \u2014 1.00% of invested equity, measured at the start of each period"
+          "v": "Above the waterfall (deal expense) \u2014 1.00% of LP equity, measured at the start of each period"
         },
         "B44": {
           "v": "20% promote on all capital, then the GP's 10% pro-rata share of the remainder"
@@ -4555,8 +4555,8 @@
         "Tyler, TX - Built 1998 - 40,000 NRSF - 320 units",
         "Occupancy: 88.0% physical / N/A economic",
         "TARGET RETURN",
-        "Leverage effect: +523 bps (accretive). Debt is accretive to the LP at the modelled terms.",
-        "LP net returns are computed under: 8.00% pref, annually compounded - Committed capital (all committed equity funds at close, so this equals contributed/unreturned) - Return of capital first (presentation only: the pref compounds, so no dollar moves) - Above the waterfall (deal expense) - 1.00% of invested equity, measured at the start of each period - 20% promote on all capital, then the GP's 10% pro-rata share of the remainder - No GP catch-up. 5 of 6 confirmed against the executed partnership agreement, 1 made moot by it.",
+        "Leverage effect: +530 bps (accretive). Debt is accretive to the LP at the modelled terms.",
+        "LP net returns are computed under: 8.00% pref, annually compounded - Committed capital (all committed equity funds at close, so this equals contributed/unreturned) - Return of capital first (presentation only: the pref compounds, so no dollar moves) - Above the waterfall (deal expense) - 1.00% of LP equity, measured at the start of each period - 20% promote on all capital, then the GP's 10% pro-rata share of the remainder - No GP catch-up. 5 of 6 confirmed against the executed partnership agreement, 1 made moot by it.",
         "Investment Thesis",
         "* Occupancy Improvement: Increase physical occupancy from 88.0% to 93% through improved marketing and ECRI program.",
         "Key Metrics",
@@ -4586,17 +4586,17 @@
           [
             "IRR",
             "11.8%",
-            "17.0%"
+            "17.1%"
           ],
           [
             "MOIC",
             "1.62x",
-            "1.96x"
+            "1.97x"
           ],
           [
             "Bear to Bull",
             "9.4% to 22.3%",
-            "12.3% to 34.7%"
+            "12.4% to 34.7%"
           ]
         ],
         [
@@ -4660,12 +4660,12 @@
           ],
           [
             "Asset-management fee (hold total)",
-            "$76,965",
+            "$69,268",
             "1.00%/yr"
           ],
           [
             "GP promote (hold total)",
-            "$205,473",
+            "$207,098",
             ""
           ]
         ],
@@ -4830,13 +4830,13 @@
         "8.00% pref, annually compounded \u2014 Pref simple or compounded, and at what frequency",
         "Committed capital (all committed equity funds at close, so this equals contributed/unreturned) \u2014 Accrual base: contributed/unreturned or committed",
         "Return of capital first (presentation only: the pref compounds, so no dollar moves) \u2014 Return of capital before pref, or pref first",
-        "Above the waterfall (deal expense) \u2014 1.00% of invested equity, measured at the start of each period \u2014 AM fee above the waterfall or netted from LP",
+        "Above the waterfall (deal expense) \u2014 1.00% of LP equity, measured at the start of each period \u2014 AM fee above the waterfall or netted from LP",
         "20% promote on all capital, then the GP's 10% pro-rata share of the remainder \u2014 Promote on all capital: before or after the pro-rata split",
         "No GP catch-up \u2014 GP catch-up tier above the pref",
         "Maximum Offer Price",
         "At a target 10% base case unlevered IRR, the maximum offer price is $5,143,814 (implied entry cap: 7.4%).",
         "At a target 15% LP NET IRR \u2014 after debt service, the asset-management fee and the GP promote \u2014 the maximum offer price is $4,672,796 (implied entry cap: 8.2%). At that price the deal supports $3,037,317 of senior debt (63.9% LTV, bound by Max LTV) and requires $1,712,580 of equity.",
-        "This price is computed on the levered assumption set stated under Levered Returns above: 8.00% pref, annually compounded; Committed capital (all committed equity funds at close, so this equals contributed/unreturned); Return of capital first (presentation only: the pref compounds, so no dollar moves); Above the waterfall (deal expense) \u2014 1.00% of invested equity, measured at the start of each period; 20% promote on all capital, then the GP's 10% pro-rata share of the remainder; No GP catch-up.",
+        "This price is computed on the levered assumption set stated under Levered Returns above: 8.00% pref, annually compounded; Committed capital (all committed equity funds at close, so this equals contributed/unreturned); Return of capital first (presentation only: the pref compounds, so no dollar moves); Above the waterfall (deal expense) \u2014 1.00% of LP equity, measured at the start of each period; 20% promote on all capital, then the GP's 10% pro-rata share of the remainder; No GP catch-up.",
         "7. Value-Add Opportunities",
         "Identified 3 revenue enhancement opportunities. Estimated total annual NOI uplift: $42,194. 5 capital improvement item(s) identified for evaluation.",
         "8. Risk Analysis",
@@ -5289,27 +5289,27 @@
           ],
           [
             "LP Net IRR",
-            "12.3%",
-            "17.0%",
+            "12.4%",
+            "17.1%",
             "34.7%"
           ],
           [
             "LP MOIC",
-            "1.64x",
-            "1.96x",
+            "1.65x",
+            "1.97x",
             "3.78x"
           ],
           [
             "GP Promote",
-            "$91,055",
-            "$205,473",
-            "$840,317"
+            "$92,681",
+            "$207,098",
+            "$841,943"
           ],
           [
             "AM Fee (total)",
-            "$76,965",
-            "$76,965",
-            "$76,965"
+            "$69,268",
+            "$69,268",
+            "$69,268"
           ],
           [
             "Equity Required",
@@ -6300,7 +6300,7 @@
           [
             "Debt & Waterfall",
             "AM Fee Base",
-            "invested_equity",
+            "lp_equity",
             "model default"
           ],
           [
@@ -6447,26 +6447,26 @@
   ],
   "levered": {
     "base": {
-      "am_fee_total": 76965.0,
-      "gp_promote": 205472.747689,
-      "lp_moic": 1.961512,
-      "lp_net_irr": 0.17045
+      "am_fee_total": 69268.5,
+      "gp_promote": 207098.230283,
+      "lp_moic": 1.965338,
+      "lp_net_irr": 0.171202
     },
     "bear": {
-      "am_fee_total": 76965.0,
-      "gp_promote": 91055.061899,
-      "lp_moic": 1.644986,
-      "lp_net_irr": 0.12283
+      "am_fee_total": 69268.5,
+      "gp_promote": 92680.544493,
+      "lp_moic": 1.648813,
+      "lp_net_irr": 0.123612
     },
     "bull": {
-      "am_fee_total": 76965.0,
-      "gp_promote": 840317.096227,
-      "lp_moic": 3.778945,
-      "lp_net_irr": 0.346763
+      "am_fee_total": 69268.5,
+      "gp_promote": 841942.578821,
+      "lp_moic": 3.782772,
+      "lp_net_irr": 0.347388
     }
   },
   "levered_max_offer": {
-    "achieved_irr": 0.149993,
+    "achieved_irr": 0.15073,
     "coerced_region": true,
     "max_price": 4672795.758929,
     "monotonicity_warning": null,

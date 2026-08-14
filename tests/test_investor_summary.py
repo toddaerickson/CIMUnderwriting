@@ -86,7 +86,7 @@ STAMP = [
     {"key": "pref_rate", "label": "8.00% preferred return, annually compounded"},
     {"key": "promote_split", "label": "20% promote on the LP residual"},
     {"key": "am_fee_treatment",
-     "label": "AM fee above the waterfall - 1.00% of invested equity"},
+     "label": "AM fee above the waterfall - 1.00% of LP equity"},
 ]
 LEVERED = {"base": {"lp_net_irr": 0.1567, "lp_moic": 2.03,
                     "am_fee_total": 208_000, "am_fee_pct": 0.01,

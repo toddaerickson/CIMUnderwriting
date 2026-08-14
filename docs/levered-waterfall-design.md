@@ -25,7 +25,8 @@ judgment about the inputs.
 Fund terms (from operator; the pref and the AM-fee placement confirmed against
 the LPA 2026-08-12): pref **8% levered / 6% unlevered**, per-deal adjustable ·
 20/80 promote above pref · no catch-up · ~10% GP co-invest · 1% AM fee **above
-the waterfall** · 15% LP **net** IRR target.
+the waterfall, on LP equity** (the base confirmed 2026-08-14; a GP charges no
+fee on its own co-invest) · 15% LP **net** IRR target.
 
 **Scope decision (operator, 2026-07-29): ONE TIER.** GP charges a management
 fee, co-invests capital upfront, and earns an x% promoted interest above a y%
@@ -73,7 +74,9 @@ covenant headroom.
   (balance ×1.08 − distributions) is exactly the 8% IRR hurdle: deterministic,
   no solver. Iteration only for multi-hurdle/XIRR day-count variants. Keep
   annual end-of-period to match npf.irr conventions.
-- Pitfalls: pref on gross vs net of the 1% AM fee; GP co-invest pari passu
+- Pitfalls: pref on gross vs net of the 1% AM fee; the fee's BASE — LP
+  equity, not GP+LP (question 4b, confirmed 2026-08-14; the build had it
+  wrong from 2026-08-01 to that date); GP co-invest pari passu
   through ROC+pref but promote computed on 100% of residual instead of the
   LP-attributable share (see question 5 — the LPA charges it on all capital,
   and the fund's model workbook settles WHICH arithmetic that means);
@@ -101,8 +104,11 @@ per-period LP/GP rows + LP net IRR/MOIC. Forward loop, no solver. GP co-invest
 pari passu through tier 1 (confirmed 2026-08-12); promote on all capital,
 taken off the top with the remainder split pro rata — GP share `x + (1−x)c`,
 per `Underwriting!J250` in the fund's model workbook (confirmed 2026-08-12;
-arithmetically what this design already specified). 1% AM fee
-deducted as a cash-flow line before the waterfall (flagged assumption).
+arithmetically what this design already specified). 1% AM fee on LP equity
+(confirmed 2026-08-14) deducted as a cash-flow line before the waterfall.
+The fee base is `equity_outstanding × (1−c)`, measured at the START of each
+year, so it picks up capital called after close — which is the one place it
+still diverges from the workbook, whose `K61` is fixed at close.
 Unlevered screen stays primary; levered + waterfall is a second lens.
 
 **Unit-test oracles** (flows: −$1,000,000; then 50k, 60k, 70k, 80k, 1,500,000):
@@ -148,6 +154,13 @@ prints as open to an LP.
    Nobody read the clause; it stopped mattering.
 4. 1% AM fee: above the waterfall (deal expense) or netted from LP
    distributions? — **CONFIRMED 2026-08-12**: above the waterfall.
+4b. And charged on WHAT? — **CONFIRMED 2026-08-14**: LP equity. A GP does
+   not charge an asset-management fee on its own co-investment. Filed as
+   4b rather than a seventh question because it is the same clause read to
+   its end; unlike questions 1-6 it MOVED MONEY, cutting the fee by the
+   co-invest share (11.1% at c=0.10) and raising every LP net IRR. The
+   fund's model workbook had said so all along — `G244` is a dropdown
+   reading "% of LP Equity".
 5. GP co-invest: earns pref pari passu, promote on residual net of GP
    pro-rata share? — **CONFIRMED 2026-08-12.** The co-invest earns the pref
    pari passu (as built), and the promote is earned on ALL capital. That
@@ -158,6 +171,8 @@ prints as open to an LP.
    **`Self-Storage-Acquisition-Model-v1.3.xlsm`, `Underwriting!J250 =
    I250+(1-I250)*$J$244`, settles it as the first** — which is what this
    design specified and what the build computes, so no number moved.
+   (Question 4b, a day later, is the counter-example: not every confirmation
+   is free — that one cut the AM fee by the co-invest share.)
    Both are implemented: `promote_basis` is the one convention on this list
    with two live values, `promote_then_split` (shipped) and
    `split_then_promote`. The distinguishing property is asserted in both

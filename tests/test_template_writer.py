@@ -590,8 +590,8 @@ def test_divergence_disclosures_land_in_the_workbook(tmp_path,
     only into the module docstring — the docstring is the one place the
     analyst reading the .xlsm will never look."""
     cells = _generate(tmp_path)
-    assert (cells[template_writer._DISCLOSURE_PREF_CELL]
-            == template_writer._PREF_DISCLOSURE)
+    assert (cells[template_writer._DISCLOSURE_PERIOD_CELL]
+            == template_writer._PERIODICITY_DISCLOSURE)
     assert (cells[template_writer._DISCLOSURE_AM_FEE_CELL]
             == template_writer._AM_FEE_DISCLOSURE)
     # And the TRUE rate stands beside the disclosure: the operator
@@ -604,7 +604,7 @@ def test_divergence_disclosures_land_in_the_workbook(tmp_path,
 def _disclosure_texts(ws):
     return [c.value for row in ws.iter_rows() for c in row
             if isinstance(c.value, str)
-            and c.value in (template_writer._PREF_DISCLOSURE,
+            and c.value in (template_writer._PERIODICITY_DISCLOSURE,
                             template_writer._AM_FEE_DISCLOSURE)]
 
 
@@ -626,7 +626,7 @@ def test_disclosures_survive_a_merged_band_at_the_preferred_rows(tmp_path):
     now moves below the band instead.
     """
     ws = _write_into(tmp_path, lambda w: w.merge_cells("B263:D264"))
-    assert _disclosure_texts(ws) == [template_writer._PREF_DISCLOSURE,
+    assert _disclosure_texts(ws) == [template_writer._PERIODICITY_DISCLOSURE,
                                      template_writer._AM_FEE_DISCLOSURE]
     # And it did NOT write into the merged band.
     assert ws["B263"].value is None and ws["B264"].value is None
@@ -641,7 +641,7 @@ def test_disclosures_never_overwrite_an_occupied_cell(tmp_path):
     ws = _write_into(tmp_path, occupy)
     assert ws["B263"].value == "Waterfall Notes"
     assert ws["B264"].value == "=SUM(H259:H261)"
-    assert _disclosure_texts(ws) == [template_writer._PREF_DISCLOSURE,
+    assert _disclosure_texts(ws) == [template_writer._PERIODICITY_DISCLOSURE,
                                      template_writer._AM_FEE_DISCLOSURE]
 
 
@@ -664,13 +664,26 @@ def test_no_room_warns_and_writes_nothing_rather_than_corrupting(
 def test_disclosures_state_mechanism_and_direction():
     """The disclosure is only a disclosure while it names the mechanism
     and the direction. A future rewording may shorten it; it may not
-    hollow it."""
-    pref = template_writer._PREF_DISCLOSURE
+    hollow it.
+
+    Both lines were REPLACED on 2026-08-14 rather than edited, because
+    both of the original divergences stopped existing: the pref one was
+    never real (H248's "IRR Hurdle" is a label; ET213/EX217-EX224 is the
+    same accrual the app runs) and the AM-fee base one was fixed in the
+    workbook's favour. What is disclosed now is what actually remains —
+    monthly vs annual, and a static vs a rolling fee base.
+    """
+    period = template_writer._PERIODICITY_DISCLOSURE
     fee = template_writer._AM_FEE_DISCLOSURE
-    assert "IRR hurdle" in pref and "accru" in pref
-    assert "LP equity" in fee and "invested equity" in fee
-    assert "light" in fee            # the direction of the gap
-    assert "true rate" in fee        # what G254 actually carries
+    assert "MONTHLY" in period and "annual" in period
+    assert "ties exactly" in period   # the direction: only monthly cash differs
+    # The claim that was there for four days and was false.
+    assert "IRR hurdle" not in period.lower()
+    assert "LP equity" in fee and "K61" in fee
+    assert "fixed at close" in fee    # the mechanism of what is left
+    assert "higher" in fee            # the direction of the gap
+    # The gap that closed must not be re-disclosed as though it were open.
+    assert "invested equity" not in fee.lower()
 
 
 # ── The real template, when it happens to be present ─────────────────
@@ -764,7 +777,7 @@ def test_real_template_still_has_the_cells_the_stub_claims(monkeypatch):
         # corrupted or missing workbook. Still asserted, because the
         # first machine to open the real file is the only one that can
         # tell us the constant points somewhere sensible.
-        for cell in (template_writer._DISCLOSURE_PREF_CELL,
+        for cell in (template_writer._DISCLOSURE_PERIOD_CELL,
                      template_writer._DISCLOSURE_AM_FEE_CELL):
             assert ws[cell].value is None, (
                 f"{cell} is occupied in the real template — the writer "

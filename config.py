@@ -1045,11 +1045,33 @@ LPA_CONFIRMED = {
 #
 # WHAT THE FEE IS CHARGED ON was left open by E2 on purpose: the design
 # doc names the rate and never the base, and "committed equity",
-# "invested capital" and "asset value" are all live conventions. The
-# operator chose INVESTED EQUITY on 2026-08-01. On the E3a plan's oracle-A
-# fixture the alternatives differ by ~2.4x ($41,600/yr on equity vs
-# ~$100,000/yr on asset value), straight through to LP net IRR — so this
-# is a number that decides an answer, not a formatting detail.
+# "invested capital" and "asset value" are all live conventions. On the
+# E3a plan's oracle-A fixture the alternatives differ by ~2.4x
+# ($41,600/yr on equity vs ~$100,000/yr on asset value), straight through
+# to LP net IRR — so this is a number that decides an answer, not a
+# formatting detail.
+#
+# **LP EQUITY, corrected 2026-08-14** (operator): "a GP does not charge
+# an asset management fee on their own personal or internal
+# co-investment. Management fees are paid by Limited Partners to
+# compensate the manager for administering capital." The operator chose
+# "invested equity" on 2026-08-01 and that was read as GP+LP, which
+# charged the GP a fee on its own money and overstated the fee by the
+# co-invest share — 11.1% too much at a 10% co-invest, on every levered
+# deal since. `invested_equity` now RAISES; it was not renamed.
+#
+# This also closes the second of the two XLSM divergences. The workbook
+# said so all along: `Underwriting!G244` is a dropdown reading
+# "% of LP Equity" and `H245 = K61*G245/12` with K61 = LP Equity. That
+# is the THIRD time the model workbook has held the fund's term while
+# the app derived its own (the 8%/6% pref rate, the promote basis, and
+# now the fee base) — see the procedure note in output/template_writer.
+#
+# WHAT REMAINS unreconciled with the workbook is narrow and one-sided:
+# the workbook's K61 is fixed at close, while this fee base rolls
+# forward on capital calls. Same on any deal that never calls; ours is
+# higher on one that does, because the manager is administering the
+# called capital too.
 #
 # MEASURED AT THE START OF EACH PERIOD, before that period's own capital
 # call. That is not a rounding convention, it is what makes the fee
@@ -1062,7 +1084,7 @@ LPA_CONFIRMED = {
 # Plain scalars passed as parameters, never a _PATCHED_DICTS entry — see
 # the reason recorded above the capital block.
 AM_FEE_PCT = 0.01
-AM_FEE_BASE = "invested_equity"     # the only base implemented; others raise
+AM_FEE_BASE = "lp_equity"           # the only base implemented; others raise
 
 # ── Partnership entity labels ───────────────────────────────────────
 # Names written into the XLSM's partnership block (C253 / C254). Labels,

@@ -168,9 +168,9 @@ def test_levered_solver_honours_the_deals_gp_coinvest():
 
 
 def test_levered_max_price_is_invariant_to_gp_coinvest_under_this_promote():
-    """The solved price does NOT move with GP co-invest, and that is
-    arithmetic rather than a bug — worth pinning because every reader
-    expects the opposite.
+    """The promote contributes NO dependence on the GP's co-invest, and
+    that is arithmetic rather than a bug — worth pinning because every
+    reader expects the opposite.
 
     Under the shipped basis the promote comes off the top and the
     remainder splits pro rata, so with `s = 1 - gp_coinvest_pct`:
@@ -182,25 +182,74 @@ def test_levered_max_price_is_invariant_to_gp_coinvest_under_this_promote():
     invariant, so it cancels. The LP earns the same RATE on a smaller
     cheque, and the price that clears 15% is the same price.
 
-    This is specific to that basis. `split_then_promote` charges
-    `promote_split x residual` regardless of `s` while the LP funds it
-    out of `s x residual`, so `s` stops factoring out and the price
-    falls — asserted below, because a property that holds under one
-    convention only says something if the other is shown to break it.
+    **The fee is zeroed to see that.** Since 2026-08-14 the AM fee is
+    charged on LP equity, so it is `s`-dependent in its own right and
+    the TOTAL price does move with the co-invest — asserted separately
+    below. Mixing the two would have let either one hide the other; this
+    test is about the promote, so the fee is switched off rather than
+    reasoned around.
+
+    `split_then_promote` charges `promote_split x residual` regardless
+    of `s` while the LP funds it out of `s x residual`, so `s` stops
+    factoring out and the price falls. Asserted too, because a property
+    that holds under one convention only says something if the other is
+    shown to break it.
     """
     at_10 = solve_max_price_levered(adjusted_ttm_noi=300_000,
-                                    gp_coinvest_pct=0.10)
+                                    gp_coinvest_pct=0.10, am_fee_pct=0.0)
     at_25 = solve_max_price_levered(adjusted_ttm_noi=300_000,
-                                    gp_coinvest_pct=0.25)
+                                    gp_coinvest_pct=0.25, am_fee_pct=0.0)
     assert at_10["max_price"] == at_25["max_price"]
     assert at_10["lp_net_irr"] == pytest.approx(at_25["lp_net_irr"], abs=1e-12)
     # Total equity is GP + LP, so it is invariant too; what moves is only
     # how that equity is split, which the Sources & Uses block owns.
     assert at_10["total_equity"] == at_25["total_equity"]
 
-    # The alternative basis, exercised through the solver rather than
-    # merely supported by it — an unexercised branch is how a convention
-    # one setting away rots.
+
+def test_a_bigger_gp_coinvest_raises_the_price_because_the_fee_shrinks():
+    """The consequence of the 2026-08-14 fee base, at the one surface
+    where it turns into a bid.
+
+    The AM fee is 1% of LP equity, so a GP that co-invests more shrinks
+    the fee it charges. That is a smaller deal expense, more distributable
+    cash, and therefore a HIGHER price that still clears a 15% LP net
+    IRR. Direction pinned, and the size with it — the fund can pay about
+    $50k more for the same asset at a 25% co-invest than at 10%.
+
+    This is the whole of the co-invest dependence: with the fee off, the
+    price is invariant (the test above). It is asserted here rather than
+    left implicit because "the GP putting in more money raises our bid"
+    is surprising enough that a reader meeting it in a solved price
+    deserves to find it stated.
+    """
+    at_10 = solve_max_price_levered(adjusted_ttm_noi=300_000,
+                                    gp_coinvest_pct=0.10)
+    at_25 = solve_max_price_levered(adjusted_ttm_noi=300_000,
+                                    gp_coinvest_pct=0.25)
+    assert at_25["max_price"] > at_10["max_price"]
+    assert at_25["max_price"] - at_10["max_price"] > 25_000
+    for solved in (at_10, at_25):
+        assert solved["lp_net_irr"] == pytest.approx(solved["target_irr"],
+                                                     abs=1e-3)
+
+
+def test_the_alternative_promote_basis_still_falls_with_the_co_invest():
+    """`split_then_promote` charges the promote on the whole residual, so
+    it does not carry the `(1 - c)` factor the LP's own flows do and a
+    bigger co-invest dilutes the LP — the solved price falls.
+
+    "Still" is doing real work since 2026-08-14: the AM fee now pushes
+    the OTHER way (a bigger co-invest shrinks the fee, which lifts the
+    price). This asserts the promote effect dominates it on this
+    fixture — about $50k of fee lift against a larger promote drag — so
+    the net direction is down. If the two ever came to within noise of
+    each other, this test going flat is the signal to look, not a
+    tolerance to widen.
+
+    The alternative basis is exercised through the solver rather than
+    merely supported by it — an unexercised branch is how a convention
+    one setting away rots.
+    """
     def on_top(coinvest):
         # The co-invest goes in the TERMS as well as the kwarg: an
         # explicit `waterfall_terms` bypasses `resolve_waterfall_terms`,

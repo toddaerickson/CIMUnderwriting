@@ -65,6 +65,16 @@ non-code items have one home:
       settled it (`Underwriting!J250 = I250+(1-I250)*$J$244` — promote off the
       top, remainder pro rata), and it is what the build already computed. No
       number moved. Every stamp row is now confirmed or moot.
+- [x] **The AM fee's BASE — the one confirmation that moved money.**
+      **Done 2026-08-14**, operator: a GP charges no asset-management fee on
+      its own co-investment, so the fee is 1% of LP equity, not of invested
+      equity. `config.AM_FEE_BASE = "lp_equity"`; `invested_equity` raises.
+      The build had charged GP+LP since 2026-08-01, overstating the fee by
+      the co-invest share (11.1% at 10%), so every levered figure in the repo
+      moved and the snapshots were regenerated. Not a seventh LPA question —
+      it is question 4 read to its end — and the model workbook had it right
+      all along (`G244` = "% of LP Equity"), the THIRD such correction in six
+      days.
 - [ ] **Re-read the LP investor summary's caveat.** Not a code task — a
       consequence of the line above. With no open row the "proposed terms,
       subject to the final partnership agreement" clause no longer renders,
