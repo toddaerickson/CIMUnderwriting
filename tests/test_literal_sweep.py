@@ -111,7 +111,7 @@ ALLOWED = {
     ("model/debt.py", 1.25): "DebtTerms.min_dscr default; == DEBT_TERMS['min_dscr']",
     ("model/debt.py", 0.1): "DebtTerms.min_debt_yield default; == DEBT_TERMS['min_debt_yield']",
     ("model/debt.py", 0.01): "DebtTerms.orig_fee_pct default; == DEBT_TERMS['orig_fee_pct']",
-    ("model/waterfall.py", 0.08): "WaterfallTerms.pref_rate default; == WATERFALL_TERMS['pref_rate']",
+    ("model/waterfall.py", 0.08): "WaterfallTerms.pref_rate default; == config.PREF_RATE_LEVERED",
     ("model/waterfall.py", 0.2): "WaterfallTerms.promote_split default; == WATERFALL_TERMS['promote_split']",
     ("model/waterfall.py", 0.1):
         "WaterfallTerms.gp_coinvest_pct default; == config.GP_COINVEST_PCT, "
@@ -268,10 +268,15 @@ def test_dataclass_defaults_still_match_config():
             f"DebtTerms.{field} drifted from config.DEBT_TERMS[{key!r}]")
 
     wf = WaterfallTerms()
-    for field, key in (("pref_rate", "pref_rate"),
-                       ("promote_split", "promote_split")):
+    for field, key in (("promote_split", "promote_split"),):
         assert getattr(wf, field) == cfg.WATERFALL_TERMS[key], (
             f"WaterfallTerms.{field} drifted from config.WATERFALL_TERMS[{key!r}]")
+    # `pref_rate` has no WATERFALL_TERMS key by design — the fund charges
+    # 8% levered and 6% unlevered, so the default is a RESOLUTION, not a
+    # constant. The dataclass mirrors the levered rate for direct
+    # construction, which still needs pinning, just to a different name.
+    assert wf.pref_rate == cfg.PREF_RATE_LEVERED, (
+        "WaterfallTerms.pref_rate drifted from config.PREF_RATE_LEVERED")
     # Deliberately NOT a WATERFALL_TERMS key: config records that
     # `gp_coinvest_pct` lives in the capital block as GP_COINVEST_PCT
     # because `resolve_capital_structure` already reads it for Sources &

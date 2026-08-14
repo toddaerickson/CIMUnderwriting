@@ -933,8 +933,9 @@ def _add_levered_returns(doc, levered, debt, scenario_results):
             f"capital plus preferred return. These fund terms carry no "
             f"clawback, so the GP keeps it.")
 
-    # Not optional and not a footnote: five of these are open LPA
-    # questions and each one moves the LP net IRR printed above.
+    # Not optional and not a footnote: every row is an LPA convention
+    # that moves the LP net IRR printed above, and the stamp says which
+    # ones the operator has actually read.
     doc.add_heading("Levered Assumptions", level=3)
     for row in base.get("assumption_stamp") or []:
         doc.add_paragraph(f"{row.get('label')} — {row.get('question')}",

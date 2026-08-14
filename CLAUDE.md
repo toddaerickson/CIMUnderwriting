@@ -274,10 +274,10 @@ output/
    assumptions page's "Debt & Waterfall" section — per-deal only, never
    settings-page editable, for the same in-place-mutation reason the
    capital block is not (item E3b).
-7. **No LP net IRR without its assumption stamp**: five LPA questions
-   each change the number — **three still open, one CONFIRMED, one made
-   MOOT by that confirmation** — so `model.levered` builds the resolved
-   set and EVERY surface that prints a levered figure renders it
+7. **No LP net IRR without its assumption stamp**: six LPA questions
+   each change the number — **four CONFIRMED, one made MOOT by a
+   confirmation, one still open** — so `model.levered` builds the
+   resolved set and EVERY surface that prints a levered figure renders it
    beside that figure — the Returns tab, memo section 6, the workbook
    sheet, and the LP-facing investor summary (item G), which is the only
    one that leaves the firm and so the one where the rule binds hardest.
@@ -285,10 +285,10 @@ output/
    it nulls the whole levered payload when the stamp is absent, so no
    block can print a figure the stamp does not cover
    — including the AM fee's rate and base, which is what makes
-   "net" mean anything. Three of those five conventions have exactly one
-   implemented value (`accrual_base`, `am_fee_treatment`, `catch_up`) and
-   the other value RAISES, so they deliberately get no form field: a
-   dropdown whose second option crashes the run is a trap, not a setting.
+   "net" mean anything. `am_fee_treatment` and `catch_up` have exactly one
+   implemented value and the other RAISES, so they deliberately get no
+   form field: a dropdown whose second option crashes the run is a trap,
+   not a setting.
    **Which questions have actually been READ is state, not memory** (item
    E4): `config.LPA_CONFIRMED` maps a question key to the date the
    operator confirmed it, and `model.waterfall.assumption_stamp` stamps
@@ -300,7 +300,41 @@ output/
    the ordering clause; it stopped mattering. A key absent from
    `LPA_CONFIRMED` stays `open`, so a new convention cannot inherit
    someone else's confirmation. The LP-facing caveat follows the rows
-   that still need it rather than blanketing all five.
+   that still need it rather than blanketing all six — after 2026-08-12
+   that is `promote_basis` alone.
+   **The 2026-08-12 reading, because two of its results are easy to
+   misread.** (a) The LPA says the pref accrues on COMMITTED capital,
+   where the build had assumed contributed/unreturned — and NO NUMBER
+   MOVED, because the operator's reading of the clauses (what is
+   committed is funded at close; a later call accrues from its own date;
+   the base falls as capital is returned) describes the accrual this
+   model already ran. The two values are one arithmetic here, pinned by
+   `test_the_two_accrual_bases_agree_to_the_cent` and NOT by assertion —
+   and the equivalence has a stated precondition (no uncalled commitment
+   is expressible) that a future commitment schedule would break. The
+   stored value changed anyway: a stamp that says "contributed" beside
+   terms that say "committed" is a disclosure disagreeing with the
+   document it discloses. (b) `catch_up` became a SIXTH stamp row rather
+   than staying a silent scope decision — a catch-up moves the promote
+   materially and "20% promote on the LP-attributable residual" does not
+   tell an LP whether one exists. "No catch-up **at this time**" is
+   exactly what a dated confirmation records.
+   **The pref rate is two rates** (`config.PREF_RATE_LEVERED` 8% /
+   `PREF_RATE_UNLEVERED` 6%), resolved per deal by
+   `model.waterfall.resolve_pref_rate` and overridable per deal on the
+   assumptions page. It is keyed on the deal's INTENT to lever
+   (`DebtTerms.is_levered`, i.e. `max_ltv > 0`), never on the loan the
+   sizer produced: a deal can name 65% leverage and size to $0 on a weak
+   debt yield, and reading the outcome would also step the rate mid-solve
+   inside `solve_max_price_levered`, which re-prices the loan at every
+   candidate — the discontinuity decision 8's monotonicity guard exists
+   to forbid. `pref_rate` therefore has NO key in
+   `config.WATERFALL_TERMS`; a third answer there would be the
+   two-constants-disagreeing failure decision 9 already paid for.
+   **This rule was in the repo as a bug for months**: the v1.2 XLSM
+   shipped `IF(H64>0, 0.08, IF(H64=0, 0.06, "n/a"))` and
+   `output/template_writer.py` overrode it with a comment calling
+   leverage-dependence "not a term in the LPA". The template was right.
 8. **Bisection solvers**: Deterministic, ~20 iterations to 0.1% precision.
    There are now TWO max offers and they are both kept (item E4,
    operator's call 2026-08-01): `solve_max_price` targets the 10%

@@ -61,11 +61,15 @@ real-estate asset the firm is underwriting.
 - **A permanent legend** (`_SUMMARY_LEGEND`, below) on every rendering, including
   every degraded path. `test_every_document_carries_the_securities_legend`
   asserts it across those paths, so it cannot be dropped by a code change.
-- **No LP net figure without its assumption stamp.** Five LPA conventions are
-  still open, and `memo_writer._is_build` nulls the entire levered payload when
-  the stamp is absent, so no net return can print without the conventions that
-  produced it printed beside it. This is structural, not incidental —
-  `test_no_levered_figure_survives_a_missing_assumption_stamp` pins it.
+- **No LP net figure without its assumption stamp.** Six LPA conventions move
+  the number; as of the 2026-08-12 reading four are confirmed, one is moot and
+  ONE (`promote_basis`) is still open. `memo_writer._is_build` nulls the entire
+  levered payload when the stamp is absent, so no net return can print without
+  the conventions that produced it printed beside it. This is structural, not
+  incidental — `test_no_levered_figure_survives_a_missing_assumption_stamp`
+  pins it. The count is not frozen in this document: it is read from
+  `config.LPA_CONFIRMED` at render time, so confirming the last row changes
+  what the LP sees without a code change.
 - **The unlevered and LP net columns carry equal weight.** Leverage is frequently
   dilutive at config defaults, and the document says so rather than showing only
   the flattering column.
@@ -136,12 +140,16 @@ fixture copy with `tests/test_investor_summary.py::_generate`.
 
 7. **The caveat beneath the LP net figures is CONDITIONAL — please set its
    wording.** It is not one fixed sentence. `memo_writer._is_assumption_stamp`
-   emits three variants depending on how many of the five LPA conventions are
+   emits three variants depending on how many of the six LPA conventions are
    confirmed: it says "proposed terms, subject to the final partnership
    agreement" only for conventions still unconfirmed, and states the position
    by count when the stamp is mixed. So the disclaimer a given deal carries
    depends on the state of the LPA at the time it was run. Counsel should set
-   all three variants, not just read the one that happens to render today.\*
+   all three variants, not just read the one that happens to render today.
+   **This is live**: the 2026-08-12 reading moved most deals off the
+   all-unconfirmed variant onto the mixed one, and confirming `promote_basis`
+   would move them again — to the variant nobody has reviewed against a
+   rendered document.\*
 
 \* Answered under an **assumed** approval on the operator's direction (2026-08-09), not by counsel. Not legal advice.
 

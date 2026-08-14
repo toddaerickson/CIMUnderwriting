@@ -49,10 +49,12 @@ and distribution series and calls `run_waterfall`, so that guard is
 retired. E3b carries the results page, memo and Excel surfaces.
 
 Numeric authority: `docs/levered-waterfall-design.md` oracles 1-3,
-reproduced to the cent in the test module. Five LPA questions are still
-open (`docs/scoped-backlog.md` item E); each ships as a named parameter
-carrying a documented default, and `assumption_stamp` in the result
-carries the resolved set so no LP net IRR is ever displayed without it.
+reproduced to the cent in the test module. The LPA questions ship as
+named parameters carrying documented defaults, and `assumption_stamp`
+in the result carries the resolved set so no LP net IRR is ever
+displayed without it. After the 2026-08-12 reading (committed capital,
+AM fee above the waterfall, no catch-up) exactly ONE row is still a
+build default standing in for the document: `promote_basis`.
 """
 
 import logging
@@ -71,10 +73,12 @@ logger = logging.getLogger("cim_analyst")
 BALANCE_TOLERANCE = 0.005
 
 # ── Conventions ─────────────────────────────────────────────────────
-# Each of these is one of the five open LPA questions. The defaults are
-# the ones the scope contract names; the alternatives are real
-# conventions that change the number, which is why an unrecognised value
-# raises instead of falling back.
+# Each of these is an LPA question that changes the number. Most have
+# now been read (`config.LPA_CONFIRMED` holds the dates); the values
+# below are what the LPA says where it has been read and the scope
+# contract's default where it has not. The alternatives are real
+# conventions, which is why an unrecognised value raises instead of
+# falling back.
 
 COMPOUNDING_ANNUAL = "annual"
 COMPOUNDING_SIMPLE = "simple"
@@ -90,12 +94,52 @@ ORDERING_LABELS = {
     ORDERING_PREF_FIRST: "Preferred return first",
 }
 
+# ── Accrual base, and why both values run the same arithmetic ───────
+# The LPA says COMMITTED capital (operator, 2026-08-12), with two
+# clauses that decide what that means here:
+#
+#   1. What is committed is the equity funded AT CLOSE. There is no
+#      uncalled commitment sitting behind the deal earning a pref.
+#   2. A later capital call is new money that accrues from ITS OWN call
+#      date, not retroactively from close.
+#   3. The base falls as capital is returned — unreturned committed
+#      capital, not a commitment that accrues undiminished to
+#      liquidation.
+#
+# Those three clauses describe, dollar for dollar and period for period,
+# the loop this module already runs. So 'committed' and 'contributed'
+# are not two accruals here; they are two NAMES for one accrual, and
+# `test_the_two_accrual_bases_agree_to_the_cent` pins that rather than
+# leaving it to be believed. Recording the LPA's actual word matters
+# even so: the stamp is what an LP reads, and printing
+# "contributed/unreturned" beside terms that say "committed" is a
+# disclosure that disagrees with the document it is disclosing.
+#
+# **The precondition, because the equivalence is not eternal.** It holds
+# because no uncalled commitment is EXPRESSIBLE — `contributions` is a
+# period-indexed record of money actually funded, and `model.levered`
+# funds the whole budgeted stack at period 0. The day a commitment
+# schedule becomes an input (an LP that signs for $5M against a $4.7M
+# budget), clause 1 stops holding, the two bases separate, and this
+# branch needs the real committed-capital accrual. Do not read the
+# equivalence as "the distinction is meaningless".
 ACCRUAL_BASE_CONTRIBUTED = "contributed"
 ACCRUAL_BASE_COMMITTED = "committed"
 ACCRUAL_BASE_LABELS = {
     ACCRUAL_BASE_CONTRIBUTED: "Contributed / unreturned capital",
     ACCRUAL_BASE_COMMITTED: "Committed capital",
 }
+#: Appended to the stamp's accrual-base row, in the same spirit as the
+#: `ordering` row's "presentation only" note: the reader is told the
+#: name is the fund's and the arithmetic is unaffected, rather than
+#: being left to wonder which of two bases priced the pref.
+#: Kept to one clause: it rides into the memo, the workbook and the
+#: results page, and the investor summary next door is held to two pages
+#: by a content budget. The mechanism lives in the block above; a reader
+#: needs only to know the two bases coincide here and why.
+ACCRUAL_BASE_EQUIVALENCE_NOTE = (
+    " (all committed equity funds at close, so this equals "
+    "contributed/unreturned)")
 
 AM_FEE_ABOVE_WATERFALL = "above_waterfall"
 AM_FEE_NETTED_FROM_LP = "netted_from_lp"
@@ -134,7 +178,7 @@ class WaterfallTerms:
     ordering: str = ORDERING_ROC_FIRST
     promote_split: float = 0.20
     gp_coinvest_pct: float = 0.10
-    accrual_base: str = ACCRUAL_BASE_CONTRIBUTED
+    accrual_base: str = ACCRUAL_BASE_COMMITTED
     am_fee_treatment: str = AM_FEE_ABOVE_WATERFALL
     catch_up: bool = False
 
@@ -219,14 +263,12 @@ class WaterfallTerms:
                 "difference between $81,600 and $72,000 of promote on the "
                 "design doc's fixture.")
 
-        if self.accrual_base == ACCRUAL_BASE_COMMITTED:
-            raise NotImplementedError(
-                "accrual_base='committed' is not implemented — the pref "
-                "would accrue on capital not yet called, which needs a "
-                "commitment schedule this model does not carry. Open LPA "
-                "question 2; the shipped default is "
-                f"{ACCRUAL_BASE_CONTRIBUTED!r}.")
-        if self.accrual_base != ACCRUAL_BASE_CONTRIBUTED:
+        # Both values are legal and BOTH RUN THE SAME ARITHMETIC — see
+        # the equivalence argument in the conventions block above. This
+        # used to raise on 'committed'; the operator read the LPA on
+        # 2026-08-12 and it is the fund's actual term, so the raise
+        # would now reject the true convention.
+        if self.accrual_base not in ACCRUAL_BASE_LABELS:
             raise ValueError(
                 f"accrual_base must be one of {sorted(ACCRUAL_BASE_LABELS)}, "
                 f"got {self.accrual_base!r}")
@@ -279,8 +321,37 @@ def _coerce_bool(value):
     return bool(value)
 
 
+def resolve_pref_rate(is_levered: bool = True) -> float:
+    """THE preferred-return default, which depends on the capital stack.
+
+    The fund charges a different pref on levered and unlevered deals —
+    8% and 6% (operator, 2026-08-12, reading the LPA). That is a term of
+    the document, not a modelling convenience, and it was hiding in
+    plain sight: the v1.2 XLSM shipped `IF(H64>0, 0.08, IF(H64=0, 0.06,
+    "n/a"))` in the pref cell, and `output.template_writer` overwrote it
+    with a comment calling leverage-dependence "not a term in the LPA".
+    The template was right and the comment was wrong.
+
+    **`is_levered` is the deal's INTENT, never its sized outcome**, and
+    the distinction is load-bearing in two places. `model.debt.size_loan`
+    takes the min of an LTV, a DSCR and a debt-yield cap, so a weak deal
+    can name 65% leverage and still size to $0 — reading the outcome
+    would hand that deal a 6% pref and a different promote for reasons
+    the LPA says nothing about. Worse, `solve_max_price_levered`
+    re-sizes the loan at every candidate price: an outcome-driven pref
+    would step from 8% to 6% partway through the bisection, putting a
+    discontinuity in the objective that decision 8's monotonicity guard
+    exists to forbid. Intent is fixed across the whole solve.
+
+    Read at CALL time, like every other resolver here.
+    """
+    return float(cfg.PREF_RATE_LEVERED if is_levered
+                 else cfg.PREF_RATE_UNLEVERED)
+
+
 def resolve_waterfall_terms(overrides: dict = None,
-                            capital_structure: dict = None) -> WaterfallTerms:
+                            capital_structure: dict = None,
+                            is_levered: bool = None) -> WaterfallTerms:
     """Partial override → fully resolved terms.
 
     Same contract as `model.debt.resolve_debt_terms` and
@@ -310,6 +381,16 @@ def resolve_waterfall_terms(overrides: dict = None,
     It is deliberately NOT a key in `config.WATERFALL_TERMS` — the
     capital block already owns it, and a second copy diverges.
 
+    **`is_levered` picks the pref default** — see `resolve_pref_rate`.
+    `None` means "the caller does not know", which resolves to the
+    LEVERED rate because every deal in this app is sized at
+    `config.DEBT_TERMS` unless it says otherwise (decision 6); the CLI
+    and direct test construction take that path. `engine.py` knows the
+    deal's resolved `max_ltv` before the model runs and passes the real
+    answer, so the normal web path never guesses. A per-deal
+    `pref_rate` override still wins over both, which is what "the
+    preferred return can be adjusted" means.
+
     Config is read at CALL time, never bound at import, so a test or a
     future settings path that rebinds it is seen.
     """
@@ -317,6 +398,14 @@ def resolve_waterfall_terms(overrides: dict = None,
     coinvest = (capital_structure or {}).get("gp_coinvest_pct")
     resolved["gp_coinvest_pct"] = (cfg.GP_COINVEST_PCT
                                    if coinvest in (None, "") else coinvest)
+    # Seeded BEFORE the override loop, exactly like the co-invest above,
+    # so a deal that names its own pref still wins. `pref_rate` is
+    # deliberately absent from `config.WATERFALL_TERMS` — a key there
+    # would be a third answer competing with the two leverage-dependent
+    # constants, and the stale one would win on whichever path read the
+    # dict first.
+    resolved["pref_rate"] = resolve_pref_rate(
+        True if is_levered is None else bool(is_levered))
     known = {f.name for f in fields(WaterfallTerms)}
 
     for key, value in (overrides or {}).items():
@@ -505,8 +594,15 @@ def _stamp_status(key, terms):
 
 
 def assumption_stamp(terms: WaterfallTerms) -> list:
-    """The five LPA questions, how this run answered them, and whether
+    """The six LPA questions, how this run answered them, and whether
     anyone has actually read the document on each.
+
+    Five as shipped; `catch_up` joined them on 2026-08-12 — see the row
+    itself for why a scope decision earns a disclosure row. After that
+    reading exactly one row is still `open`: `promote_basis`, LPA
+    question 5. Nothing here changes when the last one closes except
+    that row's status, which is the point of keeping the state in
+    `config.LPA_CONFIRMED` instead of in prose.
 
     The scope contract's rule: "Do not let an LP net IRR leave the
     building without its stamp." Each row carries a `status` —
@@ -526,7 +622,10 @@ def assumption_stamp(terms: WaterfallTerms) -> list:
         {"key": "accrual_base",
          "question": "Accrual base: contributed/unreturned or committed",
          "value": terms.accrual_base,
-         "label": ACCRUAL_BASE_LABELS[terms.accrual_base]},
+         "label": ACCRUAL_BASE_LABELS[terms.accrual_base]
+                  + (ACCRUAL_BASE_EQUIVALENCE_NOTE
+                     if terms.accrual_base == ACCRUAL_BASE_COMMITTED
+                     else "")},
         {"key": "ordering",
          "question": "Return of capital before pref, or pref first",
          "value": terms.ordering,
@@ -551,6 +650,19 @@ def assumption_stamp(terms: WaterfallTerms) -> list:
          "label": f"{terms.promote_split:.0%} promote on the "
                   f"LP-attributable residual "
                   f"({1 - terms.gp_coinvest_pct:.0%} of it)"},
+        # A SIXTH row, added 2026-08-12 when the operator confirmed there
+        # is no catch-up "at this time". The other five rows are
+        # conventions INSIDE the implemented structure; this one is the
+        # structure. It earns a row anyway, for the reason the stamp
+        # exists: a catch-up would move the promote materially, an LP
+        # reading `20% promote on the LP-attributable residual` cannot
+        # tell from that line whether one is present, and "at this time"
+        # is precisely what a DATED confirmation records — the answer
+        # given on a day, not a permanent property of the fund.
+        {"key": "catch_up",
+         "question": "GP catch-up tier above the pref",
+         "value": terms.catch_up,
+         "label": "GP catch-up" if terms.catch_up else "No GP catch-up"},
     ]
     for row in rows:
         row["status"] = _stamp_status(row["key"], terms)

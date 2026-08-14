@@ -318,6 +318,31 @@ def submitted_am_fee_pct(cleaned):
     return None if v in (None, "") else round(float(v) / 100.0, 6)
 
 
+def _levered_intent(max_ltv) -> bool:
+    """Does this form describe a deal that intends to borrow?
+
+    `model.debt.DebtTerms.is_levered` is the definition and the argument
+    for it; this is the same test applied to a raw submitted value,
+    which is all this module has before anything resolves. A blank field
+    means "the default", so it reads as levered — the same direction
+    `resolve_debt_terms` would take it.
+    """
+    if max_ltv in (None, ""):
+        return float(cfg.DEBT_TERMS["max_ltv"] or 0.0) > 0.0
+    return float(max_ltv) > 0.0
+
+
+def waterfall_defaults(is_levered: bool) -> dict:
+    """`config.WATERFALL_TERMS` plus the pref this deal's leverage
+    implies. `pref_rate` has no config key on purpose (two rates, chosen
+    per deal), so every consumer that needs "what would the default have
+    been" has to ask the resolver — and there are two of them here, the
+    prefill and the override diff, which is exactly why this is one
+    function and not two expressions."""
+    from model.waterfall import resolve_pref_rate
+    return dict(cfg.WATERFALL_TERMS, pref_rate=resolve_pref_rate(is_levered))
+
+
 def _text():
     return forms.TextInput(attrs={"class": INPUT_CSS})
 
@@ -731,12 +756,20 @@ def _debt_waterfall_initial(initial: dict, saved: dict) -> None:
         logger.warning("stored debt_terms override does not resolve — "
                        "prefilling the assumptions form from the raw merge")
         debt = {**cfg.DEBT_TERMS, **debt_saved}
+    # The pref default follows the DEAL's leverage — 8% levered, 6%
+    # unlevered (LPA, 2026-08-12) — so the prefill reads it off the debt
+    # terms resolved one line above rather than out of a config key,
+    # which no longer exists. An unlevered deal must open this page
+    # showing 6%, or the operator saves an "override" that is only an
+    # override because the form showed the wrong default.
+    is_levered = _levered_intent(debt.get("max_ltv"))
     try:
-        wf = dataclasses.asdict(resolve_waterfall_terms(wf_saved))
+        wf = dataclasses.asdict(
+            resolve_waterfall_terms(wf_saved, is_levered=is_levered))
     except (ValueError, NotImplementedError):
         logger.warning("stored waterfall_terms override does not resolve — "
                        "prefilling the assumptions form from the raw merge")
-        wf = {**cfg.WATERFALL_TERMS, **wf_saved}
+        wf = {**waterfall_defaults(is_levered), **wf_saved}
     for key in DEBT_FORM_KEYS:
         v = debt.get(key)
         initial[f"debt_{key}"] = _pct_display(v) if key in DEBT_PCT_KEYS else v
@@ -1082,11 +1115,17 @@ def build_overrides(cleaned, post, deal, eff=None) -> dict:
     # debt, with nothing anywhere saying so. Every capital-block key had a
     # field, so this could not arise before; six keys here have none.
     prev = deal.assumption_overrides or {}
+    submitted_debt = submitted_debt_terms(cleaned)
+    # Same leverage-dependent default as the prefill, and it MUST be the
+    # same or the two disagree: the page would show 6% on an unlevered
+    # deal and then store 6% as an override against an 8% default that
+    # deal never had.
+    wf_defaults = waterfall_defaults(_levered_intent(
+        submitted_debt.get("max_ltv", cfg.DEBT_TERMS["max_ltv"])))
     for out_key, form_keys, submitted, defaults in (
-            ("debt_terms", DEBT_FORM_KEYS, submitted_debt_terms(cleaned),
-             cfg.DEBT_TERMS),
+            ("debt_terms", DEBT_FORM_KEYS, submitted_debt, cfg.DEBT_TERMS),
             ("waterfall_terms", WF_FORM_KEYS,
-             submitted_waterfall_terms(cleaned), cfg.WATERFALL_TERMS)):
+             submitted_waterfall_terms(cleaned), wf_defaults)):
         section = {k: v for k, v in (prev.get(out_key) or {}).items()
                    if k not in form_keys}
         for key, value in submitted.items():
