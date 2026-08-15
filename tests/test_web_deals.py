@@ -648,3 +648,104 @@ def test_the_live_preview_keeps_the_new_basis_while_a_confirmation_is_open():
     assert not form.is_valid()          # confirmation is outstanding
     out = build_overrides(form.cleaned_data, post, deal)
     assert out["capital_structure"]["capex_basis"] == "per_sf"
+
+
+# ── The pipeline table's own copy (QA findings B5 / B1-a / B1-b) ────
+
+
+@pytest.fixture
+def _operator(client, django_user_model):
+    user = django_user_model.objects.create_user(username="op2", password="x")
+    client.force_login(user)
+    return user
+
+
+@pytest.mark.django_db
+def test_an_empty_pipeline_and_an_empty_FILTER_say_different_things(
+        client, _operator):
+    """One cell used to state one fact for two situations. Filtering to
+    nothing told the operator their pipeline was empty when it was not,
+    and offered a fix — start a New Analysis — for a problem they did
+    not have."""
+    from webapp.models import Deal
+
+    truly_empty = client.get("/deals/").content.decode()
+    assert "No deals yet" in truly_empty
+
+    Deal.objects.create(deal_id="alpha", property_name="Alpha Storage",
+                        state="TX", recommendation="PURSUE")
+    filtered = client.get("/deals/?state=CO").content.decode()
+    assert "No deals match these filters" in filtered
+    assert "No deals yet" not in filtered
+    # ...and the offered action is the one that actually helps here.
+    assert "clear them" in filtered
+
+
+@pytest.mark.django_db
+def test_the_empty_state_stops_leaking_a_shell_command(client, _operator):
+    """MUTATION: put `manage.py import_deals` back in either branch.
+
+    It is not an action available to anyone reading the page in a
+    browser, and it names a one-time bootstrap that has already run on
+    this deployment — so it read as an instruction the operator could
+    not follow."""
+    from webapp.models import Deal
+
+    assert "manage.py" not in client.get("/deals/").content.decode()
+    Deal.objects.create(deal_id="alpha", property_name="Alpha", state="TX")
+    assert "manage.py" not in client.get(
+        "/deals/?state=CO").content.decode()
+
+
+@pytest.mark.django_db
+def test_the_table_separates_thousands(client, _operator):
+    """A QA pass found `48762` and `$3500000` on the same page as
+    `$58,051,289`, which came out of `webapp.results` already formatted.
+    These three columns are the ones that reach the page raw."""
+    from webapp.models import Deal
+
+    Deal.objects.create(deal_id="alpha", property_name="Alpha Storage",
+                        nrsf=48_762.0, asking_price=3_500_000.0,
+                        estimated_fair_value=2_950_000.0)
+    body = client.get("/deals/").content.decode()
+    assert "48,762" in body
+    assert "$3,500,000" in body
+    assert "$2,950,000" in body
+    assert "48762" not in body
+    assert "3500000" not in body
+
+
+@pytest.mark.django_db
+def test_a_missing_figure_shows_a_dash_not_a_void(client, _operator):
+    """A blank cell beside populated ones reads as a broken template —
+    a browser QA pass filed exactly that against a deal whose stored run
+    never wrote the field. The dash says "no value", which is true."""
+    from webapp.models import Deal
+
+    Deal.objects.create(deal_id="alpha", property_name="Alpha Storage",
+                        recommendation="PURSUE")
+    body = client.get("/deals/").content.decode()
+    assert body.count("&mdash;") >= 3      # NRSF, Asking, Est. Fair Value
+
+
+def test_every_page_heading_uses_the_display_face():
+    """QA finding A5: three `<h1>`s computed to Public Sans while the
+    sidebar wordmark rendered in Fraunces, so the page title read as
+    lighter chrome than the nav beside it.
+
+    A sweep rather than three assertions, and it lives here beside the
+    deal-list copy tests because that is the page the defect surfaced
+    on. `base.html` loads both faces and `tailwind.config.js` defines
+    both tokens; nothing enforced that a heading reached for the display
+    one, so each new page inherited the miss from whichever template it
+    was copied off. A new template now fails this by default."""
+    import pathlib
+    import re
+
+    root = pathlib.Path(__file__).resolve().parent.parent
+    bare = []
+    for tpl in (root / "webapp" / "templates").rglob("*.html"):
+        for tag in re.findall(r"<h1\b[^>]*>", tpl.read_text()):
+            if "font-display" not in tag:
+                bare.append(f"{tpl.relative_to(root)}: {tag}")
+    assert not bare, "headings not on the display face: " + "; ".join(bare)
