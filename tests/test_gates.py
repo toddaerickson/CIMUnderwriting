@@ -28,6 +28,48 @@ def test_population_gate_tbd(mock_cim_data):
     assert g1["result"] == "TBD"
 
 
+def test_population_gate_negative_degrades_to_tbd(mock_cim_data):
+    """A negative population must degrade to TBD with a reason. Gate 5 already
+    hardens this input; gate 1 read the same attribute raw and would render
+    '-75,000' as a FAIL verdict, which reads as a real screening decision."""
+    mock_cim_data.population_3mi = -75_000
+    gates = evaluate_gates(mock_cim_data, {}, {})
+    g1 = next(g for g in gates if g["gate"] == 1)
+    assert g1["result"] == "TBD"
+    assert "negative" in g1["note"]
+    assert g1["actual"] == "N/A"
+
+
+def test_population_gate_reads_a_numeric_string_from_legacy_json(mock_cim_data):
+    """Coerced, not refused — an old override file storing the population as a
+    plain string still holds a real population, and gate 5 already reads its
+    inputs through float() for the same reason."""
+    mock_cim_data.population_3mi = "75000"
+    gates = evaluate_gates(mock_cim_data, {}, {})
+    g1 = next(g for g in gates if g["gate"] == 1)
+    assert g1["result"] == "PASS"
+    assert g1["actual"] == "75,000"
+
+
+def test_population_gate_non_numeric_does_not_crash(mock_cim_data):
+    """A hand-edited legacy JSON value must not take down all 7 gates."""
+    mock_cim_data.population_3mi = "75,000"
+    gates = evaluate_gates(mock_cim_data, {}, {})
+    g1 = next(g for g in gates if g["gate"] == 1)
+    assert g1["result"] == "TBD"
+    assert "not numeric" in g1["note"]
+    assert len(gates) == 7   # every other gate still evaluated
+
+
+def test_population_gate_renders_without_a_decimal_point(mock_cim_data):
+    """The gate coerces to float, so the format string must stay integral —
+    '78,000.0' would move every characterization snapshot."""
+    mock_cim_data.population_3mi = 78_000
+    gates = evaluate_gates(mock_cim_data, {}, {})
+    g1 = next(g for g in gates if g["gate"] == 1)
+    assert g1["actual"] == "78,000"
+
+
 def test_occupancy_gate_pass(mock_cim_data):
     """Gate 2: stabilized physical occupancy should PASS."""
     mock_cim_data.physical_occupancy = 0.90

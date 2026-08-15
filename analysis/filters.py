@@ -70,15 +70,29 @@ def evaluate_gates(cim_data, scenario_results=None, va_results=None,
     gates = []
 
     # Gate 1: Population density (3-mile ≥ 50,000)
+    # Same hardening, and for the same reason, as sf_per_capita_inputs above:
+    # the value can arrive from a legacy JSON override or an old snapshot that
+    # bypassed form validation, and a negative or non-numeric one must degrade
+    # THIS gate to TBD with a reason rather than crash the run or flip the
+    # comparison sign. Note the gate is read as a VERDICT — a population the
+    # parser never actually found in the CIM has failed real deals here, so
+    # "N/A + verify manually" is the honest output, not a number.
     pop = cim_data.population_3mi
+    pop_problem = ""
+    try:
+        pop = None if pop is None else float(pop)
+        if pop is not None and pop < 0:
+            pop, pop_problem = None, "population is negative — fix the value in assumptions"
+    except (TypeError, ValueError):
+        pop, pop_problem = None, "population is not numeric — fix the value in assumptions"
     pop_source = source_log.get("population_3mi", {}).get("source", "")
     gates.append({
         "gate": 1,
         "name": "Population (3-mi ≥ 50K)",
         "threshold": f"≥ {GATES['population_3mi']:,}",
-        "actual": f"{pop:,}" if pop else "N/A",
+        "actual": f"{pop:,.0f}" if pop else "N/A",
         "result": _eval(pop, GATES["population_3mi"], ">=") if pop else "TBD",
-        "note": "" if pop else "Population data not found in CIM — verify manually",
+        "note": pop_problem or ("" if pop else "Population data not found in CIM — verify manually"),
         "source": pop_source if pop_source else None,
     })
 
