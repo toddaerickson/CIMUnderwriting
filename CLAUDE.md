@@ -28,6 +28,17 @@ never remove, weaken, or bypass them:
   linked worktrees, foreign dirty state, and whether solo mode is on.
 - **PreToolUse** `.claude/hooks/guard-shared-worktree.py` — DENIES file edits
   and git mutations targeting the primary working tree of this clone.
+  **Exactly one file is exempt**: `<primary .git>/cim-session-notes.md`, the
+  board the carry-over section below REQUIRES every session to maintain by
+  hand. It is not a hole — `is_session_notes` matches that one basename, in a
+  directory that must RESOLVE to the primary git dir, and never through a
+  symlink. Everything else in the git dir stays denied, `.git/config` and
+  `.git/hooks` emphatically so. Before the exemption the guard and this file
+  contradicted each other, and it was not a decision about the notes: the
+  check reduces a path to its containing DIRECTORY, so the filename never
+  reached it. The only route left was the CIM_SOLO hatch, which switches the
+  guard off clone-wide — a global bypass as the standing workflow for a
+  routine act, which is how an operator learns to flip solo mode casually.
 - **PostToolUse** `.claude/hooks/detect-primary-tree-writes.py` — REPORTS
   writes that landed in the primary tree anyway. The PreToolUse guard only
   inspects Bash commands whose command word is `git`, so `echo >`, `sed -i`,
@@ -73,7 +84,9 @@ state across it.
 - Both carry-over hooks read their paths from `_shared_tree.py` for the same
   reason the guard pair does. The notes filename must never share
   `CARRYOVER_PREFIX`, or the snapshot sweep deletes it;
-  `test_the_notes_file_is_not_matched_as_a_snapshot` pins that.
+  `test_the_notes_file_is_not_matched_as_a_snapshot` pins that. The GUARD now
+  reads `CARRYOVER_NOTES` from there too, so a rename cannot silently
+  re-deny the file — three hooks, one definition.
 
 # Compact instructions
 

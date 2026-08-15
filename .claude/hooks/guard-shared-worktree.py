@@ -118,7 +118,8 @@ import subprocess
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from _shared_tree import primary_git_dir, solo_mode   # noqa: E402
+from _shared_tree import (CARRYOVER_NOTES, primary_git_dir,   # noqa: E402
+                          solo_mode)
 
 FILE_TOOLS = ("Edit", "Write", "MultiEdit", "NotebookEdit")
 SEG_SPLIT = re.compile(r"&&|\|\||;|\||\n|\(|\)")
@@ -156,6 +157,50 @@ def nearest_existing_dir(path):
     while d and not os.path.isdir(d):
         d = os.path.dirname(d)
     return d or "."
+
+
+def is_session_notes(path, project_clone):
+    """True for EXACTLY `<primary .git>/cim-session-notes.md`.
+
+    The one file under the primary tree an agent is REQUIRED to write:
+    CLAUDE.md's carry-over section says to maintain it by hand during long
+    runs, and it lives in the git dir precisely so it is one board per
+    clone rather than one per session.
+
+    Without this exemption the guard and CLAUDE.md contradict each other,
+    and the contradiction resolves the wrong way. `nearest_existing_dir`
+    below reduces a file path to its CONTAINING directory before the check,
+    so the guard never sees the filename and cannot tell the notes file
+    from `.git/config` — the denial was never a decision about this file,
+    it is the guard being unable to look. The only sanctioned route left
+    was the CIM_SOLO hatch, which switches the guard off CLONE-WIDE; making
+    a routine, mandated act require a global bypass teaches the operator to
+    flip solo mode casually, which costs far more than this write.
+
+    Deliberately ONE file, not the git dir. `.git/config` is where every
+    session pushes from, `.git/hooks` fires on the next `worktree add`, and
+    refs are the durable copy of work whose worktree is gone — the command
+    rules already defend all three, and a directory-wide exemption would
+    let `Write` walk in the door `git` is held at.
+
+    Three conditions, each closing a different way of wearing the name:
+      * the basename must match literally;
+      * the CONTAINING directory must RESOLVE to the primary git dir, so a
+        `..` chain or a symlinked `.git` is judged by where it lands;
+      * the path itself must not be a symlink — otherwise
+        `ln -s ../../analysis/financials.py <git dir>/cim-session-notes.md`
+        carries this exemption straight to a source file, since the write
+        follows the link.
+    """
+    if not project_clone:
+        return False
+    d, base = os.path.split(os.path.abspath(path))
+    if base != CARRYOVER_NOTES or os.path.islink(path):
+        return False
+    try:
+        return os.path.realpath(d) == os.path.realpath(project_clone)
+    except OSError:
+        return False
 
 
 def _resolve_dir(tok, base):
@@ -699,6 +744,10 @@ def main():
     if tool in FILE_TOOLS:
         fp = tin.get("file_path") or tin.get("notebook_path") or ""
         if not isinstance(fp, str) or not fp:
+            allow()
+        # Checked BEFORE the probe, because the probe is what loses the
+        # filename. See `is_session_notes`.
+        if is_session_notes(fp, project_clone):
             allow()
         probe = nearest_existing_dir(fp)
         if _target_guarded(probe, project_clone):
