@@ -305,6 +305,38 @@ def run_analysis(result: AnalysisResult, progress: Callable = None,
     from analysis.valuation import resolve_market_cap
     from registry import classify_asset_type
 
+    # A financial line the CIM stated and the parser could not assign to a
+    # period is REFUSED, not filled — the same posture as the CapEx warning
+    # below. It has to be said out loud, because the silent version is
+    # actively misleading: `analyze_financials` books an absent expense
+    # category at the benchmark FLOOR x NRSF and logs it as "the CIM did not
+    # state a value". Here the CIM did state one, on a page this names, and
+    # the floor estimate is a reader's cue to go look rather than a fact
+    # about the deal.
+    #
+    # ONE warning, not one per line: a two-property CIM repeats its whole
+    # income statement per property and again combined, so the same labels
+    # arrive three times and the remedy is identical for all of them. Forty
+    # warnings saying the same thing is how a reader learns to skip the
+    # warning list.
+    unmapped = getattr(cim_data, "unmapped_financial_lines", None) or []
+    if unmapped:
+        seen, where = [], {}
+        for row in unmapped:
+            label = str(row.get("label") or "").strip()
+            if label and label not in where:
+                seen.append(label)
+                where[label] = row.get("page")
+        shown = ", ".join(f"{lbl}" + (f" (p{where[lbl]})" if where[lbl] else "")
+                          for lbl in seen[:8])
+        more = f", +{len(seen) - 8} more" if len(seen) > 8 else ""
+        result.errors.append(
+            f"{len(seen)} financial line(s) appear in the CIM but could NOT be "
+            f"priced — the table's columns could not be matched to periods: "
+            f"{shown}{more}. Expense categories they cover fall back to the "
+            f"benchmark FLOOR x NRSF, which understates the expense and so "
+            f"overstates NOI. Enter the figures on the Assumptions page.")
+
     # Step 1: Financial analysis
     _progress(1, 9, "Analyzing financials...")
     from analysis.financials import analyze_financials

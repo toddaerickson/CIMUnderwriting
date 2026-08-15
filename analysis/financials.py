@@ -464,7 +464,15 @@ def _map_expense_lines(cim_data) -> dict:
 
     for line in cim_data.expense_lines:
         label = line.label.lower()
-        value = line.t12 or line.t3 or line.cim_yr1
+        # `is not None`, not truthiness: `0.0` is falsy, so an honestly
+        # reported $0 line — a brand-new asset carrying no advertising spend,
+        # a tenant-insurance line that has not started — used to fall through
+        # to the pro forma's projection for the same category and book a
+        # number the trailing actuals never contained. `tests/test_gates.py`
+        # already names the hazard ("a truthiness check on t3 would wrongly
+        # skip it"); this is the same defect one field to the left.
+        value = next((v for v in (line.t12, line.t3, line.cim_yr1)
+                      if v is not None), None)
 
         if value is None:
             continue

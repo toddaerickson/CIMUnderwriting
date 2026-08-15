@@ -2334,7 +2334,12 @@ def test_no_module_still_sizes_a_property_at_one_square_foot():
     paths = ([root / "engine.py", root / "context.py"]
              + sorted((root / "analysis").glob("*.py"))
              + sorted((root / "model").glob("*.py"))
-             + sorted((root / "output").glob("*.py")))
+             + sorted((root / "output").glob("*.py"))
+             # `extract/` joined the list when the column mapper landed
+             # there: it is the layer that decides what NRSF IS, so a
+             # fallback size introduced upstream of every consumer would
+             # have been the one place this guard could not see.
+             + sorted((root / "extract").glob("*.py")))
     offenders = []
     for path in paths:
         tree = ast.parse(path.read_text(), filename=str(path))
