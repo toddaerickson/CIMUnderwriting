@@ -471,6 +471,53 @@ def test_guard_allows_a_safe_branch_delete_but_never_a_forced_one(repo):
     assert run_guard(f"git -C {repo} branch -df feature", repo, repo) == "deny"
 
 
+# ── the other half: does CLAUDE.md recommend what the guard permits? ──
+# For months rule 3 told every session that post-merge cleanup was
+# `git branch -D` — the one command the test directly above proves this
+# guard has denied since v6. Both halves were individually right and
+# jointly contradictory, and it survived because nothing compared them:
+# the guard had tests, the prose had readers. Two sessions ran into the
+# denial before anyone treated the doc as the broken half.
+#
+# So the shipping rules get a machine-checked half. Adding a git command
+# to CLAUDE.md's "Shipping work" section means adding a row here. A row
+# that fails means the two disagree AGAIN — decide which is wrong on the
+# merits, but do not settle it by deleting the row.
+
+SHIP_COMMANDS = [
+    # (command template, expected verdict, the rule that names it)
+    ("git -C {repo} worktree add {tmp}/fresh -b fresh", None, "rule 1"),
+    ("git -C {repo} branch --show-current",             None, "rule 2"),
+    ("git -C {repo} diff",                              None, "rule 2"),
+    ("git -C {repo} add CLAUDE.md",                     None, "rule 2"),
+    ("git -C {repo} worktree remove {tmp}/wt",          None, "rule 3"),
+    ("git -C {repo} branch -d feature",                 None, "rule 3"),
+    ("git -C {repo} branch -D feature",               "deny", "rule 3"),
+    ("git -C {repo} checkout main",                   "deny", "rule 3"),
+    ("git -C {repo} push -u origin feature",            None, "rule 3"),
+    ("git -C {repo} fetch origin --prune",              None, "rule 8"),
+    ("git -C {repo} status --porcelain",                None, "rule 8"),
+    ("git -C {repo} rev-list --count origin/main..HEAD", None, "rule 8"),
+    ("git -C {repo} worktree list",                     None, "rule 8"),
+    ("git -C {repo} pull --ff-only",                  "deny", "rule 8"),
+]
+
+
+@pytest.mark.parametrize("template,want,rule", SHIP_COMMANDS)
+def test_the_commands_claude_md_recommends_are_the_ones_the_guard_allows(
+        repo, tmp_path, template, want, rule):
+    """Every git command CLAUDE.md's shipping section names, judged by the
+    guard that will actually see it. The `deny` rows are the ones the prose
+    explicitly warns are refused, so a guard that stopped denying them would
+    make the doc wrong in the other direction — both are failures."""
+    cmd = template.format(repo=repo, tmp=tmp_path)
+    got = run_guard(cmd, repo, repo)
+    assert got == want, (
+        f"CLAUDE.md {rule} names `{cmd}`, but the guard says "
+        f"{got or 'allow'} where the prose claims {want or 'allow'}. "
+        f"The doc and the hook have drifted apart — fix one of them.")
+
+
 def test_bundled_short_flags_cannot_launder_a_branch_rewrite(repo):
     """The hole seven hardening rounds walked past: git accepts `-fm` for
     `-f -m`, and exact-token matching never saw it, so a FORCE RENAME was
