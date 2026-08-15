@@ -1092,3 +1092,123 @@ def test_clearing_the_gate_removes_the_download_caveat(
     assert "has not been cleared by counsel" not in body
     assert "internal only" not in body
     assert "Investor Summary (.docx)" in body
+
+
+# ── Runs stored before a section existed (QA findings C4 / C5-b) ────
+# A run from 2026-07-28 rendered a Summary tab carrying two of its six
+# blocks and a Returns tab with no levered lens at all. Nothing was
+# broken: every absent block postdated the run, and each is correctly
+# gated on its own payload key. What was missing was any way for the
+# reader to tell that apart from a rendering bug — a browser QA pass
+# filed it as one, twice, at "major".
+
+
+def _legacy_payload():
+    """A run stored before `checks`, `sources_uses`, the fill log, the
+    register and the levered lens existed. No `payload_version` key at
+    all, which is what every run written before the stamp looks like."""
+    return {"gate_summary": {"recommendation": "DECLINE",
+                             "gates": [], "pass_count": 0, "total": 7},
+            "scenario_results": {"base": {"irr": 0.12, "moic": 1.6}}}
+
+
+def _legacy_deal(client, deals_dir, **payload_extra):
+    from webapp.models import AnalysisRun
+    deal = _make_extracted_deal(deals_dir)
+    AnalysisRun.objects.create(deal=deal, status="done",
+                               result_json=dict(_legacy_payload(),
+                                                **payload_extra))
+    return deal
+
+
+@pytest.mark.django_db
+def test_a_stale_run_says_which_sections_it_predates(client, operator,
+                                                     deals_dir):
+    """MUTATION: drop the `ctx.update(legacy_context(...))` line from
+    `deal_detail`, or the `{% if run_is_legacy %}` block from the
+    template."""
+    deal = _legacy_deal(client, deals_dir)
+    body = client.get(f"/deals/{deal.pk}/").content.decode()
+
+    assert "predates some of the sections on this page" in body
+    # Naming them is the point. "Some sections are missing" leaves the
+    # reader exactly where the QA pass was — unable to tell an absent
+    # block from a broken one.
+    for label in ("Model Checks", "Capital (Sources &amp; Uses)",
+                  "Assumptions Filled", "Assumption Register",
+                  "Levered Returns (LP Net)"):
+        assert label in body, label
+
+
+@pytest.mark.django_db
+def test_the_stale_notice_rides_every_tab(client, operator, deals_dir):
+    """The register went missing on Summary and the levered lens on
+    Returns, so a notice rendering only on Summary would leave the
+    Returns reader with the same unexplained gap. It sits outside the
+    per-tab branches for that reason."""
+    deal = _legacy_deal(client, deals_dir)
+    for tab in ("summary", "returns", "financials", "risks"):
+        body = client.get(f"/deals/{deal.pk}/?tab={tab}").content.decode()
+        assert "predates some of the sections" in body, tab
+
+
+@pytest.mark.django_db
+def test_a_current_run_missing_a_block_is_not_called_stale(client, operator,
+                                                           deals_dir):
+    """The distinction the whole version stamp exists for, and the only
+    reason `legacy_context` is not just an emptiness test.
+
+    A modern run with no `levered` block priced no loan, and the Returns
+    tab says so in its own words. Calling that stale would fire the
+    banner on a healthy deal, and a caveat that fires on healthy deals
+    stops being read — which is the failure decision 8 names for
+    `coerced_region`."""
+    from webapp.results import RESULT_PAYLOAD_VERSION
+
+    deal = _legacy_deal(client, deals_dir,
+                        payload_version=RESULT_PAYLOAD_VERSION)
+    body = client.get(f"/deals/{deal.pk}/").content.decode()
+    assert "predates some of the sections" not in body
+
+
+def test_the_notice_is_silent_when_nothing_is_actually_absent():
+    """An unversioned run carrying every block gets no banner: a version
+    number is bookkeeping the reader cannot act on, and there is nothing
+    on the page for them to go looking for."""
+    from webapp.results import legacy_context
+
+    full = {"checks": [{}], "sources_uses": {"uses": []},
+            "assumption_fill_log": [{}], "assumption_register": [{}],
+            "levered": {"base": {}}}
+    ctx = legacy_context(full)
+    assert ctx["run_is_legacy"] is False
+
+
+def test_an_unversioned_run_reports_only_the_blocks_it_lacks():
+    """`legacy_missing` is the blocks actually absent, not the whole
+    catalogue — a notice naming five sections on a run missing one
+    sends the reader looking for four that are on the page."""
+    from webapp.results import legacy_context
+
+    ctx = legacy_context({"checks": [{}], "sources_uses": {"uses": []},
+                          "assumption_fill_log": [{}],
+                          "assumption_register": [{}]})
+    assert ctx["run_is_legacy"] is True
+    assert ctx["legacy_missing"] == ["Levered Returns (LP Net)"]
+
+
+@pytest.mark.django_db
+def test_the_worker_stamps_the_version_on_what_it_writes(client, operator,
+                                                         deals_dir, fake_run):
+    """MUTATION: drop `payload_version` from the payload dict in
+    `webapp.services`. Every NEW run then reads as stale, and a banner
+    that exists to explain four missing blocks starts appearing on deals
+    that have all six."""
+    from webapp.results import RESULT_PAYLOAD_VERSION
+
+    deal = _run_deal(client, deals_dir)
+    run = deal.runs.filter(status="done").first()
+    assert run.result_json["payload_version"] == RESULT_PAYLOAD_VERSION
+    # ...and the page it produces is therefore never called stale.
+    assert "predates some of the sections" not in \
+        client.get(f"/deals/{deal.pk}/").content.decode()

@@ -69,6 +69,27 @@
   </div>
   {% endif %}
 
+  {% comment %} Slate, not amber: nothing here is wrong. The run was
+     correct on the day it ran and its numbers still stand — it simply
+     cannot fill sections that did not exist yet. Amber would rank it
+     beside a refused settings override, and a page that shouts about
+     everything ranks nothing. It names the missing blocks rather than
+     saying "some sections": the whole failure this fixes is a reader
+     not knowing what they are not being shown. {% endcomment %}
+  {% if run_is_legacy %}
+  <div class="my-3 rounded-md border border-slate-300 bg-slate-100 px-4 py-2 text-sm text-slate-700">
+    <span class="font-medium">This analysis predates some of the sections on this page.</span>
+    It was produced by an earlier version of the model, so the following
+    are absent from the stored results rather than empty:
+    <span class="font-medium">{{ legacy_missing|join:", " }}</span>.
+    Everything shown was computed correctly at the time and is unchanged;
+    re-run the analysis to populate the rest.
+    {% if has_snapshot %}Use <span class="font-medium">Re-run Analysis</span> above.
+    {% else %}This deal was imported without an extraction snapshot, so it
+    must be re-uploaded under New Analysis to be re-run.{% endif %}
+  </div>
+  {% endif %}
+
   {% if deal.memo_filename or done_run %}
   <div class="flex flex-wrap gap-2 my-3">
     <a href="{% url 'deal-download' deal.pk 'memo' %}" class="text-sm px-3 py-1.5 rounded border border-slate-300 text-slate-700 hover:bg-slate-50">Memo (.docx)</a>

@@ -25,6 +25,11 @@ import config as cfg
 from analysis.valuation import resolve_hold_years, resolve_transaction_costs
 from model.debt import resolve_debt_terms
 from model.returns_model import resolve_capital_structure
+# The payload version lives beside the display builders that consume it —
+# `results` imports nothing from here, so this direction is the acyclic
+# one, and the version's meaning ("which blocks can this populate?") is a
+# fact about the reader, not the writer.
+from webapp import results as results_ctx
 from model.waterfall import resolve_waterfall_terms
 from engine import (AnalysisResult, _apply_overrides, extract_pdf_data,
                     run_analysis)
@@ -1041,6 +1046,12 @@ def _analysis_worker(run_pk):
         write_deal_meta(deal.deal_dir, meta)
 
         payload = json_safe({
+            # Stamps WHICH display blocks this payload is capable of
+            # populating, so a results page can tell "the run predates
+            # this section" from "this deal has no answer for it". Runs
+            # written before the stamp carry no key at all, which is
+            # exactly the signal `results.legacy_context` reads.
+            "payload_version": results_ctx.RESULT_PAYLOAD_VERSION,
             "gate_results": result.gate_results,
             "gate_summary": result.gate_summary,
             "scenario_results": result.scenario_results,

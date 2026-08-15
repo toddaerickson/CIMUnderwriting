@@ -455,6 +455,11 @@ def deal_detail(request, pk):
         r = done_run.result_json or {}
         ctx["header"] = results_ctx.header_metrics(deal, r)
         ctx["run_warnings"] = r.get("errors") or []
+        # Staleness rides beside the warning banner and OUTSIDE the
+        # per-tab branches below: a run that predates the assumption
+        # register is also the run that predates the levered lens, and
+        # the reader who needs telling is on whichever tab they opened.
+        ctx.update(results_ctx.legacy_context(r))
 
         # A settings override this run REFUSED, surfaced where the numbers
         # it changed are read. `build_config_patch` skips a stored row

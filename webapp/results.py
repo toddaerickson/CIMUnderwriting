@@ -10,6 +10,56 @@ from itertools import zip_longest
 import config as cfg
 from model.debt import binding_constraint_label, displayed_rate
 
+#: Bump when a run begins persisting a payload key that one of the results
+#: surfaces renders a whole BLOCK from. `webapp.services` stamps it on
+#: every payload it writes; a run without it predates the stamp entirely.
+#:
+#: This exists because "the block is missing" and "the run is old" are
+#: different facts and only the second one is actionable. Every gated
+#: block below is `{% if %}`-ed on its own payload key, which is correct —
+#: `levered_context` degrades to `has_levered: False` rather than a table
+#: of N/A, and `has_va_max_offer` hides a card the deal genuinely has no
+#: answer for. The consequence is that a run stored before those features
+#: renders as a COMPLETE page that is quietly missing four sections, with
+#: nothing on screen saying so. A QA pass (2026-08-14) read deal 2's
+#: Summary tab, found two of its six blocks, and filed the four absences
+#: as a rendering defect; they were a 2026-07-28 run predating every one
+#: of them.
+#:
+#: Keyed on the version and NOT on absence alone, because absence is
+#: legitimate on a current run: `levered` is empty when the covenants
+#: sized no loan, `va_results` when there is no value-add case. A banner
+#: that fired on those would be crying wolf on healthy deals, which is
+#: how a caveat stops being read.
+RESULT_PAYLOAD_VERSION = 1
+
+#: payload key -> the section heading a reader would go looking for.
+#: Labels match the on-screen headings, so "Capital" sends someone to the
+#: block called Capital rather than to a key name only this file uses.
+_VERSIONED_BLOCKS = (
+    ("checks", "Model Checks"),
+    ("sources_uses", "Capital (Sources & Uses)"),
+    ("assumption_fill_log", "Assumptions Filled"),
+    ("assumption_register", "Assumption Register"),
+    ("levered", "Levered Returns (LP Net)"),
+)
+
+
+def legacy_context(r) -> dict:
+    """Does this stored run predate blocks the page would otherwise show?
+
+    Returns nothing to render when the payload carries a current version —
+    a modern run missing `levered` priced no loan, and that is reported by
+    the Returns tab in its own words, not as staleness.
+    """
+    if (r.get("payload_version") or 0) >= RESULT_PAYLOAD_VERSION:
+        return {"run_is_legacy": False}
+    missing = [label for key, label in _VERSIONED_BLOCKS if not r.get(key)]
+    # An unversioned run that happens to carry every block gets no banner:
+    # there is nothing to warn a reader about, and the version alone is
+    # bookkeeping they cannot act on.
+    return {"run_is_legacy": bool(missing), "legacy_missing": missing}
+
 
 def fmt_pct(v, digits=1):
     return f"{float(v) * 100:.{digits}f}%" if v is not None else "N/A"
