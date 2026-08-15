@@ -58,11 +58,20 @@ non-code items have one home:
       matched the shipped default, so none became implementation work; the
       reading did add the pref RATE as two numbers (8% levered / 6% unlevered)
       and moved the catch-up question onto the stamp.
-- [ ] Read the LPA's promote clause — `promote_basis`, the LAST open waterfall
-      question (promote on the LP-attributable residual only, vs on 100% of
-      it). Same shape as the three above: a dated `config.LPA_CONFIRMED` entry
-      if it matches, real implementation work if it does not, because the
-      alternative reading RAISES in code today.
+- [x] Read the LPA's promote clause — `promote_basis`, the last open
+      waterfall question. **Done 2026-08-12: the promote is earned on all
+      capital and the GP's co-invest earns the pref.** That sentence reads two
+      ways and they differ by real dollars, so the fund's own model workbook
+      settled it (`Underwriting!J250 = I250+(1-I250)*$J$244` — promote off the
+      top, remainder pro rata), and it is what the build already computed. No
+      number moved. Every stamp row is now confirmed or moot.
+- [ ] **Re-read the LP investor summary's caveat.** Not a code task — a
+      consequence of the line above. With no open row the "proposed terms,
+      subject to the final partnership agreement" clause no longer renders,
+      which is the one of `_is_assumption_stamp`'s three variants that has
+      never been reviewed against a rendered document. See
+      `docs/gc-review-investor-summary.md` question 7; the standing clearance
+      is ASSUMED, so this rides with the real GC review below.
 - [ ] Real GC review of the LP investor summary. The current clearance is an
       ASSUMED approval (operator direction 2026-08-09, marked as such on every
       surface); a real review REPLACES the assumed row in

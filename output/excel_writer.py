@@ -988,8 +988,9 @@ def _build_levered_tab(ws, levered: dict, debt: dict, scenario_results: dict):
     Nothing here re-runs the waterfall, so the workbook cannot disagree
     with the memo or the results page about the LP's net return.
 
-    The assumption stamp is at the BOTTOM and is not optional: five of
-    those inputs are open LPA questions and each one moves the IRR above.
+    The assumption stamp is at the BOTTOM and is not optional: every row
+    is an LPA convention that moves the IRR above, and the stamp says
+    which ones have been read against the executed document.
     """
     base = levered.get("base") or {}
     terms = debt.get("terms") or {}

@@ -95,6 +95,13 @@ ALLOWED = {
     ("model/returns_model.py", 1e-12):
         "float-comparison epsilon for the sensitivity grid's span/step "
         "divisibility check. Same class as above.",
+    ("model/waterfall.py", 1e-09):
+        "float-comparison epsilon on the promote_split vs 1 - "
+        "gp_coinvest_pct joint bound, where 1.0 - 0.55 evaluates to "
+        "0.44999999999999996 and would refuse a legal break-even pair. "
+        "Same class as the two above: a tolerance on IEEE754, not on a "
+        "deal, and moving it to config would offer an operator a knob "
+        "whose only honest setting is 'leave it alone'.",
     ("model/value_add_model.py", 12):
         "the stabilisation window is measured in months and compared "
         "against a year; the 12s here are the month/year conversion, "

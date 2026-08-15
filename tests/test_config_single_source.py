@@ -2834,8 +2834,19 @@ def test_the_cli_lp_summary_carries_an_lp_net_irr(tmp_path):
     # longer renders on a fixture with confirmed rows — so it asserts the
     # ACCOUNTING, which is what makes the caveat honest, rather than one
     # variant's exact prose.
+    #
+    # It has now moved a SECOND time, and in the direction that matters
+    # most: the 2026-08-12 reading closed the last open row, so the
+    # "the rest are proposed terms" clause no longer renders at all and
+    # asserting it would pin a caveat this document is no longer
+    # entitled to make. What must stay true is that the sentence still
+    # ACCOUNTS for every row — all six, none unexplained.
     assert "confirmed against the executed partnership agreement" in summary
-    assert "proposed terms, subject to it" in summary
+    assert "proposed terms" not in summary
+    stamp_line = next(line for line in summary.splitlines()
+                      if "LP net returns are computed under:" in line)
+    assert "5 of 6 confirmed" in stamp_line
+    assert "1 made moot by it" in stamp_line
 
     memo = _memo_text(ctx.memo_path)
     assert "Levered Returns (LP Net)" in memo, (

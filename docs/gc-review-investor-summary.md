@@ -62,8 +62,8 @@ real-estate asset the firm is underwriting.
   every degraded path. `test_every_document_carries_the_securities_legend`
   asserts it across those paths, so it cannot be dropped by a code change.
 - **No LP net figure without its assumption stamp.** Six LPA conventions move
-  the number; as of the 2026-08-12 reading four are confirmed, one is moot and
-  ONE (`promote_basis`) is still open. `memo_writer._is_build` nulls the entire
+  the number; as of the 2026-08-12 reading FIVE are confirmed and one is moot
+  — none open. `memo_writer._is_build` nulls the entire
   levered payload when the stamp is absent, so no net return can print without
   the conventions that produced it printed beside it. This is structural, not
   incidental — `test_no_levered_figure_survives_a_missing_assumption_stamp`
@@ -146,10 +146,14 @@ fixture copy with `tests/test_investor_summary.py::_generate`.
    by count when the stamp is mixed. So the disclaimer a given deal carries
    depends on the state of the LPA at the time it was run. Counsel should set
    all three variants, not just read the one that happens to render today.
-   **This is live**: the 2026-08-12 reading moved most deals off the
-   all-unconfirmed variant onto the mixed one, and confirming `promote_basis`
-   would move them again — to the variant nobody has reviewed against a
-   rendered document.\*
+   **This is live, and it has already moved twice in one day.** The
+   2026-08-12 reading first moved every deal off the all-unconfirmed variant
+   onto the mixed one, and then — when `promote_basis` closed — onto the
+   FULLY-SETTLED variant, which drops the "proposed terms, subject to it"
+   clause entirely. That third variant is the one no counsel has read against
+   a rendered document, and it is the one rendering today. It is also the
+   least hedged of the three, which is the direction that matters: the
+   document now asserts the terms as executed rather than as proposed.\*
 
 \* Answered under an **assumed** approval on the operator's direction (2026-08-09), not by counsel. Not legal advice.
 

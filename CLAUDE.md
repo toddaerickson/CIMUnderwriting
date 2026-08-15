@@ -152,8 +152,8 @@ model/
                            #   + Sources & Uses; sizes the ONE loan off the base case
   debt.py                  # Debt layer — min-of-three sizing (LTV/DSCR/debt yield),
                            #   monthly amortization roll-forward, origination/exit fees
-  waterfall.py             # Single-tier LP waterfall — pref accrual, promote on the
-                           #   LP-attributable residual, LP net IRR/MOIC
+  waterfall.py             # Single-tier LP waterfall — pref accrual, promote off the
+                           #   top then a pro-rata split, LP net IRR/MOIC
   levered.py               # The seam: levered equity CF, AM fee, reserve draw vs
                            #   capital call, then the waterfall. Assembles only —
                            #   it sizes no loan and distributes no dollar itself.
@@ -275,8 +275,8 @@ output/
    settings-page editable, for the same in-place-mutation reason the
    capital block is not (item E3b).
 7. **No LP net IRR without its assumption stamp**: six LPA questions
-   each change the number — **four CONFIRMED, one made MOOT by a
-   confirmation, one still open** — so `model.levered` builds the
+   each change the number — as of 2026-08-12 **five CONFIRMED and one
+   made MOOT by a confirmation; none open** — so `model.levered` builds the
    resolved set and EVERY surface that prints a levered figure renders it
    beside that figure — the Returns tab, memo section 6, the workbook
    sheet, and the LP-facing investor summary (item G), which is the only
@@ -300,8 +300,15 @@ output/
    the ordering clause; it stopped mattering. A key absent from
    `LPA_CONFIRMED` stays `open`, so a new convention cannot inherit
    someone else's confirmation. The LP-facing caveat follows the rows
-   that still need it rather than blanketing all six — after 2026-08-12
-   that is `promote_basis` alone.
+   that still need it rather than blanketing all six — and after
+   2026-08-12 that is NO rows, so the LP document's "proposed terms,
+   subject to the final partnership agreement" clause stopped rendering
+   at all. **That is the caveat variant nobody has reviewed against a
+   rendered document** — `docs/gc-review-investor-summary.md` question 7
+   asked counsel to set all three variants and got an ASSUMED approval
+   on the one that rendered that day. Nothing may hard-code "all
+   confirmed": the counts come from `LPA_CONFIRMED` at render time, so a
+   seventh question or an amended LPA reopens them with no code change.
    **The 2026-08-12 reading, because two of its results are easy to
    misread.** (a) The LPA says the pref accrues on COMMITTED capital,
    where the build had assumed contributed/unreturned — and NO NUMBER
@@ -316,9 +323,39 @@ output/
    terms that say "committed" is a disclosure disagreeing with the
    document it discloses. (b) `catch_up` became a SIXTH stamp row rather
    than staying a silent scope decision — a catch-up moves the promote
-   materially and "20% promote on the LP-attributable residual" does not
-   tell an LP whether one exists. "No catch-up **at this time**" is
-   exactly what a dated confirmation records.
+   materially and "20% promote on the residual" does not tell an LP
+   whether one exists. "No catch-up **at this time**" is exactly what a
+   dated confirmation records.
+   (c) **The promote reading is the one that nearly moved money, and the
+   reason it did not is worth more than the answer.** The LPA charges the
+   promote on ALL capital, and the GP's co-invest earns the pref
+   alongside the LPs'. The second half was already the model — tier 1 has
+   always been pari passu. The first half reads TWO ways and they differ
+   by real dollars: with `c` the co-invest, `x` the promote split and `R`
+   the residual, the promote is either `x·R·(1−c)` — taken off the top,
+   remainder split pro rata, GP share `x + (1−x)c` — or `x·R`, charged on
+   the whole residual on top of the GP's pro-rata slice, GP share `c + x`.
+   At 20% and 10% that is 28% versus 30%, and the `x·c·R` between them
+   comes out of the LP.
+   **The fund's own model workbook settles it**:
+   `Self-Storage-Acquisition-Model-v1.3.xlsm`, `Underwriting!J250 =
+   I250+(1-I250)*$J$244` — `x + (1−x)c`, which is the arithmetic the
+   build already ran. So `promote_basis` is CONFIRMED and NO NUMBER
+   MOVED. The first implementation of this row picked the other reading
+   and moved every levered figure in the repo; the operator sent it to
+   the workbook, which is the same correction the 8%/6% pref rate got
+   three days earlier — **twice now the XLSM has been the more considered
+   artifact, and it should be consulted BEFORE an ambiguous LPA sentence
+   is resolved in code, not after.**
+   Both bases stay implemented and tested
+   (`PROMOTE_BASIS_PROMOTE_THEN_SPLIT` shipped,
+   `PROMOTE_BASIS_SPLIT_THEN_PROMOTE` beside it) rather than the loser
+   being deleted: only one existed before, nothing in the codebase stated
+   the other, and that silence is exactly what let the ambiguity hide.
+   The property that distinguishes them is asserted in both directions —
+   under the shipped basis every LP flow carries the factor `(1−c)` so
+   the LP's IRR, MOIC and the levered max offer are INVARIANT to the GP's
+   co-invest; under the alternative they fall.
    **The pref rate is two rates** (`config.PREF_RATE_LEVERED` 8% /
    `PREF_RATE_UNLEVERED` 6%), resolved per deal by
    `model.waterfall.resolve_pref_rate` and overridable per deal on the

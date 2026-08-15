@@ -175,11 +175,16 @@ DEBT_PCT_KEYS = {"rate", "max_ltv", "min_debt_yield", "orig_fee_pct",
                  "exit_fee_pct"}
 DEBT_INT_KEYS = {"amort_years", "io_months", "term_years"}
 
-# Waterfall. `accrual_base`, `am_fee_treatment` and `catch_up` are
-# deliberately absent: each has exactly ONE implemented value and
-# `WaterfallTerms.__post_init__` raises on the other, so a dropdown whose
-# second option crashes the run is a trap, not a setting. They stay in the
-# assumption stamp, which is where an open LPA question belongs. Carried
+# Waterfall. `accrual_base`, `am_fee_treatment`, `catch_up` and
+# `promote_basis` are deliberately absent, for TWO different reasons.
+# The first three each have exactly ONE implemented value with
+# `WaterfallTerms.__post_init__` raising on the other, so a dropdown
+# whose second option crashes the run is a trap, not a setting.
+# `promote_basis` (added 2026-08-12) genuinely has two working values
+# and is left off anyway: it is a term of the partnership AGREEMENT,
+# identical on every deal, and a per-deal dropdown would invite a deal
+# underwritten on a basis the LPA does not permit. All four stay in the
+# assumption stamp, which is where an LPA convention belongs. Carried
 # forward on save for the same reason the debt keys above are.
 WF_FORM_LABELS = [
     ("pref_rate", "Preferred Return (%)"),

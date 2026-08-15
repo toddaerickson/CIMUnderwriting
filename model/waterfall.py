@@ -25,10 +25,11 @@ wrong:
 2. **Call** any capital for this period. It joins the accrual base and
    starts earning next period.
 3. **Distribute** — tier 1 (return of capital and preferred return, GP
-   and LP pari passu) until it is current, then the residual, on which
-   the GP earns its promote. No promote is paid in any period where
-   tier 1 is not current, so every promoted dollar follows a full
-   return of capital and preferred return *as of that period*.
+   and LP pari passu — the LPA's "co-invest earns pref too", confirmed
+   2026-08-12) until it is current, then the residual, on which the GP
+   earns its promote. No promote is paid in any period where tier 1 is
+   not current, so every promoted dollar follows a full return of
+   capital and preferred return *as of that period*.
 
 **That is not the same as a clawback, and the difference is reported.**
 Capital called AFTER a promote has been paid re-opens tier 1 with the
@@ -52,9 +53,13 @@ Numeric authority: `docs/levered-waterfall-design.md` oracles 1-3,
 reproduced to the cent in the test module. The LPA questions ship as
 named parameters carrying documented defaults, and `assumption_stamp`
 in the result carries the resolved set so no LP net IRR is ever
-displayed without it. After the 2026-08-12 reading (committed capital,
-AM fee above the waterfall, no catch-up) exactly ONE row is still a
-build default standing in for the document: `promote_basis`.
+displayed without it. The 2026-08-12 reading closed the last of them —
+committed capital, AM fee above the waterfall, no catch-up, and the
+promote earned on ALL capital (with the ORDER settled against the
+fund's model workbook — see the promote-basis block). Every row now
+carries a date or is moot; none is a build default standing in for the
+document. Two of the four named a convention this model already ran, so
+the reading moved no number at all.
 """
 
 import logging
@@ -148,9 +153,69 @@ AM_FEE_LABELS = {
     AM_FEE_NETTED_FROM_LP: "Netted from LP distributions",
 }
 
+# ── Promote basis: promote on all capital, and in WHICH ORDER ───────
+# The LPA charges the promote on ALL capital, and the GP's co-invest
+# earns the preferred return alongside the LPs' (operator, 2026-08-12).
+# Both halves are terms and NEITHER changed the arithmetic — but working
+# out why took a wrong turn worth recording, because the sentence is
+# genuinely ambiguous and the ambiguity is worth real money.
+#
+# "Promote on all capital" can mean two different orders of operations.
+# Write R for the residual, c for `gp_coinvest_pct`, x for
+# `promote_split`:
+#
+#   promote_then_split  promote = x·R off the top; the remaining R(1−x)
+#                       is split pro rata. GP = x·R + (1−x)·R·c, i.e.
+#                       a share of `x + (1−x)c`. LP keeps R(1−c)(1−x).
+#
+#   split_then_promote  the GP takes its pro-rata c·R first and the
+#                       promote is charged on the whole residual ON TOP
+#                       of it. GP = c·R + x·R, a share of `c + x`. LP
+#                       keeps R(1−c) − x·R.
+#
+# Both are "the promote is earned on all capital". They differ by x·c·R
+# — the promote on the GP's own co-invested dollars — and at the shipped
+# 20% and 10% that is a GP share of 28% versus 30% of every residual.
+#
+# **The fund's model workbook settles it: `promote_then_split`.** The
+# Self-Storage-Acquisition-Model v1.3 `Underwriting` sheet computes the
+# promoted tier's GP split as
+#
+#     J250 = I250 + (1 - I250) * $J$244        (x + (1−x)c)
+#
+# with I250 the promote and J244 = H60 the GP's contribution share, and
+# the pref tier directly above it as `J249 = J244` — the co-invest
+# earning the pref pari passu, the sentence's second half, in a cell.
+# The operator's instruction on reading both was "change to match the
+# model xlsm".
+#
+# **So this convention is confirmed and NO number moved** — the same
+# outcome `accrual_base` had, reached the same way: the document (here
+# the workbook that encodes it) named the convention the model already
+# ran. What changed is that the basis is now a stored, stamped term
+# instead of a hard-coded string in the stamp, and that it is named for
+# what the LPA says rather than for its side effect. The old label read
+# "20% promote on the LP-attributable residual (90% of it)", which is
+# arithmetically the same thing and is exactly the description that made
+# "promote on all capital" sound like a contradiction of it. It is not
+# one: promote on all capital, remainder split pro rata, IS promote on
+# the LP-attributable residual. Two names, one arithmetic.
+#
+# `split_then_promote` is implemented and tested rather than raising,
+# because the pair is what makes the choice auditable — the reason this
+# was a coin-flip for an afternoon is that only one of them existed and
+# nothing in the codebase stated the other. `test_the_two_promote_bases
+# _differ_by_the_promote_on_the_co_invest` is that statement.
+PROMOTE_BASIS_PROMOTE_THEN_SPLIT = "promote_then_split"
+PROMOTE_BASIS_SPLIT_THEN_PROMOTE = "split_then_promote"
+PROMOTE_BASIS_LABELS = {
+    PROMOTE_BASIS_PROMOTE_THEN_SPLIT: "Promote on all capital, then pro rata",
+    PROMOTE_BASIS_SPLIT_THEN_PROMOTE: "Promote on all capital, above pro rata",
+}
+
 _FLOAT_FIELDS = ("pref_rate", "promote_split", "gp_coinvest_pct")
 _STR_FIELDS = ("pref_compounding", "ordering", "accrual_base",
-               "am_fee_treatment")
+               "am_fee_treatment", "promote_basis")
 
 
 @dataclass(frozen=True)
@@ -180,6 +245,7 @@ class WaterfallTerms:
     gp_coinvest_pct: float = 0.10
     accrual_base: str = ACCRUAL_BASE_COMMITTED
     am_fee_treatment: str = AM_FEE_ABOVE_WATERFALL
+    promote_basis: str = PROMOTE_BASIS_PROMOTE_THEN_SPLIT
     catch_up: bool = False
 
     def __post_init__(self):
@@ -284,6 +350,42 @@ class WaterfallTerms:
                 f"am_fee_treatment must be one of "
                 f"{sorted(AM_FEE_LABELS)}, got {self.am_fee_treatment!r}")
 
+        if self.promote_basis not in PROMOTE_BASIS_LABELS:
+            raise ValueError(
+                f"promote_basis must be one of "
+                f"{sorted(PROMOTE_BASIS_LABELS)}, got "
+                f"{self.promote_basis!r}. The two differ by the promote on "
+                "the GP's own co-invest, which is real money, so this does "
+                "not fall back to a default.")
+        # Only `split_then_promote` can overrun: it charges x·R against an
+        # LP residual of R(1−c), so x > 1−c pays the GP more promote than
+        # the LP has residual and the LP's own line goes NEGATIVE — the LP
+        # funding the promote out of its returned capital. There is no
+        # such thing under the shipped basis, where the promote comes off
+        # the top before the split and cannot exceed what it is taken
+        # from.
+        #
+        # Each field is separately in range at the point this fires; it
+        # is the PAIR that is impossible, which is why neither field's
+        # own bound catches it. Cheap to hit by hand: a 55/45 co-invest
+        # with a 50% promote passes both.
+        #
+        # The slack is float representation, not a judgment call: at the
+        # exact break-even pair the LP's residual is zero — degenerate,
+        # but not negative, so it is legal — and `1.0 - 0.55` evaluates
+        # to 0.44999999999999996, which would refuse a 45% promote
+        # beside a 55% co-invest for no reason a reader could see.
+        if (self.promote_basis == PROMOTE_BASIS_SPLIT_THEN_PROMOTE
+                and float(self.promote_split)
+                > 1.0 - float(self.gp_coinvest_pct) + 1e-9):
+            raise ValueError(
+                f"promote_split {self.promote_split!r} exceeds the LP's "
+                f"share of the residual (1 - gp_coinvest_pct = "
+                f"{1.0 - float(self.gp_coinvest_pct):.4f}) under "
+                f"promote_basis='{PROMOTE_BASIS_SPLIT_THEN_PROMOTE}', which "
+                "charges the promote on the whole residual ON TOP of the "
+                "GP's pro-rata share. The LP's residual would go negative.")
+
         # Coerced HERE and not in `resolve_waterfall_terms`, so both
         # construction paths agree. They did not: resolve coerced, direct
         # construction did not, and `WaterfallTerms(catch_up="False")`
@@ -360,7 +462,7 @@ def resolve_waterfall_terms(overrides: dict = None,
 
     Unknown **keys** are logged and ignored, so a stored override row
     written by a future version cannot take down a run on an older one.
-    Unknown **values** for the four convention fields raise instead —
+    Unknown **values** for the five convention fields raise instead —
     the split is deliberate and argued in `WaterfallTerms.__post_init__`:
     a wrong basis label costs a rounding difference, a wrong pref
     convention re-prices the promote.
@@ -598,11 +700,12 @@ def assumption_stamp(terms: WaterfallTerms) -> list:
     anyone has actually read the document on each.
 
     Five as shipped; `catch_up` joined them on 2026-08-12 — see the row
-    itself for why a scope decision earns a disclosure row. After that
-    reading exactly one row is still `open`: `promote_basis`, LPA
-    question 5. Nothing here changes when the last one closes except
-    that row's status, which is the point of keeping the state in
-    `config.LPA_CONFIRMED` instead of in prose.
+    itself for why a scope decision earns a disclosure row. That same
+    reading closed the last `open` row, so a default run now stamps five
+    `confirmed` and one `moot`. **That is a state, not an end state**:
+    the counts come from `config.LPA_CONFIRMED` at render time precisely
+    so a seventh question, or an amended LPA, moves them without a code
+    change. Do not hard-code "all confirmed" anywhere downstream.
 
     The scope contract's rule: "Do not let an LP net IRR leave the
     building without its stamp." Each row carries a `status` —
@@ -644,19 +747,30 @@ def assumption_stamp(terms: WaterfallTerms) -> list:
          # reads complete.
          "label": AM_FEE_LABELS[terms.am_fee_treatment]
                   + " — rate and base set by the caller, not this module"},
+        # Read 2026-08-12: the promote is earned on all capital and the
+        # GP's co-invest earns the pref alongside the LPs'. The label
+        # says "on all capital" — the LPA's own words — and then the
+        # ORDER, because that is the whole content of the choice and the
+        # old label ("on the LP-attributable residual, 90% of it") named
+        # the side effect instead and read as a contradiction of the
+        # document it was disclosing.
         {"key": "promote_basis",
-         "question": "Promote on 100% of residual or LP-attributable only",
-         "value": "lp_attributable",
-         "label": f"{terms.promote_split:.0%} promote on the "
-                  f"LP-attributable residual "
-                  f"({1 - terms.gp_coinvest_pct:.0%} of it)"},
+         "question": "Promote on all capital: before or after the pro-rata split",
+         "value": terms.promote_basis,
+         "label": (f"{terms.promote_split:.0%} promote on all capital, "
+                   f"above the GP's {terms.gp_coinvest_pct:.0%} pro-rata "
+                   f"share"
+                   if terms.promote_basis == PROMOTE_BASIS_SPLIT_THEN_PROMOTE
+                   else f"{terms.promote_split:.0%} promote on all capital, "
+                        f"then the GP's {terms.gp_coinvest_pct:.0%} "
+                        f"pro-rata share of the remainder")},
         # A SIXTH row, added 2026-08-12 when the operator confirmed there
         # is no catch-up "at this time". The other five rows are
         # conventions INSIDE the implemented structure; this one is the
         # structure. It earns a row anyway, for the reason the stamp
         # exists: a catch-up would move the promote materially, an LP
-        # reading `20% promote on the LP-attributable residual` cannot
-        # tell from that line whether one is present, and "at this time"
+        # reading `20% promote on all capital` cannot tell from that
+        # line whether one is present, and "at this time"
         # is precisely what a DATED confirmation records — the answer
         # given on a day, not a permanent property of the fund.
         {"key": "catch_up",
@@ -691,10 +805,17 @@ def run_waterfall(contributions, distributions,
     ratio. Two separately rolled accounts give identical numbers with
     twice the arithmetic to audit.
 
-    **The promote is charged on the LP-attributable residual only.** The
-    LP receives `(1-c) x R x (1-x)`, the GP `c x R + (1-c) x R x x`.
-    Charging the promote on 100% of the residual would pay the GP a
-    promote on its own co-invested capital.
+    **The promote is charged on all capital, per `terms.promote_basis`**
+    (LPA, 2026-08-12; the order settled against the fund's model
+    workbook). Under the shipped `promote_then_split` the promote comes
+    off the top and the rest is split pro rata: the LP receives
+    `(1-c) x R x (1-x)` and the GP `x x R + (1-x) x R x c`, a share of
+    `x + (1-x)c`. Under `split_then_promote` the GP takes its pro-rata
+    slice first and the promote rides on top: the LP receives
+    `(1-c) x R - x x R` and the GP `c x R + x x R`. The difference is
+    `x x c x R` — the promote on the GP's own co-invested capital. See
+    the conventions block for why the LPA's sentence admits both and
+    which cell of the workbook decides it.
 
     Returns a dict, not the `WaterfallResult` dataclass the design doc
     names: every other builder in the model layer returns one, and the
@@ -788,7 +909,7 @@ def run_waterfall(contributions, distributions,
             tier1_current = (capital <= BALANCE_TOLERANCE
                              and unpaid_pref <= BALANCE_TOLERANCE)
 
-        # 4. Residual, and the promote on the LP's share of it. No
+        # 4. Residual, and the promote on the basis the LPA names. No
         #    promote is paid in any period where tier 1 is not current.
         #    A later capital call re-opens tier 1 and the promote is not
         #    recovered — no clawback, per the fund terms — which
@@ -805,7 +926,15 @@ def run_waterfall(contributions, distributions,
 
         lp_residual = residual * lp_share
         gp_residual = residual - lp_residual
-        promote = lp_residual * float(terms.promote_split)
+        # The ONE line the two bases differ by, written to mirror the
+        # workbook rather than to be short. `promote_then_split` takes
+        # x·R off the top and splits the rest pro rata, so what the LP
+        # funds is x·(its own share); `split_then_promote` charges x·R
+        # on top of a pro-rata split already taken, which is what
+        # `__post_init__` bounds so the LP's line cannot go negative.
+        promote = float(terms.promote_split) * (
+            residual if terms.promote_basis == PROMOTE_BASIS_SPLIT_THEN_PROMOTE
+            else lp_residual)
 
         lp_contribution = contribution * lp_share
         gp_contribution = contribution - lp_contribution

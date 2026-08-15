@@ -58,9 +58,28 @@ the writer stamps them into the workbook itself
    the workbook's K61 is fixed at close, so a single compensated rate
    reproduces the model's dollars only on deals that never call.)
 
-Settled 2026-08-10; until then both lines read "item T's to reconcile"
-and T closed without them. Do not "fix" either by editing a value into
-agreement — that trades a visible discrepancy for a hidden one.
+## What DOES reconcile, and is worth saying
+
+The promote nearly joined the list on 2026-08-12 and did not, which is
+the more useful fact. J250 = `I250+(1-I250)*$J$244` gives the GP
+`x + (1-x)c` of the promoted tier, and J249 = J244 gives it exactly its
+contribution share of the pref tier. Those are `model.waterfall`'s
+`promote_then_split` basis and its pari-passu tier 1, cell for cell.
+
+When the operator read the LPA as "the promote is earned on all capital,
+so co-invest earns pref too", that sentence admitted a second order of
+operations — pro-rata share first, promote on the whole residual on top
+— which pays the GP 30% of the residual against this workbook's 28%.
+The app was briefly changed to it. **The workbook is what settled it
+back**, on the operator's instruction to match the model xlsm, and it is
+the second time in two days that this template has been the more
+considered artifact (the first was the 8%/6% pref formula at H249).
+Treat a disagreement with it as a question, not as a defect in it.
+
+Divergences 1 and 2 settled 2026-08-10; until then both lines read
+"item T's to reconcile" and T closed without them. Do not "fix" either
+by editing a value into agreement — that trades a visible discrepancy
+for a hidden one.
 """
 
 import logging
@@ -1053,9 +1072,13 @@ def _write_waterfall(ws, terms, am_fee_pct: float):
     Promote: v1.3 ships tier 4 at 30% against tiers 2-3 at 20%, so the
     single `promote_split` must be written to all three or the workbook
     runs a promote ladder we do not model. J250 =
-    `I250+(1-I250)*$J$244` — promote plus the GP's pari-passu share of
-    the residual — is the same construction as ours, promote computed on
-    the LP-attributable residual only.
+    `I250+(1-I250)*$J$244` gives the GP `x + (1-x)c` of the promoted
+    tier — promote off the top, remainder split pro rata — which is
+    `model.waterfall`'s `promote_then_split`, the basis confirmed
+    against the LPA on 2026-08-12. J249 = J244 is the pref tier at the
+    GP's bare contribution share, i.e. tier 1 pari passu. Both agree
+    with us; see the module docstring for the afternoon they briefly did
+    not.
 
     What the mapping does NOT fix is that H248 is labelled "IRR Hurdle"
     while our pref is an accrual account. Same rate, different math; see
@@ -1144,6 +1167,12 @@ def _write_divergence_disclosures(ws):
     module docstring carries the full reasoning; these two lines carry
     the direction and the mechanism to the reader who has only the file.
     Text only — the AST gate is numeric and untouched by design.
+
+    **Still two, and that was checked rather than assumed.** The
+    2026-08-12 LPA reading looked briefly like it had opened a third on
+    the promote; the workbook's own J250 turned out to state the
+    convention the LPA meant, so the two agree and there is nothing to
+    disclose. See the module docstring.
 
     The target cells are CHECKED, not assumed (see `_DISCLOSURE_COL`):
     this writer runs against a proprietary workbook nobody who chose the

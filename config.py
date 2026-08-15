@@ -943,10 +943,12 @@ PREF_RATE_UNLEVERED = 0.06
 # the single-source-of-truth rule forbids. `pref_rate` is absent for the
 # same class of reason — see the block above.
 #
-# After the 2026-08-12 reading only `promote_basis` (LPA question 5) is
-# still a build default; the rest are confirmed below. They ship stamped
-# either way: model.waterfall.assumption_stamp renders the resolved set,
-# and no LP net IRR is displayed without it.
+# After the 2026-08-12 reading NONE of these is a build default any
+# more — five confirmed against the LPA, one (`ordering`) made moot by
+# one of those confirmations. They ship stamped either way:
+# model.waterfall.assumption_stamp renders the resolved set, and no LP
+# net IRR is displayed without it. A convention added here later starts
+# open again; the stamp is state, not a milestone.
 # `am_fee_treatment="netted_from_lp"` is a real market convention this
 # module does NOT implement and will raise on, rather than quietly
 # running the default. `accrual_base` no longer raises on either value —
@@ -964,16 +966,17 @@ PREF_RATE_UNLEVERED = 0.06
 WATERFALL_TERMS = {
     "pref_compounding": "annual",   # "annual" | "simple" — ~19% of promote
     "ordering": "roc_first",        # only bites when the pref is simple
-    "promote_split": 0.20,          # GP share of the LP-attributable residual
+    "promote_split": 0.20,          # GP share of the residual, per basis below
     "accrual_base": "committed",    # the LPA's word; == contributed here
     "am_fee_treatment": "above_waterfall",   # a deal expense, charged by E3
+    "promote_basis": "promote_then_split",   # all capital, then pro rata
     "catch_up": False,              # scoped out; True raises
 }
 
 # ── Which LPA questions have actually been read (item E4) ───────────
 # The conventions above shipped as BUILD DEFAULTS — plausible
 # choices standing in for a document nobody had opened. `model.waterfall.
-# assumption_stamp` prints all five beside every LP net IRR, and the rule
+# assumption_stamp` prints all six beside every LP net IRR, and the rule
 # is that a stamped figure is a labeled assumption, not a decision-grade
 # number.
 #
@@ -1013,15 +1016,31 @@ LPA_CONFIRMED = {
     "accrual_base": "2026-08-12",
     "am_fee_treatment": "2026-08-12",
     "catch_up": "2026-08-12",
-    # `promote_basis` (LPA question 5 — promote on the LP-attributable
-    # residual, GP co-invest earning pref pari passu) is the LAST open
-    # row. Deliberately absent: nobody has read that clause.
+    # Operator confirmed 2026-08-12, the last open row: the promote is
+    # earned on all capital, and the GP's co-invest earns the pref
+    # alongside the LPs'. NO NUMBER MOVED — both halves were already the
+    # model. The second half is tier-1 pari passu, which this waterfall
+    # has always run; the first half is "promote on all capital, then
+    # split pro rata", which is the same arithmetic as the promote the
+    # build charged on the LP-attributable residual. Two names, one
+    # split: 20% + 80%*10% = 28% to the GP either way.
+    #
+    # That equivalence is NOT self-evident and was briefly got wrong.
+    # The sentence also admits "GP takes its pro-rata share, promote on
+    # top", which pays the GP 30% and is a different deal. The fund's
+    # model workbook decides it — Self-Storage-Acquisition-Model v1.3,
+    # `Underwriting!J250 = I250+(1-I250)*$J$244` — and the operator's
+    # instruction on being shown both was "change to match the model
+    # xlsm". `model.waterfall` implements both and names them for the
+    # ORDER rather than for the base, so the next reader is not asked to
+    # re-derive which "all capital" was meant.
+    "promote_basis": "2026-08-12",
 }
 
 # ── Asset-Management Fee (item E3a) ─────────────────────────────────
 # The GP's 1% annual management fee. Charged ABOVE the waterfall — it
-# reduces distributable cash before the LP/GP split — which is open LPA
-# question 4's default, stamped on every run by
+# reduces distributable cash before the LP/GP split — confirmed against
+# the LPA 2026-08-12 (question 4), stamped on every run by
 # model.levered.build_levered_returns.
 #
 # WHAT THE FEE IS CHARGED ON was left open by E2 on purpose: the design

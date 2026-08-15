@@ -183,7 +183,7 @@ def test_oracle_b_io_rolls_to_an_amortizing_payment(oracle_b):
     assert debt["payoff_balance"] == pytest.approx(6_256_487.17, abs=CENT)
 
 
-def test_oracle_b_pays_a_promote_on_the_lp_attributable_residual(oracle_b):
+def test_oracle_b_pays_a_promote_off_the_top_then_splits_pro_rata(oracle_b):
     projection, _, su, lev = oracle_b
     assert su["total_equity"] == pytest.approx(3_665_000.00, abs=CENT)
     assert [r["levered_cf"] for r in lev["years"]] == pytest.approx(
@@ -191,6 +191,13 @@ def test_oracle_b_pays_a_promote_on_the_lp_attributable_residual(oracle_b):
         abs=CENT)
     wf = lev["waterfall"]
     assert wf["tier1_current"] is True
+    # 263,790.53 = 20% of the LP's 90% of the residual — the fund
+    # workbook's `J250 = I250+(1-I250)*$J$244`, confirmed against the LPA
+    # 2026-08-12. The other reading of "promote on all capital" charges
+    # 20% of the WHOLE residual and pays 293,100.59; the 29,310.06
+    # between them is promote on the GP's own co-invest, funded by the
+    # LP. Asserted end-to-end, not only in `test_waterfall.py`, because
+    # this is the number that reaches an LP-facing document.
     assert wf["gp"]["promote"] == pytest.approx(263_790.53, abs=CENT)
     assert lev["lp_net_irr"] == pytest.approx(0.129941, abs=BP)
     assert lev["lp_moic"] == pytest.approx(1.7146, abs=1e-4)

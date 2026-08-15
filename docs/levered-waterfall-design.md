@@ -17,8 +17,10 @@ are reproduced in `tests/test_debt.py`. The LPA confirmations at the bottom
 were the original stated blocker and stopped being one (PR #21): they
 ship as named parameters carrying documented defaults, and every LP net IRR is
 displayed with its resolved assumption set. **Most of the LPA has since been
-read** — 2026-08-09 and 2026-08-12; one convention (`promote_basis`) is still
-outstanding, so the number is decision-grade on every axis but that one.
+read** — 2026-08-09 and 2026-08-12, and as of the second date NO convention
+is outstanding. Every stamp row carries a date or is moot. The LP net IRR is
+decision-grade on the conventions; what remains is ordinary underwriting
+judgment about the inputs.
 
 Fund terms (from operator; the pref and the AM-fee placement confirmed against
 the LPA 2026-08-12): pref **8% levered / 6% unlevered**, per-deal adjustable ·
@@ -73,7 +75,9 @@ covenant headroom.
   annual end-of-period to match npf.irr conventions.
 - Pitfalls: pref on gross vs net of the 1% AM fee; GP co-invest pari passu
   through ROC+pref but promote computed on 100% of residual instead of the
-  LP-attributable share; clawback — avoided structurally by paying no promote
+  LP-attributable share (see question 5 — the LPA charges it on all capital,
+  and the fund's model workbook settles WHICH arithmetic that means);
+  clawback — avoided structurally by paying no promote
   until Tier 1 is current each period.
 - Key sources: adventuresincre.com (waterfall model + ROC/pref timing
   article), tacticares.com (simple vs IRR), amundsendavislaw.com and
@@ -94,7 +98,10 @@ annual DS + payoff; optional `refi_event(year, new_terms)`.
 `gp_coinvest_pct=0.10`, catch_up explicitly unsupported).
 `run_waterfall(contributions, distributions, terms) -> WaterfallResult` with
 per-period LP/GP rows + LP net IRR/MOIC. Forward loop, no solver. GP co-invest
-pari passu through tier 1; promote on LP-attributable residual only. 1% AM fee
+pari passu through tier 1 (confirmed 2026-08-12); promote on all capital,
+taken off the top with the remainder split pro rata — GP share `x + (1−x)c`,
+per `Underwriting!J250` in the fund's model workbook (confirmed 2026-08-12;
+arithmetically what this design already specified). 1% AM fee
 deducted as a cash-flow line before the waterfall (flagged assumption).
 Unlevered screen stays primary; levered + waterfall is a second lens.
 
@@ -120,7 +127,7 @@ Unlevered screen stays primary; levered + waterfall is a second lens.
 
 ## ⚑ LPA confirmations required (answers change the numbers)
 
-Status 2026-08-12: **only 5 is still open.** 6 and 7 were answered 2026-07-29;
+Status 2026-08-12: **none is open.** 6 and 7 were answered 2026-07-29;
 1 was read 2026-08-09; 2, 4 and the catch-up question were read 2026-08-12, and
 that confirmation MOOTED 3. The machine-readable version of this list is
 `config.LPA_CONFIRMED` (key → date read) — it, not this paragraph, is what the
@@ -142,10 +149,21 @@ prints as open to an LP.
 4. 1% AM fee: above the waterfall (deal expense) or netted from LP
    distributions? — **CONFIRMED 2026-08-12**: above the waterfall.
 5. GP co-invest: earns pref pari passu, promote on residual net of GP
-   pro-rata share (assumed standard)? — **OPEN**, and now the only one. A
-   one-line `LPA_CONFIRMED` entry once read; the alternative (promote on 100%
-   of the residual) RAISES rather than silently recomputing, so a disagreeing
-   LPA fails loudly.
+   pro-rata share? — **CONFIRMED 2026-08-12.** The co-invest earns the pref
+   pari passu (as built), and the promote is earned on ALL capital. That
+   second phrase reads two ways and they differ by real dollars: promote off
+   the top with the remainder split pro rata (GP share `x + (1−x)c` = 28% at
+   20/10), or the GP's pro-rata slice first with the promote charged on the
+   whole residual on top (GP share `c + x` = 30%). The gap is `x·c·R`.
+   **`Self-Storage-Acquisition-Model-v1.3.xlsm`, `Underwriting!J250 =
+   I250+(1-I250)*$J$244`, settles it as the first** — which is what this
+   design specified and what the build computes, so no number moved.
+   Both are implemented: `promote_basis` is the one convention on this list
+   with two live values, `promote_then_split` (shipped) and
+   `split_then_promote`. The distinguishing property is asserted in both
+   directions — under the shipped basis every LP flow carries `(1−c)`, so LP
+   IRR, MOIC and the levered max offer are invariant to the GP's co-invest;
+   under the alternative they fall.
 6. Any clawback/escrow language on interim promote? — answered 2026-07-29: no
    clawback.
 7. "15% LP net IRR": net of both fee and promote? — answered 2026-07-29: yes.
