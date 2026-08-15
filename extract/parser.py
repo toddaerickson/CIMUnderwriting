@@ -364,30 +364,195 @@ def _parse_property_basics(text: str, data: CIMData, pages: list = None):
             pass
 
 
+#: Extraction bounds for the size fields, parser-local for the same reason
+#: MIN_PLAUSIBLE_ASKING_PRICE is: they are extraction bounds, not investment
+#: criteria, and a config key would owe the assumption register a row.
+#: The floor is what turns `Number of Stories 1 Net Rentable SF` from
+#: `nrsf = 1` — which ran end-to-end, dividing every $/SF benchmark by 1 —
+#: into a refusal at `analysis.fills.require_underwritable` with the right
+#: reason. The smallest real facility in the corpus is ~5,400 SF / 16 units;
+#: the largest is ~410,000 SF / ~2,000 units. Units gets no floor: no small
+#: number ever sits adjacent to a units label in the corpus (measured), and
+#: an ungrounded floor is exactly the kind of rule the mutation bar removes.
+MIN_PLAUSIBLE_NRSF = 1_000
+MAX_PLAUSIBLE_NRSF = 2_000_000
+MAX_PLAUSIBLE_UNITS = 5_000
+
+#: The label must say RENTABLE (or NRSF) — a bare `SF` would match site work,
+#: retail pads and `Warehouse SF`. Separators are `[\s\-]*` because the MNET
+#: text layer glues tokens (`RentableSF`) and prose hyphenates
+#: (`rentable-square-feet`).
+_NRSF_LABEL = (
+    r"(?:net[\s\-]*)?rentable[\s\-]*(?:square[\s\-]*(?:feet|foot|footage)"
+    r"|sq\.?[\s\-]*ft\.?|sf)|nrsf")
+
+#: Label first: `NRSF: 84,375`, `Net Rentable SF ±45,755`, `Total NRSF
+#: 45,680 Square Feet`, `RentableSF 48,762SF`. The unit word after the label
+#: is OPTIONAL — requiring one is why the bare forms, which is how the whole
+#: MNET family states the figure, never matched. `±` sits in the tolerated
+#: junk beside `~`/`≈` because it is the marker the corpus actually uses.
+#: `$` is deliberately NOT tolerated: a building's size is never a dollar
+#: figure, and `GPR/NRSF $12.42` must contribute nothing.
+_NRSF_LABEL_FIRST_RE = re.compile(
+    r"(?:total[\s\-]*)?(?:" + _NRSF_LABEL + r")"
+    r"[\s:]*[~≈±]*\s*(\d[\d,]*(?:\.\d+)?)", re.IGNORECASE)
+
+#: Value first: `84,375 NRSF`, `48,762 rentable-square-feet`. The value must
+#: sit IMMEDIATELY before the label — `Number of Stories 1 Net Rentable SF
+#: ±45,755` binds the 1 here, and the plausibility floor is what discards it.
+_NRSF_VALUE_FIRST_RE = re.compile(
+    r"(\d[\d,]*(?:\.\d+)?)\s*[~≈±]?\s*"
+    r"(?:total[\s\-]*)?(?:" + _NRSF_LABEL + r")", re.IGNORECASE)
+
+#: Units label first: `Total Units 362`, `#ofUnits 434` (glued), `Unit
+#: Count: 96`. A bare qualified prefix is required — `Occupied Units` and
+#: the demographics tables' `2PersonUnits` must not match.
+_UNITS_LABEL_FIRST_RE = re.compile(
+    r"(?:(?:total|#[\s\-]*of|number[\s\-]*of)[\s\-]*(?:storage[\s\-]*)?units?"
+    r"|unit[\s\-]*count)\b[\s:]*[~≈±]*\s*(\d[\d,]*(?:\.\d+)?)", re.IGNORECASE)
+
+#: Units value first: `434 units`, `434 Total Units`. Adjacency does the
+#: work: `5 uncovered parking units` and `1 PersonUnits` put a word between
+#: the number and the label and must not match.
+#: The lookbehind refuses the top of a RANGE: `50-66 units, doubling the
+#: asset's long-term earning capacity` is a projection whose segment carries
+#: no qualifier word, and a range's upper bound is not a unit count.
+_UNITS_VALUE_FIRST_RE = re.compile(
+    r"(?<![\d.,\-–])(\d[\d,]*(?:\.\d+)?)\s*[~≈±]?\s*"
+    r"(?:total[\s\-]*)?(?:storage[\s\-]*)?units\b", re.IGNORECASE)
+
+
+def _pick_ranked(cands):
+    """Resolve ranked (rank, value) candidates: the best rank wins outright,
+    and within it the surviving values must agree on exactly ONE number after
+    de-dup. Two distinct label-first statements of the building's size is a
+    portfolio deck quoting per-property figures or a broken read, and both
+    refuse rather than guess — the house rule, same as `_resolve_vintaged`."""
+    if not cands:
+        return None
+    best = min(r for r, _ in cands)
+    values = {v for r, v in cands if r == best}
+    return values.pop() if len(values) == 1 else None
+
+
+#: A facility spec card: the `GrossSF: 64,850SF RentableSF: 61,607 SF` /
+#: `LotSize: 5.03Acres RentableSF: 51,558SF` rows that MNET prints one per
+#: facility in the sale-comps section. Their RentableSF is some OTHER
+#: building's, so a card row is demoted to a last-resort rank — consulted
+#: only when the deck states nothing else (a subject-only card still reads),
+#: and never allowed to contradict the subject's own statement into a
+#: refusal. Columbus states `Net Rentable Square Feet 70,102` three times
+#: and then prints six comp cards; without the demotion the disagreement
+#: rule would refuse the whole deck.
+_SPEC_CARD_RE = re.compile(r"gross[\s\-]*sf|lot[\s\-]*size", re.IGNORECASE)
+
+#: The rank a spec-card row is demoted to.
+_RANK_SPEC_CARD = 3
+
+#: A figure qualified as a PROJECTION is not the facility: `5,400 NRSF
+#: expansion underway` is the addition, not the building, and `Combined
+#: Future Unit Count 116-132` counts pads that do not exist. Both shipped as
+#: bookings in the first cut of these rules, which is why the qualifier
+#: refusal is segment-scoped rather than line-scoped: a bullet line can say
+#: `Total Net Rentable Square Feet N • Room for Future Expansion
+#: Opportunities` and the total is still the total.
+#: "expansion"/"expanded" are deliberately NOT here: `Year Expanded 2023`
+#: sits on the same unsegmented spec line as the real NRSF and units.
+#:
+#: The vocabulary is MEASURED, not imagined: every entry fires alone on at
+#: least one corpus line (and one test), and entries that could not — the
+#: ones that only ever co-fired with another (`proforma`, `opportunity`,
+#: `develop`), the ones no corpus line uses at all (`proposed`, `planned`,
+#: `projected`), and ligature-dropped "potential" (`Poten al`), whose every
+#: corpus firing guards a range the units lookbehind already refuses — came
+#: out under the mutation bar. A projection word this list lacks is a
+#: future deck's problem to demonstrate, not this list's to anticipate.
+_PROJECTION_RE = re.compile(
+    r"future|underway|approved|up\s+to|\badd(?:ed|ing)?\b",
+    re.IGNORECASE)
+
+_SEGMENT_SPLIT_RE = re.compile(r"[•|]")
+
+#: A count qualified as a SUBTYPE is a breakdown row, not the total, and one
+#: deck states both under the same label: `Number of Units: 242 total` and
+#: `Number of Units: 69 non-climate controlled self-storage units`. Read
+#: flat, those are two rank-1 statements that disagree, so the whole deck
+#: refuses over a row that was never claiming to be the total. Demoted, not
+#: dropped — a deck whose only count is a subtype row still gets read, the
+#: same bargain the spec card gets.
+_UNITS_SUBTYPE_RE = re.compile(r"(?:non[\s\-]*)?climate[\s\-]*controlled",
+                               re.IGNORECASE)
+
+#: How far past the value the qualifier may sit. It follows the value in the
+#: one corpus line that needs it; the mirror form (`Climate Controlled Units
+#: N`, Little Rock and Midland) produces no candidate at all under the label
+#: rules, so no rule is written for a position nothing exercises.
+_SUBTYPE_WINDOW = 30
+
+
+def _segment(line: str, pos: int) -> str:
+    """The bullet-delimited span of `line` containing offset `pos`."""
+    start = 0
+    for sm in _SEGMENT_SPLIT_RE.finditer(line):
+        if sm.start() > pos:
+            return line[start:sm.start()]
+        start = sm.end()
+    return line[start:]
+
+
+def _ranked_candidates(text, label_first_re, value_first_re, lo, hi,
+                       subtype_re=None):
+    """All plausible (rank, value) pairs for a size field. Matching is
+    per-line, which is the ONE implementation of "the label and its value
+    share a line" (a trailing `NRSF` on a cover line must not adopt the next
+    line's number) and lets a spec-card row demote everything it carries.
+    Rates need no rule of their own: `7.13 NRSF` per capita and `$4.63`/SF
+    all fall below MIN_PLAUSIBLE_NRSF, and the plausibility band refuses
+    them the same way it refuses a story count."""
+    cands = []
+    prev_spec = False
+    for line in text.split("\n"):
+        # The card shape can wrap: `Lot Size: 3Acres GrossSF: 4,079SF` with
+        # its `RentableSF: 3,671 SF` on the NEXT text line, so the demotion
+        # carries one line forward.
+        this_spec = bool(_SPEC_CARD_RE.search(line))
+        demoted = this_spec or prev_spec
+        prev_spec = this_spec
+        for rank, pat in ((1, label_first_re), (2, value_first_re)):
+            for m in pat.finditer(line):
+                if _PROJECTION_RE.search(_segment(line, m.start())):
+                    continue
+                val = _parse_number(m.group(1))
+                if not val or not lo <= val <= hi:
+                    continue
+                subtype = subtype_re is not None and subtype_re.search(
+                    line[m.end():m.end() + _SUBTYPE_WINDOW])
+                cands.append(
+                    (_RANK_SPEC_CARD if (demoted or subtype) else rank, val))
+    return cands
+
+
 def _parse_size_occupancy(text: str, data: CIMData):
     """Extract NRSF, unit counts, CC split, occupancy."""
 
-    # NRSF / Net Rentable SF
-    nrsf_patterns = [
-        r"(?:net\s+rentable|NRSF|rentable)\s*(?:square\s*(?:feet|footage)|SF|sq\.?\s*ft\.?)[:\s]*[~≈]*([\d,]+)",
-        r"([\d,]+)\s*(?:net\s+rentable|NRSF)\s*(?:square\s*(?:feet|footage)|SF)",
-    ]
-    for pat in nrsf_patterns:
-        m = re.search(pat, text, re.IGNORECASE)
-        if m:
-            data.nrsf = _parse_number(m.group(1))
-            break
+    # NRSF and total units — ranked candidates, the shape _parse_pricing
+    # establishes: label-first outranks value-first, the winning rank must
+    # agree on one value, and the plausibility band bounds everything. What
+    # this replaced required a unit word after the label (so `NRSF: 84,375`
+    # never matched), did not tolerate `±`, and read the number BEFORE the
+    # label — on `Number of Stories 1 Net Rentable SF ±45,755` it booked the
+    # story count as the building, while `Total Units` took the 45,755.
+    nrsf = _pick_ranked(_ranked_candidates(
+        text, _NRSF_LABEL_FIRST_RE, _NRSF_VALUE_FIRST_RE,
+        MIN_PLAUSIBLE_NRSF, MAX_PLAUSIBLE_NRSF))
+    if nrsf is not None:
+        data.nrsf = float(nrsf)
 
-    # Total units
-    unit_patterns = [
-        r"([\d,]+)\s*(?:total\s+)?(?:storage\s+)?units",
-        r"(?:units|unit\s+count)[:\s]*([\d,]+)",
-    ]
-    for pat in unit_patterns:
-        m = re.search(pat, text, re.IGNORECASE)
-        if m:
-            data.total_units = int(_parse_number(m.group(1)))
-            break
+    units = _pick_ranked(_ranked_candidates(
+        text, _UNITS_LABEL_FIRST_RE, _UNITS_VALUE_FIRST_RE,
+        1, MAX_PLAUSIBLE_UNITS, _UNITS_SUBTYPE_RE))
+    if units is not None:
+        data.total_units = int(units)
 
     # Climate-controlled percentage
     cc_pat = r"([\d\.]+)\s*%\s*(?:climate[\s\-]?controlled|CC)"
