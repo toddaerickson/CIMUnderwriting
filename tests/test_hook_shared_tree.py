@@ -13,6 +13,7 @@ half of the parallel-session rules and was refactored onto this module; a
 regression there fails open silently, so its core verdicts are asserted against
 real repos rather than trusted to a careful read.
 """
+import ast
 import importlib.util
 import json
 import os
@@ -616,3 +617,112 @@ def test_both_carry_over_hooks_import_the_shared_paths(repo):
         assert shared.CARRYOVER_PREFIX not in source, (
             f"{os.path.basename(script)} hard-codes the snapshot prefix "
             "instead of importing it")
+
+
+# ── The notes file: the guard's ONE file exemption ───────────────────
+# CLAUDE.md tells every session to maintain `<primary .git>/cim-session-
+# notes.md` by hand, and the guard denied it — not by decision, but because
+# `nearest_existing_dir` reduces a file path to its containing directory
+# before the check, so the filename never reached it. The only sanctioned
+# route left was CIM_SOLO, which switches the guard off clone-wide; that is
+# a global bypass as the standing workflow for a routine act.
+#
+# Every test below asserts the exemption is exactly ONE file wide.
+
+
+def run_file_guard(file_path, cwd, project_dir):
+    """The guard's verdict on a Write. None when it allowed."""
+    payload = json.dumps({"tool_name": "Write", "cwd": str(cwd),
+                          "tool_input": {"file_path": str(file_path)}})
+    e = {**os.environ, "CLAUDE_PROJECT_DIR": str(project_dir)}
+    e.pop("CIM_SOLO", None)
+    p = subprocess.run([sys.executable, GUARD], input=payload,
+                       capture_output=True, text=True, env=e, timeout=30)
+    assert p.returncode == 0, p.stderr
+    if not p.stdout.strip():
+        return None
+    return json.loads(p.stdout)["hookSpecificOutput"]["permissionDecision"]
+
+
+def test_the_session_notes_file_is_writable_from_a_worktree(repo, tmp_path):
+    """The case the exemption exists for: a session working in its own
+    worktree — which is every session — updating the shared task board."""
+    wt = tmp_path / "wt"
+    git(repo, "worktree", "add", "-q", str(wt), "-b", "feature")
+    notes = repo / ".git" / shared.CARRYOVER_NOTES
+
+    assert run_file_guard(notes, wt, repo) is None
+
+
+def test_the_notes_file_is_writable_before_it_exists(repo):
+    """The first session to write it creates it. An exemption that only
+    covered an existing file would deny exactly the first write."""
+    notes = repo / ".git" / shared.CARRYOVER_NOTES
+    assert not notes.exists()
+
+    assert run_file_guard(notes, repo, repo) is None
+
+
+def test_nothing_else_in_the_git_dir_is_exempt(repo):
+    """The exemption is one FILE, not the git dir. `.git/config` is where
+    every session pushes from and `.git/hooks` fires on the next `worktree
+    add` — the command rules already defend both, and a directory-wide
+    exemption would let `Write` walk in the door `git` is held at."""
+    for name in ("config", "HEAD", "hooks/pre-commit",
+                 shared.CARRYOVER_NOTES + ".bak",
+                 shared.CARRYOVER_PREFIX + "abc123"):
+        assert run_file_guard(repo / ".git" / name, repo, repo) == "deny", name
+
+
+def test_the_notes_name_is_not_exempt_outside_the_git_dir(repo):
+    """A file of the same name in the WORKING tree is an ordinary source
+    file, and the primary tree is exactly what the guard protects."""
+    assert run_file_guard(repo / shared.CARRYOVER_NOTES, repo, repo) == "deny"
+
+
+def test_a_symlink_wearing_the_notes_name_is_not_exempt(repo):
+    """The hole a realpath-both-sides comparison would open. The write
+    FOLLOWS the link, so `ln -s ../config.py <git dir>/cim-session-notes.md`
+    would carry the exemption to a source file — and both sides would
+    resolve equal, so a naive comparison calls it a match."""
+    link = repo / ".git" / shared.CARRYOVER_NOTES
+    os.symlink(str(repo / "config.py"), str(link))
+
+    assert run_file_guard(link, repo, repo) == "deny"
+
+
+def test_the_exemption_resolves_a_dotdot_chain_rather_than_matching_text(repo):
+    """Judged by where the path LANDS, not how it is spelled — the same
+    property `primary_git_dir` has. A textual prefix test would refuse this
+    spelling of the very file it means to allow."""
+    indirect = repo / ".git" / "hooks" / ".." / shared.CARRYOVER_NOTES
+
+    assert run_file_guard(indirect, repo, repo) is None
+
+
+def test_the_guard_imports_the_notes_name_rather_than_restating_it(repo):
+    """Same structural assertion the carry-over hooks get. A hard-coded
+    copy here and a rename in `_shared_tree` would silently re-deny the
+    file — failing open in the direction that trains a solo-mode habit.
+
+    Asserted over string LITERALS rather than raw source text, docstrings
+    excluded. A substring scan cannot tell "the code compares against this
+    name" from "a docstring names the file it is about", and the prose is
+    the part a reader needs most here. Comments never reach the AST at
+    all, so they are exempt for free."""
+    source = open(GUARD).read()
+    tree = ast.parse(source)
+    docstrings = {
+        ast.get_docstring(n, clean=False)
+        for n in ast.walk(tree)
+        if isinstance(n, (ast.Module, ast.FunctionDef, ast.AsyncFunctionDef,
+                          ast.ClassDef))
+    }
+    literals = [n.value for n in ast.walk(tree)
+                if isinstance(n, ast.Constant) and isinstance(n.value, str)
+                and n.value not in docstrings]
+
+    assert "from _shared_tree import" in source
+    assert shared.CARRYOVER_NOTES not in literals, (
+        "guard-shared-worktree.py hard-codes the notes filename instead of "
+        "importing CARRYOVER_NOTES")
