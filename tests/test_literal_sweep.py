@@ -119,6 +119,19 @@ ALLOWED = {
         "Same class as the two above: a tolerance on IEEE754, not on a "
         "deal, and moving it to config would offer an operator a knob "
         "whose only honest setting is 'leave it alone'.",
+    ("analysis/financials.py", 0.005):
+        "the relative half of the statement-reconciliation tolerance "
+        "(`_STATEMENT_TOL_REL`): how far a CIM's per-property figures may "
+        "miss their own combined statement and still be judged the same "
+        "number. It measures ROUNDING IN THE SOURCE DOCUMENT — Wichita's "
+        "parts miss its whole by a dollar in both directions — not anything "
+        "about a deal, and it can move no output value: it decides only "
+        "whether repeated statements reconcile or are REFUSED to a human. "
+        "Same class as the IEEE754 epsilons above, one layer up, and config "
+        "would be actively worse — an operator knob reading 'how much broker "
+        "rounding to forgive' has no honest setting, and widening it silently "
+        "re-enables the double-count this constant exists to end. The "
+        "absolute half (2.0) needs no entry; TRIVIAL already covers it.",
     ("model/value_add_model.py", 12):
         "the stabilisation window is measured in months and compared "
         "against a year; the 12s here are the month/year conversion, "

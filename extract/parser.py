@@ -34,6 +34,27 @@ class FinancialLine:
     t12: Optional[float] = None   # trailing 12-month actual
     cim_yr1: Optional[float] = None  # CIM pro forma year 1
 
+    # Where the line came from. `statement` is the ordinal of the source
+    # TABLE across the whole document, and it is the identity
+    # `analysis.financials._map_expense_lines` reconciles on: a CIM that
+    # prints its operating statement once per property and again combined
+    # states the same property tax three times, and adding them up booked
+    # 2-3x the real expense on the 3 corpus CIMs that carry expense lines
+    # at all (Dallas, Wichita, Columbus) — i.e. on every one of them.
+    #
+    # `page` is for the run warning's TEXT only. Two statements can share a
+    # page and one statement can span two, so a page is not an identity —
+    # using it as one is the bug wearing a different hat.
+    #
+    # Both default to None so a snapshot stored before these fields existed
+    # still rehydrates (`webapp.services.cim_from_dict` drops unknown keys
+    # and lets the rest default). Every line then carries `statement=None`,
+    # lands in ONE group, and is summed within it — which is exactly the
+    # pre-existing behaviour, so a legacy deal's numbers do not move until
+    # it is re-extracted.
+    page: Optional[int] = None
+    statement: Optional[int] = None
+
 
 @dataclass
 class CIMData:
@@ -619,7 +640,10 @@ def _parse_financial_tables(tables: list, data: CIMData):
         "total expense", "total operating", "net operating",
     ]
 
-    for table_info in tables:
+    # `enumerate` over ALL tables, not just the ones that yield lines: the
+    # ordinal only has to be stable and unique per table, and counting the
+    # skipped ones keeps it that way without a second counter to desync.
+    for statement, table_info in enumerate(tables):
         table = table_info["data"]
         page = table_info.get("page")
         # ONE header read per table, not per row — a header is a property of
@@ -639,7 +663,42 @@ def _parse_financial_tables(tables: list, data: CIMData):
             is_expense = any(kw in label for kw in expense_keywords)
 
             if is_income or is_expense:
-                line = FinancialLine(label=row[0].strip())
+                # A label that says "income" is not an expense, whatever
+                # else it matched. `expense_keywords` carries a bare
+                # "insurance" and `income_keywords` had no bare "income",
+                # so `Insurance Income` and `Tenant Insurance Income (net)`
+                # matched the EXPENSE list only, landed in expense_lines,
+                # mapped to the `insurance` benchmark category and were
+                # ADDED to the insurance expense: 52,674 of pure income
+                # booked as expense on the Wichita CIM, 16,638 on Dallas.
+                #
+                # The same rule catches `Net Operating Income`, `Total
+                # Operating Income` and `NET OPERATING INCOME GROWTH`,
+                # which reached expense_lines through "net operating" /
+                # "total operating". Those map to no benchmark category and
+                # so moved no money, but they were never expenses either,
+                # and fixing insurance alone would leave the next reader to
+                # rediscover why a NOI line is filed under costs.
+                #
+                # Routed to income_lines rather than dropped: nothing
+                # downstream PRICES income_lines (only
+                # `scripts/extraction_report.py` and the JSON round-trip
+                # read it), so this cannot move a number, and keeping the
+                # line preserves the extraction report's count.
+                #
+                # INSIDE the gate, never as part of it. Applied before it,
+                # a bare `"income" in label` promotes the section HEADER
+                # row — the lone `INCOME` cell above the line items — into
+                # a financial line, which then fails period assignment and
+                # lands in the refusal log, reporting a parse failure on a
+                # table that parsed perfectly. The gate is what separates
+                # "a row naming an income or expense line" from "a row
+                # saying the word".
+                if "income" in label:
+                    is_income, is_expense = True, False
+
+                line = FinancialLine(label=row[0].strip(),
+                                     page=page, statement=statement)
                 periods = assign_periods(roles, row) if roles else None
 
                 if periods is None:
