@@ -125,6 +125,118 @@ def test_egr_le_gpr_skips_when_absent():
     assert _run("egr_le_gpr", ttm_gpr=800_000.0).status == C.SKIPPED
 
 
+# ── 1d. Order-of-magnitude tripwires (blocking) ─────────────────────
+# The regression these exist for: a four-property portfolio CIM whose
+# PORTFOLIO NOI was underwritten against ONE property's square footage and
+# asking price, producing a 125.7% base IRR that passed the 10% IRR gate
+# with every other check individually satisfied.
+#
+# Two checks rather than one because they fail INDEPENDENTLY — the NOI
+# could be wrong, or the SF, or the price — and knowing which pair
+# disagrees is most of the diagnosis. Abilene happens to trip both.
+
+ABILENE = {"ttm_noi": 4_320_000.0, "nrsf": 48_762.0,
+           "asking_price": 3_500_000.0}
+
+
+def test_noi_per_nrsf_passes_on_a_normal_asset():
+    r = _run("noi_per_nrsf_plausible", ttm_noi=390_000.0, nrsf=48_762.0)
+    assert r.status == C.PASS
+    assert r.severity == C.BLOCKING
+
+
+def test_noi_per_nrsf_fails_on_the_abilene_portfolio_mix():
+    r = _run("noi_per_nrsf_plausible", ttm_noi=ABILENE["ttm_noi"],
+             nrsf=ABILENE["nrsf"])
+    assert r.status == C.FAIL
+    assert r.blocks
+    assert r.values["noi_per_nrsf"] == pytest.approx(88.59, abs=0.01)
+    # The message has to name the likely CAUSE, not just restate the
+    # number: this fires on a CIM nobody has re-read yet, and "88.59 is
+    # outside 1.00–30.00" does not tell the analyst where to look.
+    assert "portfolio" in r.message
+
+
+def test_noi_per_nrsf_boundaries_are_inclusive():
+    low, high = C.PLAUSIBLE_NOI_PER_NRSF
+    sf = 10_000.0
+    assert _run("noi_per_nrsf_plausible", ttm_noi=low * sf, nrsf=sf).status == C.PASS
+    assert _run("noi_per_nrsf_plausible", ttm_noi=high * sf, nrsf=sf).status == C.PASS
+    assert _run("noi_per_nrsf_plausible", ttm_noi=high * sf + 1,
+                nrsf=sf).status == C.FAIL
+    assert _run("noi_per_nrsf_plausible", ttm_noi=low * sf - 1,
+                nrsf=sf).status == C.FAIL
+
+
+def test_noi_per_nrsf_low_side_names_lease_up_as_legitimate():
+    """A thin NOI is a real asset in ramp as often as it is a bad input,
+    and refusing the first for the second's reason is the mistake design
+    decision 9 paid for with occupancy."""
+    r = _run("noi_per_nrsf_plausible", ttm_noi=20_000.0, nrsf=48_762.0)
+    assert r.status == C.FAIL
+    assert "lease-up" in r.message
+
+
+def test_noi_per_nrsf_skips_rather_than_dividing_by_zero():
+    assert _run("noi_per_nrsf_plausible", ttm_noi=390_000.0).status == C.SKIPPED
+    assert _run("noi_per_nrsf_plausible", nrsf=48_762.0).status == C.SKIPPED
+    assert _run("noi_per_nrsf_plausible", ttm_noi=390_000.0,
+                nrsf=0.0).status == C.SKIPPED
+
+
+def test_entry_cap_passes_on_a_normal_transaction():
+    r = _run("entry_cap_plausible", ttm_noi=245_000.0,
+             asking_price=3_500_000.0)
+    assert r.status == C.PASS
+    assert r.severity == C.BLOCKING
+
+
+def test_entry_cap_fails_on_the_abilene_portfolio_mix():
+    r = _run("entry_cap_plausible", ttm_noi=ABILENE["ttm_noi"],
+             asking_price=ABILENE["asking_price"])
+    assert r.status == C.FAIL
+    assert r.blocks
+    assert r.values["entry_cap"] == pytest.approx(1.234, abs=0.001)
+    # The exit-cap floor is the half a reader will not predict: decision 4
+    # reprices the exit in EVERY scenario off this number, which is what
+    # makes the sensitivity grid stop reconciling to the headline IRR.
+    assert "exit cap" in r.message
+
+
+def test_entry_cap_boundaries_are_inclusive():
+    low, high = C.PLAUSIBLE_ENTRY_CAP
+    price = 1_000_000.0
+    assert _run("entry_cap_plausible", ttm_noi=low * price,
+                asking_price=price).status == C.PASS
+    assert _run("entry_cap_plausible", ttm_noi=high * price,
+                asking_price=price).status == C.PASS
+    assert _run("entry_cap_plausible", ttm_noi=high * price + 1,
+                asking_price=price).status == C.FAIL
+    assert _run("entry_cap_plausible", ttm_noi=low * price - 1,
+                asking_price=price).status == C.FAIL
+
+
+def test_entry_cap_skips_rather_than_dividing_by_zero():
+    assert _run("entry_cap_plausible", ttm_noi=245_000.0).status == C.SKIPPED
+    assert _run("entry_cap_plausible",
+                asking_price=3_500_000.0).status == C.SKIPPED
+    assert _run("entry_cap_plausible", ttm_noi=245_000.0,
+                asking_price=0.0).status == C.SKIPPED
+
+
+def test_both_adapters_carry_asking_price():
+    """If either adapter drops it, `entry_cap_plausible` reports `skipped`
+    on that surface — the exact failure it exists to catch, wearing a
+    badge that says the register looked."""
+    from extract.parser import CIMData
+    from webapp.forms import check_input_from_cleaned
+
+    assert C.input_from_cim(
+        CIMData(asking_price=3_500_000.0)).asking_price == 3_500_000.0
+    assert check_input_from_cleaned(
+        {"asking_price": 3_500_000.0}).asking_price == 3_500_000.0
+
+
 # ── 2. Unit mix SF vs NRSF (advisory) ───────────────────────────────
 
 def _mix(count, sf, rate=100.0):

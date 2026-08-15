@@ -4,13 +4,18 @@
     "advisory_failed": 5,
     "blocking_failed": 0,
     "failed": 5,
-    "passed": 8,
+    "passed": 10,
     "skipped": 1,
-    "total": 14
+    "total": 16
   },
   "checks": [
     [
       "egr_le_gpr",
+      "blocking",
+      "pass"
+    ],
+    [
+      "entry_cap_plausible",
       "blocking",
       "pass"
     ],
@@ -37,6 +42,11 @@
     [
       "market_exit_cap",
       "advisory",
+      "pass"
+    ],
+    [
+      "noi_per_nrsf_plausible",
+      "blocking",
       "pass"
     ],
     [
@@ -873,29 +883,37 @@
         },
         "A10": {
           "fill": "00DDF3E4",
-          "v": "Exit cap \u2265 entry cap"
+          "v": "Exit cap derivation"
         },
         "A11": {
           "fill": "00DDF3E4",
-          "v": "Loan term vs hold period"
+          "v": "Exit cap \u2265 entry cap"
         },
         "A12": {
           "fill": "00DDF3E4",
-          "v": "Occupancy coherence"
+          "v": "Loan term vs hold period"
         },
         "A13": {
           "fill": "00DDF3E4",
-          "v": "OpEx / Revenue band"
+          "v": "NOI per NRSF is the right order of magnitude"
         },
         "A14": {
           "fill": "00DDF3E4",
-          "v": "Revenue \u2212 Expenses = NOI"
+          "v": "Occupancy coherence"
         },
         "A15": {
           "fill": "00DDF3E4",
-          "v": "Sources & Uses ties to DCF basis"
+          "v": "OpEx / Revenue band"
         },
         "A16": {
+          "fill": "00DDF3E4",
+          "v": "Revenue \u2212 Expenses = NOI"
+        },
+        "A17": {
+          "fill": "00DDF3E4",
+          "v": "Sources & Uses ties to DCF basis"
+        },
+        "A18": {
           "v": "TTM annualization basis"
         },
         "A2": {
@@ -927,7 +945,7 @@
         },
         "A9": {
           "fill": "00DDF3E4",
-          "v": "Exit cap derivation"
+          "v": "Entry cap is the right order of magnitude"
         },
         "B10": {
           "fill": "00DDF3E4",
@@ -939,11 +957,11 @@
         },
         "B12": {
           "fill": "00DDF3E4",
-          "v": "Blocking"
+          "v": "Advisory"
         },
         "B13": {
           "fill": "00DDF3E4",
-          "v": "Advisory"
+          "v": "Blocking"
         },
         "B14": {
           "fill": "00DDF3E4",
@@ -951,9 +969,17 @@
         },
         "B15": {
           "fill": "00DDF3E4",
-          "v": "Blocking"
+          "v": "Advisory"
         },
         "B16": {
+          "fill": "00DDF3E4",
+          "v": "Blocking"
+        },
+        "B17": {
+          "fill": "00DDF3E4",
+          "v": "Blocking"
+        },
+        "B18": {
           "v": "Advisory"
         },
         "B2": {
@@ -985,7 +1011,7 @@
         },
         "B9": {
           "fill": "00DDF3E4",
-          "v": "Advisory"
+          "v": "Blocking"
         },
         "C10": {
           "fill": "00DDF3E4",
@@ -1012,6 +1038,14 @@
           "v": "PASS"
         },
         "C16": {
+          "fill": "00DDF3E4",
+          "v": "PASS"
+        },
+        "C17": {
+          "fill": "00DDF3E4",
+          "v": "PASS"
+        },
+        "C18": {
           "v": "SKIPPED"
         },
         "C2": {
@@ -1047,29 +1081,37 @@
         },
         "D10": {
           "fill": "00DDF3E4",
-          "v": "No scenario needed its exit cap raised to meet the exit \u2265 entry rule."
+          "v": "Self Storage in the aging band anchors at 6.750% (table as of 2026-Q3). Derived caps \u2014 Bear 8.250% = 6.750% +100 bp spread +50 bp drift over 5 yrs; Base 7.125% = 6.750% +0 bp spread +37.5 bp drift over 5 yrs; Bull 6.000% = 6.750% -100 bp spread +25 bp drift over 5 yrs; Value-Add Bear 8.250% = 6.750% +100 bp spread +50 bp drift over 5 yrs; Value-Add Base 7.125% = 6.750% +0 bp spread +37.5 bp drift over 5 yrs; Value-Add Bull 6.000% = 6.750% -100 bp spread +25 bp drift over 5 yrs."
         },
         "D11": {
           "fill": "00DDF3E4",
-          "v": "The loan's 10-year term outlasts the 5-year hold."
+          "v": "No scenario needed its exit cap raised to meet the exit \u2265 entry rule."
         },
         "D12": {
           "fill": "00DDF3E4",
-          "v": "Occupancy inputs are in range and economic does not exceed physical."
+          "v": "The loan's 10-year term outlasts the 5-year hold."
         },
         "D13": {
           "fill": "00DDF3E4",
-          "v": "OpEx/Revenue of 48.5% is inside the 35.0%\u201355.0% band."
+          "v": "TTM NOI of $6.81/SF is a plausible figure for 52,000 SF."
         },
         "D14": {
           "fill": "00DDF3E4",
-          "v": "Revenue $672,000 \u2212 Expenses $318,000 = $354,000, matching TTM NOI within the $6,720 tolerance."
+          "v": "Occupancy inputs are in range and economic does not exceed physical."
         },
         "D15": {
           "fill": "00DDF3E4",
-          "v": "Uses, Sources and the DCF basis all equal $6,500,345 (DCF basis $6,464,000 + financing costs $36,345)."
+          "v": "OpEx/Revenue of 48.5% is inside the 35.0%\u201355.0% band."
         },
         "D16": {
+          "fill": "00DDF3E4",
+          "v": "Revenue $672,000 \u2212 Expenses $318,000 = $354,000, matching TTM NOI within the $6,720 tolerance."
+        },
+        "D17": {
+          "fill": "00DDF3E4",
+          "v": "Uses, Sources and the DCF basis all equal $6,500,345 (DCF basis $6,464,000 + financing costs $36,345)."
+        },
+        "D18": {
           "v": "The CIM does not state how many months of actuals its TTM figures cover."
         },
         "D2": {
@@ -1101,33 +1143,41 @@
         },
         "D9": {
           "fill": "00DDF3E4",
-          "v": "Self Storage in the aging band anchors at 6.750% (table as of 2026-Q3). Derived caps \u2014 Bear 8.250% = 6.750% +100 bp spread +50 bp drift over 5 yrs; Base 7.125% = 6.750% +0 bp spread +37.5 bp drift over 5 yrs; Bull 6.000% = 6.750% -100 bp spread +25 bp drift over 5 yrs; Value-Add Bear 8.250% = 6.750% +100 bp spread +50 bp drift over 5 yrs; Value-Add Base 7.125% = 6.750% +0 bp spread +37.5 bp drift over 5 yrs; Value-Add Bull 6.000% = 6.750% -100 bp spread +25 bp drift over 5 yrs."
+          "v": "Entry cap of 5.531% is a plausible going-in yield."
         },
         "E10": {
           "fill": "00DDF3E4",
-          "v": "scenario_results[*].requested_exit_cap, va_results[*].requested_exit_cap"
+          "v": "market_cap, scenario_results[*].exit_cap_detail, va_results[*].exit_cap_detail"
         },
         "E11": {
           "fill": "00DDF3E4",
-          "v": "debt.terms.term_years, debt.annual_debt_service"
+          "v": "scenario_results[*].requested_exit_cap, va_results[*].requested_exit_cap"
         },
         "E12": {
           "fill": "00DDF3E4",
-          "v": "physical_occupancy, economic_occupancy"
+          "v": "debt.terms.term_years, debt.annual_debt_service"
         },
         "E13": {
           "fill": "00DDF3E4",
-          "v": "financial_analysis.expense_ratio_check.opex_revenue_ratio"
+          "v": "ttm_noi, nrsf"
         },
         "E14": {
           "fill": "00DDF3E4",
-          "v": "ttm_total_revenue, ttm_total_expenses, ttm_noi"
+          "v": "physical_occupancy, economic_occupancy"
         },
         "E15": {
           "fill": "00DDF3E4",
-          "v": "sources_uses, scenario_results[*].total_basis"
+          "v": "financial_analysis.expense_ratio_check.opex_revenue_ratio"
         },
         "E16": {
+          "fill": "00DDF3E4",
+          "v": "ttm_total_revenue, ttm_total_expenses, ttm_noi"
+        },
+        "E17": {
+          "fill": "00DDF3E4",
+          "v": "sources_uses, scenario_results[*].total_basis"
+        },
+        "E18": {
           "v": "ttm_months"
         },
         "E2": {
@@ -1159,7 +1209,7 @@
         },
         "E9": {
           "fill": "00DDF3E4",
-          "v": "market_cap, scenario_results[*].exit_cap_detail, va_results[*].exit_cap_detail"
+          "v": "ttm_noi, asking_price"
         }
       },
       "Inputs": {
@@ -5154,7 +5204,7 @@
         "1. Investment Summary",
         "Occupancy check: economic occupancy trails physical by 17 pts (91.0% physical vs 74.0% economic). A spread this wide signals revenue leakage \u2014 concessions, delinquency, or in-place rents below street \u2014 and is the primary mismanagement value-add screen. Decompose the spread from the rent roll during diligence.",
         "Model Checks",
-        "5 of 14 integrity checks flagged. Blocking findings were accepted by the analyst with the discrepancy recorded; advisory findings do not stop the model but change how its outputs should be read.",
+        "5 of 16 integrity checks flagged. Blocking findings were accepted by the analyst with the discrepancy recorded; advisory findings do not stop the model but change how its outputs should be read.",
         "1 model input was not stated in the CIM and was filled from a default or a benchmark. Every one is listed with its source in Appendix A; the returns below are computed on them.",
         "Screening Gates",
         "Returns Snapshot (Unlevered)",

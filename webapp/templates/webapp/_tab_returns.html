@@ -250,6 +250,24 @@
         </tbody>
       </table>
     </div>
+    {% comment %} Only rendered when the base case was actually floored —
+       an unconditional footnote about a rule that did not fire is the
+       kind of caveat readers learn to skip, and `coerced_region` on the
+       solver is left off the UI for exactly that reason. {% endcomment %}
+    {% if sens_base_coerced %}
+    <p class="mt-1.5 text-xs text-amber-800">
+      This grid does not reconcile to the Base Case IRR above, and that is
+      expected here: the base case requested a {{ sens_requested_cap }} exit
+      cap and was floored at the entry cap
+      (<span class="font-medium">{{ sens_applied_cap }}</span>), because the
+      exit cap may not sit below the entry cap. The grid deliberately sweeps
+      exit caps <em>without</em> that floor — applying it would raise every
+      cell below the entry cap to the same value and flatten the axis. Read
+      the two as answering different questions, and check the entry cap
+      itself: a floor binding this hard usually means the NOI and the asking
+      price do not describe the same asset.
+    </p>
+    {% endif %}
   </div>
   {% endif %}
 </div>
