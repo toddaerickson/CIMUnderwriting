@@ -174,7 +174,8 @@ def _analyze_expenses(cim_data, nrsf: float, egr: float, state: str = "",
                     "property_tax_multiplier": 1.0}))
 
     # Map CIM expense lines to benchmark categories
-    expense_map = _map_expense_lines(cim_data)
+    statement_refusals: list = []
+    expense_map = _map_expense_lines(cim_data, refusals=statement_refusals)
 
     # Analyst-entered line values beat CIM-extracted ones (model-view
     # coalesce rule); the benchmark adjustment below applies on top.
@@ -390,6 +391,12 @@ def _analyze_expenses(cim_data, nrsf: float, egr: float, state: str = "",
         # raises, and not data. `fills.collect` reads it back through
         # `from_dicts`.
         "fills": to_dicts(fills),
+        # Categories whose repeated statements could not be reconciled.
+        # NOT a fill: a fill records a number the model invented, and this
+        # records one it DECLINED to invent. `engine` raises it as a run
+        # warning, because the category then falls back to the benchmark
+        # floor x NRSF — understating expense and overstating NOI.
+        "statement_refusals": statement_refusals,
         "benchmark_source": benchmark_source,
     }
 
@@ -453,14 +460,89 @@ def _get_benchmarks(state: str, nrsf: float, cc_pct: float,
     return static_benchmarks, static_source
 
 
-def _map_expense_lines(cim_data) -> dict:
-    """Map CIM expense line items to benchmark categories."""
-    mapped = {}
+# Rounding in the source document, not slack in the model. On the Wichita
+# CIM the two per-property statements miss their own combined statement by
+# a dollar in BOTH directions:
+#
+#     property tax   46,868 + 30,889 = 77,757  vs 77,757   exact
+#     insurance      17,316 +  9,942 = 27,258  vs 27,257   +1
+#     tenant ins      6,390 +  1,070 =  7,460  vs  7,461   -1
+#
+# so a strict equality test refuses that CIM outright. Two dollars or half
+# a percent, whichever is LOOSER: the absolute term carries small
+# categories where a percentage is noise, the relative one carries a
+# property-tax line in the hundreds of thousands where two dollars is.
+_STATEMENT_TOL_ABS = 2.0
+_STATEMENT_TOL_REL = 0.005
+
+
+def _statements_agree(a: float, b: float) -> bool:
+    return abs(a - b) <= max(_STATEMENT_TOL_ABS,
+                             _STATEMENT_TOL_REL * max(abs(a), abs(b)))
+
+
+def _reconcile_statements(values: list):
+    """Pick the ONE value a category is worth across repeated statements.
+
+    Returns `(value, None)` when the statements reconcile, `(None, reason)`
+    when they do not — a REFUSAL, not a fill. `analysis.fills` draws that
+    line, and booking a guess here is precisely what the double-count did.
+
+    **Page order decides nothing.** Wichita's COMBINED statement is on page
+    10 and its two property statements are on pages 19 and 42, so neither
+    first-wins nor last-wins is correct. Only the arithmetic is.
+    """
+    if not values:
+        return None, "no values"
+    if len(values) == 1:
+        return values[0], None
+
+    # The same statement printed twice — the Dallas case, where pages 12
+    # and 13 repeat ONE property's operating statement under different pro
+    # formas. Dallas is a single-property CIM, which is what makes it the
+    # clean proof that this is duplication and not two real assets.
+    first = values[0]
+    if all(_statements_agree(v, first) for v in values[1:]):
+        return first, None
+
+    # Parts and whole — the Columbus and Wichita case: a portfolio CIM
+    # states each property AND the combined total, and the per-property
+    # figures sum to it. Keep the whole; adding everything counts the
+    # portfolio twice.
+    for i, whole in enumerate(values):
+        parts = values[:i] + values[i + 1:]
+        if len(parts) >= 2 and _statements_agree(sum(parts), whole):
+            return whole, None
+
+    # Everything else refuses, and the `len(parts) >= 2` above is why the
+    # honest boundary sits here: given exactly TWO disagreeing statements,
+    # "one property stated twice with a typo" and "two properties whose sum
+    # is the portfolio" are indistinguishable from the numbers alone. One
+    # reading halves the expense, the other doubles it, and the arithmetic
+    # cannot choose. Refusing routes it to a human instead of to a coin
+    # flip. No corpus CIM reaches this branch today.
+    return None, ("statements disagree: "
+                  + ", ".join(f"{v:,.0f}" for v in sorted(values)))
+
+
+def _map_expense_lines(cim_data, refusals=None) -> dict:
+    """Map CIM expense line items to benchmark categories.
+
+    Values are summed WITHIN one statement and RECONCILED across
+    statements — see `_reconcile_statements`. Pass `refusals` a list to
+    collect the categories that could not be reconciled; `engine` turns it
+    into a run warning, because a dropped category falls back to the
+    benchmark FLOOR x NRSF, which understates expense and so OVERSTATES
+    NOI.
+    """
     keyword_map = EXPENSE_KEYWORD_MAP
 
     # Use CIM total expenses as fallback
     if cim_data.ttm_total_expenses and not cim_data.expense_lines:
-        return mapped
+        return {}
+
+    # cat_key -> statement id -> that statement's running total.
+    by_statement: dict = {}
 
     for line in cim_data.expense_lines:
         label = line.label.lower()
@@ -479,11 +561,24 @@ def _map_expense_lines(cim_data) -> dict:
 
         for cat_key, keywords in keyword_map.items():
             if any(kw in label for kw in keywords):
-                if cat_key not in mapped:
-                    mapped[cat_key] = value
-                else:
-                    mapped[cat_key] += value  # Accumulate if multiple lines match
+                # Summing WITHIN one statement is the old `+=`'s legitimate
+                # case and is kept unchanged: `Insurance` and `Tenant
+                # Insurance Expense` on the same operating statement are two
+                # real costs that genuinely add. It was summing ACROSS
+                # statements that booked the same dollar twice.
+                stmt = getattr(line, "statement", None)
+                per_stmt = by_statement.setdefault(cat_key, {})
+                per_stmt[stmt] = per_stmt.get(stmt, 0.0) + value
                 break
+
+    mapped = {}
+    for cat_key, per_stmt in by_statement.items():
+        value, reason = _reconcile_statements(list(per_stmt.values()))
+        if value is None:
+            if refusals is not None:
+                refusals.append({"category": cat_key, "reason": reason})
+            continue
+        mapped[cat_key] = value
 
     return mapped
 

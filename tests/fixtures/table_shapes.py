@@ -150,6 +150,37 @@ SYNTHETIC_T3 = [
 ]
 
 
+#: Wichita's insurance block — the shape that booked INCOME as EXPENSE.
+#: `income_keywords` carried no bare "income" and `expense_keywords` carries
+#: a bare "insurance", so `Insurance Income` matched the EXPENSE list ONLY,
+#: landed in `expense_lines`, mapped to the `insurance` benchmark category
+#: and was added to the insurance expense — 52,674 of pure income on this
+#: CIM, 16,638 on Dallas. `Net Operating Income` reaches the same list
+#: through "net operating"; it maps to no category and so moved no money,
+#: but it is not an expense either.
+WICHITA_INSURANCE_INCOME = [
+    ['EXPENSES', '', 'Current', '', '', 'Year 1', ''],
+    ['Insurance Income', '', '$ 26,337', '$0.25SF', '', '$ 27,000', '$0.25SF'],
+    ['Insurance', '', '$ 27,257', '$0.25SF', '', '$ 28,000', '$0.26SF'],
+    ['Tenant Insurance Expense', '', '$ 7,461', '$0.07SF', '', '$ 7,600',
+     '$0.07SF'],
+    ['Net Operating Income', '', '$ 193,603', '$1.80SF', '', '$ 210,000',
+     '$1.96SF'],
+]
+
+#: Dallas pages 12 and 13: ONE property's operating statement, printed
+#: twice under different pro formas. The `Current` column is identical in
+#: both, which is what makes a single-property CIM the clean proof that a
+#: property-tax line at exactly 2.00x is duplication and not two assets.
+#: Wrap each in its own `wrap()` — they are two tables, and that is the
+#: whole point.
+DALLAS_REPEATED_STATEMENT = [
+    ['EXPENSES', '', 'Current', '', '', 'Year 1', ''],
+    ['Property Taxes', '', '$ 72,835', '$1.75SF', '', '$ 74,000', '$1.78SF'],
+    ['Insurance', '', '$ 28,215', '$0.68SF', '', '$ 29,000', '$0.70SF'],
+]
+
+
 def wrap(rows, page=1):
     """One table in the shape `extract.pdf_reader.extract_pdf` returns."""
     return {"page": page, "data": rows}

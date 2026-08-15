@@ -349,6 +349,24 @@ def run_analysis(result: AnalysisResult, progress: Callable = None,
     result.expense_ratio = result.financial_analysis.get(
         "expense_ratio_check", {}).get("opex_revenue_ratio")
 
+    # A category whose repeated statements did not reconcile is REFUSED,
+    # the same posture as the unmapped-line warning above and for the same
+    # reason: the silent version books the benchmark FLOOR x NRSF and
+    # narrates it as "the CIM did not state a value", when the CIM stated
+    # several that disagree. One warning listing the categories, not one
+    # per category — the remedy is identical for all of them.
+    refused = ((result.financial_analysis.get("expense_analysis") or {})
+               .get("statement_refusals") or [])
+    if refused:
+        detail = "; ".join(
+            f"{row.get('category')} ({row.get('reason')})" for row in refused)
+        result.errors.append(
+            f"{len(refused)} expense categor{'y' if len(refused) == 1 else 'ies'} "
+            f"could NOT be reconciled across the CIM's repeated operating "
+            f"statements: {detail}. Each falls back to the benchmark FLOOR x "
+            f"NRSF, which understates the expense and so overstates NOI. "
+            f"Enter the figures on the Assumptions page.")
+
     # Step 2: Market analysis
     _progress(2, 9, "Analyzing market...")
     from analysis.market import analyze_market

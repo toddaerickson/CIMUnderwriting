@@ -16,7 +16,8 @@ from extract import tables as T
 from extract.parser import CIMData, _parse_financial_tables
 from tests.fixtures.table_shapes import (
     COLUMBUS_OFFSET, COLUMBUS_TAX_PANEL, DALLAS_BARE_INTEGER_YEARS,
-    KERRVILLE_FRAGMENT_PER_SF, KERRVILLE_FRAGMENT_PROJECTION, SYNTHETIC_T3,
+    DALLAS_REPEATED_STATEMENT, KERRVILLE_FRAGMENT_PER_SF,
+    KERRVILLE_FRAGMENT_PROJECTION, SYNTHETIC_T3, WICHITA_INSURANCE_INCOME,
     WICHITA_ASSUMPTION_PANEL, WICHITA_GROWTH_FOOTNOTES, WICHITA_INTERLEAVED,
     wrap,
 )
@@ -273,3 +274,98 @@ def test_every_mapped_shape_puts_current_before_year_one(rows):
     sequence = T.period_sequence(roles)
     assert sequence[0] == T.ROLE_CURRENT
     assert sequence[1] == "year_1"
+
+
+# ── An "income" label is never an expense ────────────────────────────
+
+def _routed(*tables):
+    """Parse tables and report which list each label landed in."""
+    data = CIMData()
+    _parse_financial_tables(list(tables), data)
+    return ({ln.label for ln in data.income_lines},
+            {ln.label for ln in data.expense_lines})
+
+
+def test_insurance_income_is_not_an_insurance_expense():
+    """The money bug. `expense_keywords` has a bare "insurance" and
+    `income_keywords` had no bare "income", so this row matched the
+    expense list only and was ADDED to the insurance expense —
+    52,674 of pure income on the Wichita CIM.
+    """
+    income, expense = _routed(wrap(WICHITA_INSURANCE_INCOME))
+
+    assert "Insurance Income" in income
+    assert "Insurance Income" not in expense
+    # The real expense lines beside it are untouched.
+    assert {"Insurance", "Tenant Insurance Expense"} <= expense
+
+
+def test_noi_lines_leave_expense_lines_too():
+    """`Net Operating Income` reached expense_lines through "net
+    operating". It maps to no benchmark category, so it moved no money —
+    but fixing insurance alone would leave the next reader to work out
+    why a NOI line is filed under costs.
+    """
+    income, expense = _routed(wrap(WICHITA_INSURANCE_INCOME))
+
+    assert "Net Operating Income" in income
+    assert "Net Operating Income" not in expense
+
+
+def test_a_reclassified_line_keeps_its_value_rather_than_being_dropped():
+    """Routed, not discarded: nothing downstream PRICES `income_lines`, so
+    this cannot move a number, and keeping the line keeps the extraction
+    report's count honest."""
+    data = CIMData()
+    _parse_financial_tables([wrap(WICHITA_INSURANCE_INCOME)], data)
+
+    line = next(ln for ln in data.income_lines if ln.label == "Insurance Income")
+    assert line.t12 == 26_337
+
+
+# ── Statement identity ───────────────────────────────────────────────
+
+def test_each_table_is_its_own_statement():
+    """The identity `analysis.financials._map_expense_lines` reconciles
+    on. Dallas prints one property's statement on two pages; without a
+    per-table ordinal the two are indistinguishable from two real
+    properties and their figures were summed.
+    """
+    data = CIMData()
+    _parse_financial_tables(
+        [wrap(DALLAS_REPEATED_STATEMENT, page=12),
+         wrap(DALLAS_REPEATED_STATEMENT, page=13)], data)
+
+    taxes = [ln for ln in data.expense_lines if ln.label == "Property Taxes"]
+    assert len(taxes) == 2
+    assert taxes[0].statement != taxes[1].statement
+    assert [ln.page for ln in taxes] == [12, 13]
+
+
+def test_lines_of_one_table_share_a_statement_id():
+    """Two different costs on the SAME statement must group together —
+    that is the case the accumulation was always right for."""
+    data = CIMData()
+    _parse_financial_tables([wrap(DALLAS_REPEATED_STATEMENT, page=12)], data)
+
+    ids = {ln.statement for ln in data.expense_lines}
+    assert len(ids) == 1
+
+
+def test_a_section_header_saying_income_is_not_promoted_to_a_line():
+    """The trap in the rule above, pinned because it fires silently.
+
+    `WICHITA_INTERLEAVED` opens with a lone `INCOME` cell naming the
+    section. It matches no income OR expense keyword, so the gate has
+    always skipped it — but a bare `"income" in label` test placed BEFORE
+    the gate promotes it to a financial line, which then fails period
+    assignment and files a refusal against a table that parsed perfectly.
+    The failure is invisible in the numbers and shows up only as a run
+    warning nobody can reproduce.
+    """
+    data = CIMData()
+    _parse_financial_tables([wrap(WICHITA_INTERLEAVED, page=10)], data)
+
+    labels = {ln.label for ln in data.income_lines + data.expense_lines}
+    assert "INCOME" not in labels
+    assert data.unmapped_financial_lines == []
