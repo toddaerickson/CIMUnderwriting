@@ -39,9 +39,15 @@ import subprocess
 import time
 
 #: Both escape hatches, in one place. The env var is per-session (launch with
-#: it set); the marker file is per-clone (`touch "$(git rev-parse
-#: --git-dir)/cim-solo"`) and must be removed immediately after, since leaving
-#: it disables the hooks for every future session.
+#: it set); the marker file is per-clone and must be removed immediately after,
+#: since leaving it disables the hooks for every future session.
+#:
+#: The marker belongs in the PRIMARY git dir, which is the only place
+#: `solo_mode` below looks — `touch "$(git -C <primary> rev-parse
+#: --absolute-git-dir)/cim-solo"`. Both halves are load-bearing and the shorter
+#: spelling silently fails: `--git-dir` prints a relative `.git`, which inside a
+#: linked worktree is a FILE (so `touch` dies with ENOTDIR), and dropping `-C`
+#: resolves to the worktree's own git dir, creating a marker nothing reads.
 SOLO_ENV = "CIM_SOLO"
 SOLO_MARKER = "cim-solo"
 

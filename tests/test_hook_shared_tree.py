@@ -17,13 +17,14 @@ import ast
 import importlib.util
 import json
 import os
+import re
 import subprocess
 import sys
 
 import pytest
 
-HOOKS = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-                     ".claude", "hooks")
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+HOOKS = os.path.join(ROOT, ".claude", "hooks")
 GUARD = os.path.join(HOOKS, "guard-shared-worktree.py")
 
 
@@ -479,43 +480,197 @@ def test_guard_allows_a_safe_branch_delete_but_never_a_forced_one(repo):
 # the guard had tests, the prose had readers. Two sessions ran into the
 # denial before anyone treated the doc as the broken half.
 #
-# So the shipping rules get a machine-checked half. Adding a git command
-# to CLAUDE.md's "Shipping work" section means adding a row here. A row
-# that fails means the two disagree AGAIN — decide which is wrong on the
-# merits, but do not settle it by deleting the row.
+# The first attempt at this gate was a hand-written table of commands, and
+# it reproduced the same defect one level up: it claimed to cover "every
+# git command CLAUDE.md's shipping section names" while never opening
+# CLAUDE.md, so the claim was already false at the commit that made it —
+# two rows named commands the prose does not, and the prose named two the
+# table did not. Worse, it could not fail in the direction that caused the
+# original bug: putting `git branch -D` back into rule 3 left every row
+# green.
+#
+# So the command list is EXTRACTED from the doc and the table is a
+# whitelist over it. What stays hand-written is the VERDICT column, which
+# is intent, and no extractor holds intent.
+#
+# What this does NOT cover, stated because the file it guards says a safety
+# tool you over-trust is worse than none:
+#   * prose that describes a command without backticking it as `git …`;
+#   * the other sections of CLAUDE.md, and every other doc in the repo;
+#   * anything run through `gh`, which the guard never inspects at all —
+#     that is precisely why rule 7's `--delete-branch` warning exists, and
+#     it is the one rule here no test can enforce.
 
-SHIP_COMMANDS = [
-    # (command template, expected verdict, the rule that names it)
-    ("git -C {repo} worktree add {tmp}/fresh -b fresh", None, "rule 1"),
-    ("git -C {repo} branch --show-current",             None, "rule 2"),
-    ("git -C {repo} diff",                              None, "rule 2"),
-    ("git -C {repo} add CLAUDE.md",                     None, "rule 2"),
-    ("git -C {repo} worktree remove {tmp}/wt",          None, "rule 3"),
-    ("git -C {repo} branch -d feature",                 None, "rule 3"),
-    ("git -C {repo} branch -D feature",               "deny", "rule 3"),
-    ("git -C {repo} checkout main",                   "deny", "rule 3"),
-    ("git -C {repo} push -u origin feature",            None, "rule 3"),
-    ("git -C {repo} fetch origin --prune",              None, "rule 8"),
-    ("git -C {repo} status --porcelain",                None, "rule 8"),
-    ("git -C {repo} rev-list --count origin/main..HEAD", None, "rule 8"),
-    ("git -C {repo} worktree list",                     None, "rule 8"),
-    ("git -C {repo} pull --ff-only",                  "deny", "rule 8"),
-]
+CLAUDE_MD = os.path.join(ROOT, "CLAUDE.md")
+SHIPPING_HEADING = "## Shipping work"
+
+#: A floor on what the extractor must find. Renaming or gutting the section
+#: would otherwise satisfy every row below by finding nothing at all — a
+#: completeness gate that passes vacuously is the failure it exists to catch.
+MIN_SHIP_SPANS = 10
 
 
-@pytest.mark.parametrize("template,want,rule", SHIP_COMMANDS)
+def shipping_git_spans():
+    """Every distinct backticked `git …` span in CLAUDE.md's shipping section.
+
+    Bounded by the next heading of ANY level, not the next `## ` — the
+    section is immediately followed by the `# Compact instructions` H1, and
+    a `^## ` boundary silently swallows it.
+    """
+    with open(CLAUDE_MD, encoding="utf-8") as fh:
+        text = fh.read()
+    m = re.search(r"^%s\b.*?(?=^\#{1,6} )" % re.escape(SHIPPING_HEADING),
+                  text, re.S | re.M)
+    assert m, (f"CLAUDE.md has no {SHIPPING_HEADING!r} section. If it was "
+               f"renamed, rename it here too — do not delete this test.")
+    spans = []
+    for span in re.findall(r"`([^`\n]+)`", m.group(0)):
+        span = span.strip()
+        if span.startswith("git ") and span not in spans:
+            spans.append(span)
+    return spans
+
+
+#: The span EXACTLY as CLAUDE.md writes it -> (runnable form, expected
+#: verdict, which tree it runs in). The key is verbatim so that rewording the
+#: prose fails loudly instead of drifting quietly.
+SHIP_COMMANDS = {
+    "git worktree add .claude/worktrees/<slug> -b <branch> origin/main":
+        ("git -C {repo} worktree add {tmp}/fresh -b fresh", None, "primary"),
+    # Rule 2 says "in that exact directory" — i.e. YOUR worktree. Asserting
+    # these against the primary tree would pin "staging into the shared index
+    # is fine", which is the foreign-edit hazard rule 2 warns about.
+    "git branch --show-current":
+        ("git -C {wt} branch --show-current", None, "worktree"),
+    "git diff":
+        ("git -C {wt} diff", None, "worktree"),
+    "git add":
+        ("git -C {wt} add config.py", None, "worktree"),
+    "git worktree remove <path>":
+        ("git -C {repo} worktree remove {wt}", None, "primary"),
+    "git branch -d":
+        ("git -C {repo} branch -d feature", None, "primary"),
+    "git checkout":
+        ("git -C {repo} checkout main", "deny", "primary"),
+    "git fetch origin --prune":
+        ("git -C {repo} fetch origin --prune", None, "primary"),
+    "git -C <primary> status --porcelain":
+        ("git -C {repo} status --porcelain", None, "primary"),
+    "git -C <primary> rev-list --count origin/main..HEAD":
+        ("git -C {repo} rev-list --count origin/main..HEAD", None, "primary"),
+    # Denied as written, and rule 8 knows it — the whole point of that rule is
+    # that the solo marker is what opens it. The test below pins that half.
+    "git -C <primary> pull --ff-only; rm -f <marker>":
+        ("git -C {repo} pull --ff-only; rm -f {tmp}/marker", "deny", "primary"),
+    "git worktree list":
+        ("git -C {repo} worktree list", None, "primary"),
+}
+
+#: Extracted spans that are deliberately not commands, each with its reason.
+#: Mirrors `NOT_IN_REGISTER` in the assumption register and `ALLOWED` in the
+#: literal sweep: an escape that must be argued for, not a silent skip.
+NOT_IN_TABLE = {
+    "git …": "the preamble's reference to this very table, not a command",
+}
+
+
+def test_every_git_command_in_claude_mds_shipping_section_has_a_verdict():
+    """The whitelist gate. A git command added to the shipping rules fails
+    here until someone states what the guard should say about it.
+
+    This is the direction the hand-written table could not fail in, and the
+    direction the original defect actually came from: `git branch -D` was
+    added to the prose, not to the hook."""
+    spans = shipping_git_spans()
+    assert len(spans) >= MIN_SHIP_SPANS, (
+        f"only {len(spans)} `git …` spans found in {SHIPPING_HEADING!r} "
+        f"(floor is {MIN_SHIP_SPANS}). Either the section was gutted or the "
+        f"extractor stopped matching it; a vacuous pass here is the bug.")
+    unaccounted = [s for s in spans
+                   if s not in SHIP_COMMANDS and s not in NOT_IN_TABLE]
+    assert not unaccounted, (
+        f"CLAUDE.md's shipping rules name git commands with no verdict: "
+        f"{unaccounted}. Add each to SHIP_COMMANDS with the verdict the prose "
+        f"claims, or to NOT_IN_TABLE with a reason. Do not delete the span to "
+        f"make this pass — the prose is what sessions actually follow.")
+    stale = [s for s in SHIP_COMMANDS if s not in spans]
+    assert not stale, (
+        f"SHIP_COMMANDS has rows for spans CLAUDE.md no longer contains: "
+        f"{stale}. The prose was reworded; re-key the rows to match it "
+        f"verbatim so this keeps checking the text sessions read.")
+
+
+@pytest.mark.parametrize("span", sorted(SHIP_COMMANDS))
 def test_the_commands_claude_md_recommends_are_the_ones_the_guard_allows(
-        repo, tmp_path, template, want, rule):
-    """Every git command CLAUDE.md's shipping section names, judged by the
-    guard that will actually see it. The `deny` rows are the ones the prose
-    explicitly warns are refused, so a guard that stopped denying them would
-    make the doc wrong in the other direction — both are failures."""
-    cmd = template.format(repo=repo, tmp=tmp_path)
-    got = run_guard(cmd, repo, repo)
+        repo, tmp_path, span):
+    """Each extracted command, judged by the guard that will actually see it.
+
+    The `deny` rows are the ones the prose explicitly warns are refused, so a
+    guard that stopped denying them would make the doc wrong in the other
+    direction — both are failures."""
+    template, want, where = SHIP_COMMANDS[span]
+    wt = tmp_path / "wt"
+    git(repo, "worktree", "add", "-q", str(wt), "-b", "feature")
+    cmd = template.format(repo=repo, tmp=tmp_path, wt=wt)
+    cwd = wt if where == "worktree" else repo
+    got = run_guard(cmd, cwd, repo)
     assert got == want, (
-        f"CLAUDE.md {rule} names `{cmd}`, but the guard says "
-        f"{got or 'allow'} where the prose claims {want or 'allow'}. "
-        f"The doc and the hook have drifted apart — fix one of them.")
+        f"CLAUDE.md's shipping rules name `{span}`, run here as `{cmd}` in "
+        f"the {where} tree, but the guard says {got or 'allow'} where the "
+        f"prose claims {want or 'allow'}. The doc and the hook have drifted "
+        f"apart — fix one of them on the merits, not by deleting the row.")
+
+
+def test_rule_8s_documented_marker_command_actually_opens_the_pull(repo, tmp_path):
+    """Rule 8's whole procedure rests on one claim: that the `touch` it
+    prints puts the marker where `solo_mode` reads it. The first version
+    shipped `rev-parse --git-dir`, and that claim was FALSE — the flag prints
+    a relative `.git`, which inside a linked worktree is a file, so the touch
+    died with ENOTDIR; drop the `-C` instead and it silently seeds the
+    worktree's own git dir, which solo mode never consults. Either way the
+    pull the rule authorizes stayed denied.
+
+    So the command is run verbatim, from a worktree (where rule 1 puts every
+    session), and the guard itself is asked whether the gate opened."""
+    wt = tmp_path / "wt"
+    git(repo, "worktree", "add", "-q", str(wt), "-b", "feature")
+    pull = f"git -C {repo} pull --ff-only"
+
+    assert run_guard(pull, wt, repo) == "deny", "precondition: shut before the hatch"
+
+    documented = f'touch "$(git -C {repo} rev-parse --absolute-git-dir)/cim-solo"'
+    subprocess.run(documented, shell=True, cwd=str(wt), check=True)
+    assert (repo / ".git" / shared.SOLO_MARKER).exists(), (
+        "the documented touch did not land in the primary git dir")
+    assert run_guard(pull, wt, repo) is None, (
+        "marker placed by rule 8's own command, and the guard still denies "
+        "the pull that rule exists to authorize")
+
+    os.unlink(repo / ".git" / shared.SOLO_MARKER)
+    assert run_guard(pull, wt, repo) == "deny", "and the hatch shuts again"
+
+
+def test_the_short_marker_spellings_rule_4_warns_about_really_do_fail(repo, tmp_path):
+    """The other half of the claim above: rule 4 tells sessions that the two
+    obvious shorter forms are broken. If either quietly started working, the
+    warning would be scaring people off a fine command — so both are pinned
+    as failing, for the two DIFFERENT reasons the rule states."""
+    wt = tmp_path / "wt"
+    git(repo, "worktree", "add", "-q", str(wt), "-b", "feature")
+    marker = repo / ".git" / shared.SOLO_MARKER
+
+    # (a) relative `.git`, and in a worktree `.git` is a file -> ENOTDIR
+    p = subprocess.run(f'touch "$(git -C {repo} rev-parse --git-dir)/cim-solo"',
+                       shell=True, cwd=str(wt), capture_output=True, text=True)
+    assert p.returncode != 0 and "Not a directory" in p.stderr, p
+    assert not marker.exists()
+
+    # (b) no -C: resolves to the WORKTREE's git dir, so the touch succeeds and
+    #     the marker is simply never read. The silent one, and the worse one.
+    subprocess.run('touch "$(git rev-parse --absolute-git-dir)/cim-solo"',
+                   shell=True, cwd=str(wt), check=True)
+    assert not marker.exists(), "expected the marker to land somewhere useless"
+    assert run_guard(f"git -C {repo} pull --ff-only", wt, repo) == "deny"
 
 
 def test_bundled_short_flags_cannot_launder_a_branch_rewrite(repo):

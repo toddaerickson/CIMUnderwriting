@@ -66,8 +66,10 @@ echo "MANDATORY: do NOT mutate the primary working tree. The PreToolUse guard"
 echo "denies file edits and git mutations here. Before any file-mutating work,"
 echo "create an isolated worktree and do everything there:"
 echo "  git worktree add .claude/worktrees/<slug> -b <branch> origin/main"
-echo "Commit early (refs are durable; the worktree dir is not). Merge/cleanup"
-echo "server-side via gh; never 'git checkout' the primary tree to ship."
+echo "Commit early (refs are durable; the worktree dir is not). Merge via gh;"
+echo "clean up LOCALLY per CLAUDE.md rule 3 (worktree remove, then a"
+echo "best-effort branch -d) and never pass 'gh pr merge --delete-branch';"
+echo "never 'git checkout' the primary tree to ship."
 echo "==="
 
 exit 0
