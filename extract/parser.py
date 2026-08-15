@@ -10,7 +10,7 @@ import re
 from dataclasses import dataclass, field, fields
 from typing import Optional
 
-from extract.location import best_city_state
+from extract.location import best_city_state, norm_text
 
 
 @dataclass
@@ -183,23 +183,135 @@ def parse_cim(raw: dict) -> CIMData:
 
 # ── Internal Parsing Functions ──────────────────────────────────────
 
+#: A property name is a name, not a sentence. Six words is generous —
+#: "Lone Star Boat & RV Self Storage" is five — and past that the capture
+#: has run into whatever sat on the line below it.
+MAX_NAME_WORDS = 6
+
+#: Cover-page boilerplate. The name patterns are anchored on the word
+#: "Storage", so a runaway capture always eats LEFTWARD: every token here
+#: shows up as a prefix on the real name, never as a suffix.
+#:
+#: `scripts/cims_rename_plan.py` carries a similar-looking junk list and
+#: is NOT a duplicate of this one, so do not consolidate them: it answers
+#: "what is the first plausible title line on this cover?" for an
+#: informational CSV column where a miss costs a blank cell, while this
+#: answers "what is this deal called?" for a name that becomes the deal
+#: folder, the memo title and the comps match. Different question,
+#: different cost of being wrong, so different rules — that one accepts a
+#: title with no "Storage" in it and this one must not.
+NAME_NOISE = frozenset({
+    "confidential", "offering", "memorandum", "om", "for", "sale",
+    "exclusively", "offered", "listed", "presented", "by", "investment",
+    "opportunity", "brochure", "package", "listing", "executive",
+    "summary", "subject", "property", "properties", "asset", "assets",
+    "facility", "name", "the", "a", "an", "of", "and", "in", "at",
+})
+
+#: The words the patterns anchor ON. A capture that trims down to only
+#: these matched the anchor and nothing else, which is not a name.
+ANCHOR_ONLY = frozenset({"self", "storage", "ss", "self-storage"})
+
+
+def tidy_property_name(raw: str) -> str:
+    """Trim a captured name back to just the name.
+
+    `\\s` inside the capture class matches newlines, so the whole-document
+    search that produced these ran straight through line breaks: a cover
+    reading "CONFIDENTIAL OFFERING MEMORANDUM / Expo Storage" stored both
+    lines, separator and all, as the property's name. That name is the
+    deal's identity everywhere downstream — the folder, the memo's title,
+    the pipeline table, the comps match — so it was wrong in every one of
+    them at once.
+
+    Boilerplate is dropped from the LEFT because the anchor is on the
+    right. What survives is capped at `MAX_NAME_WORDS`, keeping the
+    RIGHTMOST words for the same reason: whatever the capture over-ate is
+    at the front, and the anchor is at the back."""
+    name = norm_text(raw)                       # newlines → single spaces
+    tokens = [t for t in name.split(" ") if t]
+    # ONE loop over both rules, not one loop each: a real banner mixes
+    # them — "OFFERING MEMORANDUM 4 Properties Expo Storage" — and two
+    # sequential passes stop at the first token the pass they are in does
+    # not recognise, leaving the rest of the prefix in the name.
+    while tokens:
+        head = tokens[0]
+        # A leading token holding a digit is an address number or a
+        # portfolio count, never the start of a name.
+        if (head.strip(".,-|:").lower() in NAME_NOISE
+                or any(ch.isdigit() for ch in head)):
+            tokens.pop(0)
+            continue
+        break
+    if len(tokens) > MAX_NAME_WORDS:
+        tokens = tokens[-MAX_NAME_WORDS:]
+    # Nothing but the anchor left. "Self Storage" is what the pattern
+    # matched ON, not a property's name — a banner line reading "FOR SALE
+    # Storage" trims down to exactly this, and returning it would put the
+    # word Storage in the pipeline table as a deal.
+    if all(t.strip(".,-|:").lower() in ANCHOR_ONLY for t in tokens):
+        return ""
+    return " ".join(tokens).strip(" .,-|:")
+
+
+#: **Spaces, never `\s`** — in BOTH patterns. This one character is the
+#: whole defect: `\s` matches a newline, and the capture is anchored on
+#: "Storage" at its right end, so a match beginning at the first capital
+#: letter on a cover page ran forward THROUGH every line break until it
+#: found one. A cover reading "CONFIDENTIAL OFFERING MEMORANDUM / Expo
+#: Storage" stored both lines, separator included, as the name.
+#:
+#: Scanning line-by-line would fix it equally well and is NOT done here,
+#: deliberately: two defenses against one failure mean neither can be
+#: tested — remove either alone and the other still holds, so no mutation
+#: fails and the suite stops saying anything about which one works.
+_NAME_CLASS = r"[A-Z][A-Za-z0-9 \-\']+"
+
+#: Label-led, so it can be trusted anywhere in the document. The label
+#: itself is case-insensitive — it was not, which meant the title-cased
+#: "Property Name:" that CIMs actually print never matched. That went
+#: unnoticed because the anchored pattern below usually reaches the same
+#: answer from the other side; it does not when the name ends in "SS",
+#: which only the labelled pattern accepts.
+_NAME_LABELLED = re.compile(
+    r"(?i:property|facility|asset)\s*(?i:name)?[:\s]+"
+    rf"({_NAME_CLASS}(?:Self[ \-]?Storage|Storage|SS))")
+
+#: Unlabelled: a name ending in "Storage".
+_NAME_ANCHORED = re.compile(rf"({_NAME_CLASS}(?:Self[ \-]?Storage|Storage))")
+
+
+def _find_property_name(text: str, pages: list = None) -> str | None:
+    """Cover page first, whole document second — the same order
+    `extract.location` reads for city/state, and for the same reason: the
+    name on page 1 is the property's, while a match from page 40 is as
+    likely to be the seller's other facility or a comp's."""
+    for scope in ([pages[0]] if pages else []) + [text]:
+        for rx in (_NAME_LABELLED, _NAME_ANCHORED):
+            # finditer, not search: a first match that tidies away to
+            # nothing (a banner line that was all boilerplate) must hand
+            # off to the NEXT match, not abandon the pattern. With
+            # `search` the fallback below re-runs the same pattern from
+            # position 0, finds the same doomed match, and the document's
+            # real name — two lines down — is never looked at.
+            for m in rx.finditer(scope or ""):
+                name = tidy_property_name(m.group(1))
+                if name:
+                    return name
+    return None
+
+
 def _parse_property_basics(text: str, data: CIMData, pages: list = None):
     """Extract property name, address, year built, acreage.
 
-    `pages` is the per-page text list; the city/state lookup reads the cover page
-    first and only falls back to the body. Callers without it degrade to the
-    old whole-document behaviour rather than failing."""
+    `pages` is the per-page text list; the property name and the city/state
+    lookup both read the cover page first and only fall back to the body.
+    Callers without it degrade to the old whole-document behaviour rather
+    than failing."""
 
-    # Property name — often near top, try common patterns
-    name_patterns = [
-        r"(?:property|facility|asset)\s*(?:name)?[:\s]+([A-Z][A-Za-z0-9\s\-\']+(?:Self[\s\-]?Storage|Storage|SS))",
-        r"([A-Z][A-Za-z0-9\s\-\']+(?:Self[\s\-]?Storage|Storage))",
-    ]
-    for pat in name_patterns:
-        m = re.search(pat, text)
-        if m:
-            data.property_name = m.group(1).strip()
-            break
+    name = _find_property_name(text, pages)
+    if name:
+        data.property_name = name
 
     # Address
     addr_pat = r"(\d{1,6}\s+[A-Za-z0-9\s\.\,]+(?:Street|St|Avenue|Ave|Road|Rd|Drive|Dr|Boulevard|Blvd|Lane|Ln|Way|Highway|Hwy|Parkway|Pkwy)[\.?\s,]*)"
