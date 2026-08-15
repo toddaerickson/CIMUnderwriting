@@ -1,8 +1,9 @@
 {% extends "base.html" %}
+{% load humanize %}
 {% block title %}Deal Pipeline{% endblock %}
 {% block content %}
 <div class="max-w-7xl">
-  <h1 class="text-xl font-semibold mb-3">Deal Pipeline</h1>
+  <h1 class="font-display text-xl font-semibold mb-3">Deal Pipeline</h1>
 
   <div class="bg-white border border-slate-200 rounded-lg">
     <form method="get" class="flex flex-wrap gap-2 items-end p-3 border-b border-slate-200">
@@ -52,15 +53,33 @@
             <td class="py-1.5 pr-3">{{ d.city }}</td>
             <td class="py-1.5 pr-3">{{ d.state }}</td>
             <td class="py-1.5 pr-3">{{ d.asset_type }}</td>
-            <td class="py-1.5 pr-3 text-right whitespace-nowrap">{{ d.nrsf|floatformat:0 }}</td>
-            <td class="py-1.5 pr-3 text-right whitespace-nowrap">{% if d.asking_price %}${{ d.asking_price|floatformat:0 }}{% endif %}</td>
-            <td class="py-1.5 pr-3 text-right whitespace-nowrap">{% if d.estimated_fair_value %}${{ d.estimated_fair_value|floatformat:0 }}{% endif %}</td>
+            {% comment %} An em-dash, not an empty cell. A blank on a row
+               whose neighbours are populated reads as a rendering fault —
+               a browser QA pass filed exactly that against a deal whose
+               stored run simply never wrote the field. {% endcomment %}
+            <td class="py-1.5 pr-3 text-right whitespace-nowrap">{% if d.nrsf %}{{ d.nrsf|floatformat:0|intcomma }}{% else %}<span class="text-slate-300">&mdash;</span>{% endif %}</td>
+            <td class="py-1.5 pr-3 text-right whitespace-nowrap">{% if d.asking_price %}${{ d.asking_price|floatformat:0|intcomma }}{% else %}<span class="text-slate-300">&mdash;</span>{% endif %}</td>
+            <td class="py-1.5 pr-3 text-right whitespace-nowrap">{% if d.estimated_fair_value %}${{ d.estimated_fair_value|floatformat:0|intcomma }}{% else %}<span class="text-slate-300">&mdash;</span>{% endif %}</td>
             <td class="py-1.5 pr-3 whitespace-nowrap">{{ d.recommendation }}</td>
             <td class="py-1.5 pr-3 whitespace-nowrap">{{ d.analysis_date|date:"Y-m-d" }}</td>
           </tr>
           {% empty %}
-          <tr><td colspan="9" class="py-8 px-3 text-center text-slate-500">No deals yet — run
-            <code>python manage.py import_deals</code> or start a New Analysis.</td></tr>
+          {% comment %} Two different facts, and the one cell used to state
+             the first regardless. A filtered-to-nothing table saying "no
+             deals yet" tells the operator their pipeline is empty when it
+             is not, and offers a fix (start a New Analysis) for a problem
+             they do not have — the fix is to widen the filter.
+             The bootstrap command is gone from both branches: a shell
+             invocation is not an action available to anyone reading this
+             in a browser, and it names a one-time import that has already
+             happened on this deployment. {% endcomment %}
+          {% if state or recommendation or asset_type %}
+          <tr><td colspan="9" class="py-8 px-3 text-center text-slate-500">No deals match these filters &mdash;
+            <a href="{% url 'deal-list' %}" class="underline">clear them</a> to see the whole pipeline.</td></tr>
+          {% else %}
+          <tr><td colspan="9" class="py-8 px-3 text-center text-slate-500">No deals yet &mdash; start a
+            <a href="{% url 'analyze' %}" class="underline">New Analysis</a> to add the first one.</td></tr>
+          {% endif %}
           {% endfor %}
         </tbody>
       </table>

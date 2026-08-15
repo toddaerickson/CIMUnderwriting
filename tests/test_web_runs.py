@@ -1212,3 +1212,89 @@ def test_the_worker_stamps_the_version_on_what_it_writes(client, operator,
     # ...and the page it produces is therefore never called stale.
     assert "predates some of the sections" not in \
         client.get(f"/deals/{deal.pk}/").content.decode()
+
+
+# ── The replacement-cost bridge (QA finding C4-b) ───────────────────
+# The table listed hard cost per facility type and the line beneath it
+# stated the total. On the QA deal those were $3,413,340 and $4,736,924
+# — a 38.8% jump the page never accounted for, under the gate that
+# screens asking price against that very total.
+
+
+def _repl(**cim_kwargs):
+    from analysis.physical import analyze_physical
+    cim = _sample_cim()
+    for k, v in cim_kwargs.items():
+        setattr(cim, k, v)
+    return analyze_physical(cim)["replacement_cost"]
+
+
+def test_the_bridge_accounts_for_every_dollar_between_hard_cost_and_total():
+    """Not a formatting test. The rows are read as an addition and they
+    have to be one, so the arithmetic is asserted against the build-up
+    the engine actually produced rather than against a hand-rolled
+    fixture that could drift from it."""
+    from webapp.results import _replacement_bridge
+
+    repl = _repl(cc_pct=0.35)
+    rows = {r["label"].split(" @ ")[0]: r["value"]
+            for r in _replacement_bridge(repl)}
+
+    assert set(rows) == {"Hard Cost (all facility types)", "Site Work",
+                         "Subtotal — Hard + Site", "Soft Costs",
+                         "Developer Profit"}
+    money = lambda s: float(s.replace("$", "").replace(",", ""))
+    assert money(rows["Subtotal — Hard + Site"]) == round(
+        money(rows["Hard Cost (all facility types)"])
+        + money(rows["Site Work"]))
+    # ...and the addends reach the total the page prints beside them.
+    bridged = (money(rows["Subtotal — Hard + Site"])
+               + money(rows["Soft Costs"]) + money(rows["Developer Profit"]))
+    assert abs(bridged - repl["total_replacement"]) < 2.0   # rounding only
+
+
+def test_the_two_percentage_rows_state_the_rate_that_priced_them():
+    """`Soft Costs: $412,000` invites the reader to look up the band in
+    CLAUDE.md and find two numbers, neither of which is the one used.
+    The resolved midpoint is what moved the total, so it is what
+    prints."""
+    from webapp.results import _replacement_bridge
+
+    labels = [r["label"] for r in _replacement_bridge(_repl(cc_pct=0.35))]
+    assert "Soft Costs @ 10.0%" in labels
+    assert "Developer Profit @ 12.5%" in labels
+
+
+def test_a_run_without_the_breakdown_gets_no_bridge_at_all():
+    """Runs predating the facility-type build-up carry no `site_work` or
+    `soft_costs`. Four rows of N/A would disclose LESS than the single
+    total they replaced, so the bridge stays absent and the total stands
+    alone as it always did."""
+    from webapp.results import _replacement_bridge
+
+    assert _replacement_bridge({"estimable": True,
+                                "total_replacement": 4_736_924.0}) == []
+
+
+@pytest.mark.django_db
+def test_the_summary_tab_renders_the_bridge_and_foots_to_the_total(
+        client, operator, deals_dir):
+    """MUTATION: delete the `<tfoot>` from `_tab_summary.html`."""
+    from webapp.models import AnalysisRun
+    from webapp.results import fmt_money
+
+    deal = _make_extracted_deal(deals_dir)
+    repl = _repl(cc_pct=0.35)
+    AnalysisRun.objects.create(
+        deal=deal, status="done",
+        result_json={"physical_analysis": {
+            "replacement_cost": repl,
+            "price_vs_replacement": {"comparable": False}}})
+
+    body = client.get(f"/deals/{deal.pk}/").content.decode()
+    assert "Site Work" in body
+    assert "Subtotal &mdash; Hard + Site" in body or \
+        "Subtotal — Hard + Site" in body
+    assert "Developer Profit @ 12.5%" in body
+    assert body.count(fmt_money(repl["total_replacement"])) >= 2  # foot + line
+    assert f"{fmt_money(repl['replacement_per_sf'])}/SF" in body

@@ -277,9 +277,54 @@ def summary_context(r) -> dict:
         "gates": r.get("gate_results") or [],
         "repl_estimable": bool(repl.get("estimable")),
         "repl_rows": repl_rows,
+        "repl_bridge": _replacement_bridge(repl),
         "repl_total": fmt_money(repl.get("total_replacement")),
+        # None, not "N/A" — the template hangs "/SF" off this and a run
+        # with no NRSF would otherwise read "N/A/SF".
+        "repl_per_sf": (fmt_money(repl["replacement_per_sf"])
+                        if repl.get("replacement_per_sf") is not None
+                        else None),
         "repl_delta_label": delta_label, "repl_delta": delta,
     }
+
+
+def _replacement_bridge(repl: dict) -> list[dict]:
+    """Hard cost → total replacement, one row per addend.
+
+    The table above lists hard cost per facility type and the line under
+    it printed the total, with site work, soft costs and the developer's
+    profit crossed silently in between — on the QA deal a 38.8% jump the
+    page never accounted for. Asking price is screened against that
+    total (`analysis.physical._compare_to_asking`), so the gap sat under
+    a gate with nothing on screen explaining it.
+
+    A row is emitted only for a component the stored run actually
+    carries. Runs predating the facility-type build-up have no
+    `site_work`/`soft_costs`, and a bridge of four `N/A`s would disclose
+    less than the single total it replaced. The percentages are the
+    resolved midpoints the run used, not the config band — the band is
+    two numbers and only one of them priced this deal.
+    """
+    rows = []
+    for key, label, pct_key in (
+            ("hard_cost", "Hard Cost (all facility types)", None),
+            ("site_work", "Site Work", None),
+            ("subtotal", "Subtotal — Hard + Site", None),
+            ("soft_costs", "Soft Costs", "soft_cost_pct"),
+            ("dev_profit", "Developer Profit", "dev_profit_pct")):
+        value = repl.get(key)
+        if value is None:
+            continue
+        pct = repl.get(pct_key) if pct_key else None
+        rows.append({
+            "label": label if pct is None else f"{label} @ {fmt_pct(pct)}",
+            "value": fmt_money(value),
+            # The two running totals read as sums of what precedes them,
+            # so they carry the weight rather than sitting flush with the
+            # addends.
+            "is_subtotal": key == "subtotal",
+        })
+    return rows
 
 
 def _hold_years(scenarios: dict, noi_key: str = "noi_projection") -> int:

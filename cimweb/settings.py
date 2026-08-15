@@ -64,6 +64,11 @@ INSTALLED_APPS = [
     "django.contrib.sessions",
     "django.contrib.messages",
     "django.contrib.staticfiles",
+    # `intcomma`, for the deal table and the detail sub-header. Those are
+    # the two places a raw figure reaches the page without passing through
+    # `webapp.results`, which formats everything else it emits — so they
+    # were the two places printing 48762 next to $58,051,289.
+    "django.contrib.humanize",
     # webapp precedes allauth so its templates/allauth/... overrides
     # (chrome for login/logout/signup-closed pages) win over allauth's
     # own bundled templates — app_directories.Loader resolves by

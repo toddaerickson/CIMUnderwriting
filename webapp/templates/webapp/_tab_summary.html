@@ -265,10 +265,30 @@
           </tr>
           {% endfor %}
         </tbody>
+        {% comment %} The bridge from the hard costs above to the total
+           below. Without it the table lists one figure and the line under
+           it states a much larger one, and the reader is left to guess
+           what crossed in between — which on a real deal was 38.8% of the
+           number the asking price is screened against. {% endcomment %}
+        {% if repl_bridge %}
+        <tfoot class="border-t border-slate-300">
+          {% for row in repl_bridge %}
+          <tr class="{% if row.is_subtotal %}font-medium{% else %}text-slate-600{% endif %}">
+            <td class="py-1.5 pl-3 pr-3" colspan="3">{{ row.label }}</td>
+            <td class="py-1.5 pr-3 text-right">{{ row.value }}</td>
+          </tr>
+          {% endfor %}
+          <tr class="border-t border-slate-300 font-semibold">
+            <td class="py-1.5 pl-3 pr-3" colspan="3">Total Replacement Cost</td>
+            <td class="py-1.5 pr-3 text-right">{{ repl_total }}</td>
+          </tr>
+        </tfoot>
+        {% endif %}
       </table>
     </div>
     <p class="mt-1.5 text-sm">
       <span class="font-medium">Total Replacement Cost: {{ repl_total }}</span>
+      {% if repl_per_sf %} &middot; {{ repl_per_sf }}/SF{% endif %}
       {% if repl_delta %} &middot; {{ repl_delta_label }}: {{ repl_delta }}{% endif %}
     </p>
   </div>
