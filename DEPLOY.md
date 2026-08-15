@@ -36,7 +36,7 @@
 | `ALLOWED_EMAILS` | Login allowlist | Fixed in `render.yaml`: `terickson@marathoncre.com` |
 | `ALLOWED_HOSTS` | Django Host-header validation | The assigned host after first deploy (e.g. `cim-analyst.onrender.com`); `sync: false` |
 | `CSRF_TRUSTED_ORIGINS` | CSRF origin allowlist | `https://<same host>`; `sync: false` |
-| `CENSUS_API_KEY` | Census demographics lookups | Copied from the current Railway env; `sync: false` |
+| `CENSUS_API_KEY` | Census demographics lookups | Copied from the Railway env during the 2026-07-28 cutover; `sync: false` |
 | `CIM_DEALS_DIR` | Deal folders root | Fixed in `render.yaml`: `/data/deals` (on the disk) |
 | `COMP_DB_PATH` | Comp SQLite DB path | Fixed in `render.yaml`: `/data/cim_comps.db` (on the disk) |
 | `CIM_OVERRIDES_DIR` | Per-deal override JSONs | Fixed in `render.yaml`: `/data/overrides` (on the disk) |
@@ -44,12 +44,19 @@
 | `ADMIN_ENABLED` | Mounts `/admin/` (unmounted = 404) | Fixed in `render.yaml`: `false`. Flip to `1` temporarily for runbook step 7's verification, remove after. Defaults to `DEBUG` when unset, so dev boxes with `DEBUG=true` get it automatically |
 | `PYTHON_VERSION` | Render Python runtime pin | Fixed in `render.yaml`: `3.12.6` |
 
-## Cutover runbook (after PR 5C merges — operator gates marked ⚑)
+## Cutover runbook — executed 2026-07-28 (operator gates marked ⚑)
 
-Ship-dark ends here. Railway keeps serving Streamlit until step 8; nothing below is destructive until step 9.
+**Status: steps 1–8 are done.** Production has been Django-on-Render since
+2026-07-28, at `https://cim-analyst.onrender.com` — blueprint `render.yaml`,
+auto-deploy on push to `main`. **Steps 9 and 10 are still open**: the Railway
+service has not been confirmed deleted, and the `~/.claude/CLAUDE.md` deploy
+table still needs its `CIM_Analyst` row corrected. The steps below are kept
+verbatim, both as the record of what ran and as the DR procedure.
+
+Ship-dark ended here. Railway kept serving Streamlit until step 8; nothing below was destructive until step 9.
 
 1. ⚑ **Neon**: create project `cim-analyst` (Postgres 16+); copy the **pooled** connection string. (Free tier is fine at this scale; note autosuspend means the first request after idle takes ~1s extra.)
-2. ⚑ **Render**: New → Blueprint → point at the GitHub repo; Render reads `render.yaml`. Paste `sync: false` values: `DATABASE_URL` (from step 1), `CENSUS_API_KEY` (from the current Railway env), `ALLOWED_HOSTS` = the assigned host (e.g. `cim-analyst.onrender.com`), `CSRF_TRUSTED_ORIGINS` = `https://<that host>`. First deploy runs migrate against Neon automatically.
+2. ⚑ **Render**: New → Blueprint → point at the GitHub repo; Render reads `render.yaml`. Paste `sync: false` values: `DATABASE_URL` (from step 1), `CENSUS_API_KEY` (from the Railway env at the time), `ALLOWED_HOSTS` = the assigned host (e.g. `cim-analyst.onrender.com`), `CSRF_TRUSTED_ORIGINS` = `https://<that host>`. First deploy runs migrate against Neon automatically.
 3. **Verify boot**: `curl https://<host>/health/` → `{"status": "ok", "db": true, "disk": true, "git_sha": "<HEAD>"}`. The git_sha must match origin/main HEAD; `disk: true` proves the mount and env routing before any data lands on it.
 4. **Operator account** — Render Shell tab on the service:
    ```bash
@@ -111,9 +118,11 @@ Both are now closed:
 
 ## Rollback
 
-- **Before cutover**: the Railway service keeps running the last Streamlit image
-  until manually deleted — Railway deploys are manual, so merging PR 5C changes
-  nothing in prod. The cutover is the runbook above, not the merge.
+- **Before cutover** (historical — this window closed 2026-07-28): the Railway
+  service kept running the last Streamlit image until manually deleted — Railway
+  deploys were manual, so merging PR 5C changed nothing in prod. The cutover was
+  the runbook above, not the merge. Deleting that service is runbook step 9,
+  which is still open.
 - **After cutover**: `/rollback` on `main` reverts the bad merge and Render
   auto-deploys the revert (push-to-main trigger). The disk and Neon are
   unaffected by code rollbacks.
