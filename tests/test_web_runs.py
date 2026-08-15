@@ -812,13 +812,13 @@ def test_run_payload_carries_the_levered_lens(client, operator, deals_dir,
     levered = payload["levered"]["base"]
     assert levered["lp_net_irr"] is not None
     assert levered["am_fee_pct"] > 0
-    assert levered["am_fee_base"] == "invested_equity"
+    assert levered["am_fee_base"] == "lp_equity"
     assert len(levered["years"]) == 5
     assert levered["distributions"][0] == 0
     # The stamp travels with the number it qualifies.
     am_row = next(r for r in levered["assumption_stamp"]
                   if r["key"] == "am_fee_treatment")
-    assert am_row["base"] == "invested_equity"
+    assert am_row["base"] == "lp_equity"
     assert "1.00%" in am_row["label"]
 
     # Item E4's payload, held to the same round-trip contract. This goes

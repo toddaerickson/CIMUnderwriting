@@ -39,9 +39,18 @@ logger = logging.getLogger(__name__)
 #: back — the same discipline `WaterfallTerms` applies to its four
 #: convention fields, and for the same reason: silently substituting one
 #: convention for another produces a confident wrong LP net IRR.
-AM_FEE_BASE_INVESTED_EQUITY = "invested_equity"
+#:
+#: **`invested_equity` was REMOVED on 2026-08-14, not deprecated**
+#: (operator): a GP does not charge an asset-management fee on its own
+#: co-investment. The fee compensates the manager for administering the
+#: LPs' capital, so the base is the LPs' capital. It shipped from
+#: 2026-08-01 charging the fee on GP+LP, which overstated it by exactly
+#: the co-invest share — 11.1% too much at a 10% co-invest. The name
+#: still raises rather than resolving, so a stored value or an old call
+#: site fails loudly instead of quietly re-charging the GP.
+AM_FEE_BASE_LP_EQUITY = "lp_equity"
 AM_FEE_BASE_LABELS = {
-    AM_FEE_BASE_INVESTED_EQUITY: "invested equity",
+    AM_FEE_BASE_LP_EQUITY: "LP equity",
 }
 
 #: Sub-cent noise is not a shortfall. Without this, float error on a
@@ -76,12 +85,16 @@ def noi_series(projection: dict) -> list:
 
 def _fee_base(base):
     if base not in AM_FEE_BASE_LABELS:
+        extra = ("  'invested_equity' was the shipped base until "
+                 "2026-08-14 and is GONE, not renamed: it charged the fee "
+                 "on the GP's own co-invest too. See AM_FEE_BASE_LABELS."
+                 if base == "invested_equity" else "")
         raise ValueError(
             f"am_fee_base={base!r} is not implemented — supported: "
             f"{sorted(AM_FEE_BASE_LABELS)}. '1% of committed equity', '1% of "
             "invested capital' and '1% of asset value' are all live "
             "conventions with materially different LP net IRRs, so this "
-            "raises rather than quietly charging the default.")
+            "raises rather than quietly charging the default." + extra)
     return base
 
 
@@ -105,8 +118,23 @@ def build_levered_returns(projection: dict, *, sources_uses: dict, debt: dict,
     fixed point. It also matches `model.waterfall`, which accrues pref on
     the START-of-period balance and does not accrue at period 0.
 
-    **"Invested equity" means cumulative CONTRIBUTED equity, not equity
-    net of returns of capital**, and that is the second circularity this
+    **The base is the LPs' equity, not the partnership's** (operator,
+    2026-08-14). A GP does not charge an asset-management fee on its own
+    co-investment: the fee compensates the manager for administering the
+    LIMITED partners' capital. So the base is `equity_outstanding x
+    (1 - gp_coinvest_pct)`, and the co-invest comes from the SAME
+    resolved `terms` the waterfall splits on — reading it from config
+    here while the waterfall used the deal's own is the divergence
+    `resolve_waterfall_terms` documents at length.
+
+    This also closes an XLSM divergence rather than opening one: the
+    workbook's `Underwriting!H245 = K61*G245/12` charges the fee on K61,
+    LP Equity, and its `G244` dropdown reads "% of LP Equity" in so many
+    words. The app charged GP+LP from 2026-08-01 until this change,
+    which overstated the fee by 11.1% at a 10% co-invest.
+
+    **"Equity" means cumulative CONTRIBUTED equity, not equity net of
+    returns of capital**, and that is the second circularity this
     convention dodges. Reducing the base by interim returns of capital
     would require splitting each distribution into return-of-capital and
     profit — which is what `run_waterfall` does, using distributable cash
@@ -148,7 +176,8 @@ def build_levered_returns(projection: dict, *, sources_uses: dict, debt: dict,
             own, and a deal edited to 25% prints a stack split 25/75
             beside an LP net IRR computed on 10/90.
         am_fee_pct: annual management fee rate; None → `config.AM_FEE_PCT`
-        am_fee_base: what the fee is charged on; None → `config.AM_FEE_BASE`
+        am_fee_base: what the fee is charged on; None → `config.AM_FEE_BASE`.
+            Only `lp_equity` is implemented; anything else raises.
 
     Returns a dict, not a dataclass: every other builder in the model
     layer returns one, and the memo writer, Excel writer, Django
@@ -196,6 +225,13 @@ def build_levered_returns(projection: dict, *, sources_uses: dict, debt: dict,
 
     total_equity = float(sources_uses["total_equity"])
 
+    # ONE co-invest, from the terms the waterfall will split on. Every
+    # contribution — the close-date draw and every later call — is split
+    # pro rata by this share, so the LPs' outstanding equity is exactly
+    # this fraction of the partnership's at every point in the hold, and
+    # the fee base needs no series of its own.
+    lp_share = 1.0 - float(terms.gp_coinvest_pct)
+
     reserve_balance = reserve_funded
     equity_outstanding = total_equity
     contributions = [total_equity] + [0.0] * hold_years
@@ -205,7 +241,8 @@ def build_levered_returns(projection: dict, *, sources_uses: dict, debt: dict,
     for t in range(1, hold_years + 1):
         # START-of-period equity: includes every call made BEFORE this
         # period, excludes this period's own. See the docstring.
-        am_fee = equity_outstanding * am_fee_pct
+        # LP equity only — the GP pays no fee on its own co-invest.
+        am_fee = equity_outstanding * lp_share * am_fee_pct
         debt_service = float(schedule[t - 1])
         exit_proceeds = (net_exit - payoff - exit_fee if t == hold_years
                          else 0.0)

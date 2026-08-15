@@ -124,12 +124,19 @@ def test_oracle_a_stack_ties_to_the_basis_plus_financing(oracle_a):
 
 def test_oracle_a_levered_cash_flow(oracle_a):
     _, _, _, lev = oracle_a
+    # 1% of the LPs' 90% of $4,160,000 — NOT 1% of the partnership's
+    # equity. The fee compensates the manager for administering the LPs'
+    # capital, so the GP's own co-invest is not in the base (operator,
+    # 2026-08-14). At a 10% co-invest that is exactly 0.9x the fee this
+    # oracle carried from 2026-08-01: $41,600 became $37,440.
     assert [r["am_fee"] for r in lev["years"]] == pytest.approx(
-        [41_600.00] * 5, abs=CENT)
+        [37_440.00] * 5, abs=CENT)
+    assert lev["years"][0]["am_fee"] == pytest.approx(
+        0.01 * 4_160_000.00 * 0.90, abs=CENT)
     assert [r["levered_cf"] for r in lev["years"]] == pytest.approx(
-        [103_311.02, 121_311.02, 139_851.02, 158_947.22, 5_258_793.39],
+        [107_471.02, 125_471.02, 144_011.02, 163_107.22, 5_262_953.39],
         abs=CENT)
-    assert lev["am_fee_total"] == pytest.approx(208_000.00, abs=CENT)
+    assert lev["am_fee_total"] == pytest.approx(187_200.00, abs=CENT)
 
 
 def test_oracle_a_never_clears_the_pref_so_no_promote(oracle_a):
@@ -137,10 +144,10 @@ def test_oracle_a_never_clears_the_pref_so_no_promote(oracle_a):
     wf = lev["waterfall"]
     assert wf["tier1_current"] is False
     assert wf["unreturned_capital"] + wf["unpaid_pref"] == pytest.approx(
-        225_455.71, abs=CENT)
+        201_050.65, abs=CENT)
     assert wf["gp"]["promote"] == pytest.approx(0.0, abs=CENT)
-    assert lev["lp_net_irr"] == pytest.approx(0.071479, abs=BP)
-    assert lev["lp_moic"] == pytest.approx(1.3900, abs=1e-4)
+    assert lev["lp_net_irr"] == pytest.approx(0.072401, abs=BP)
+    assert lev["lp_moic"] == pytest.approx(1.3950, abs=1e-4)
 
 
 def test_oracle_a_leverage_is_dilutive_and_the_model_can_say_so(oracle_a):
@@ -187,21 +194,27 @@ def test_oracle_b_pays_a_promote_off_the_top_then_splits_pro_rata(oracle_b):
     projection, _, su, lev = oracle_b
     assert su["total_equity"] == pytest.approx(3_665_000.00, abs=CENT)
     assert [r["levered_cf"] for r in lev["years"]] == pytest.approx(
-        [307_100.00, 337_100.00, 294_290.58, 326_738.58, 5_311_997.08],
+        [310_765.00, 340_765.00, 297_955.58, 330_403.58, 5_315_662.08],
         abs=CENT)
     wf = lev["waterfall"]
     assert wf["tier1_current"] is True
-    # 263,790.53 = 20% of the LP's 90% of the residual — the fund
+    # 267,660.73 = 20% of the LP's 90% of the residual — the fund
     # workbook's `J250 = I250+(1-I250)*$J$244`, confirmed against the LPA
     # 2026-08-12. The other reading of "promote on all capital" charges
-    # 20% of the WHOLE residual and pays 293,100.59; the 29,310.06
+    # 20% of the WHOLE residual and pays 297,400.81; the 29,740.08
     # between them is promote on the GP's own co-invest, funded by the
     # LP. Asserted end-to-end, not only in `test_waterfall.py`, because
     # this is the number that reaches an LP-facing document.
-    assert wf["gp"]["promote"] == pytest.approx(263_790.53, abs=CENT)
-    assert lev["lp_net_irr"] == pytest.approx(0.129941, abs=BP)
-    assert lev["lp_moic"] == pytest.approx(1.7146, abs=1e-4)
-    assert wf["gp"]["irr"] == pytest.approx(0.224806, abs=BP)
+    #
+    # It rose from 263,790.53 on 2026-08-14, and NOT because the promote
+    # changed: the AM fee moved to an LP-equity base, which left $3,665
+    # a year more in the deal, and a bigger residual carries a bigger
+    # promote. Every levered figure on this fixture moved for that one
+    # reason.
+    assert wf["gp"]["promote"] == pytest.approx(267_660.73, abs=CENT)
+    assert lev["lp_net_irr"] == pytest.approx(0.130695, abs=BP)
+    assert lev["lp_moic"] == pytest.approx(1.7185, abs=1e-4)
+    assert wf["gp"]["irr"] == pytest.approx(0.226652, abs=BP)
     # Positive leverage here, unlike oracle A.
     assert projection["irr"] == pytest.approx(0.097899, abs=BP)
     assert lev["lp_net_irr"] > projection["irr"]
@@ -227,20 +240,20 @@ def test_oracle_c_draws_the_reserve_before_calling_capital(oracle_c):
     capital call."""
     _, _, _, lev = oracle_c
     year_1 = lev["years"][0]
-    assert year_1["levered_cf"] == pytest.approx(-293_342.06, abs=CENT)
+    assert year_1["levered_cf"] == pytest.approx(-290_517.06, abs=CENT)
     assert year_1["reserve_drawn"] == pytest.approx(150_000.00, abs=CENT)
-    assert year_1["capital_call"] == pytest.approx(143_342.06, abs=CENT)
+    assert year_1["capital_call"] == pytest.approx(140_517.06, abs=CENT)
     assert lev["reserve_funded"] == pytest.approx(150_000.00, abs=CENT)
     assert lev["reserve_remaining"] == pytest.approx(0.0, abs=CENT)
     # The reserve is exhausted in year 1, so years 2-4 call the full gap.
     assert [r["reserve_drawn"] for r in lev["years"][1:]] == pytest.approx(
         [0.0] * 4, abs=CENT)
     assert [r["capital_call"] for r in lev["years"][1:4]] == pytest.approx(
-        [246_775.48, 195_483.24, 137_226.87], abs=CENT)
+        [243_781.71, 192_215.75, 133_734.49], abs=CENT)
     # The exact total, not the sum of the four ROUNDED calls above — those
     # differ in the third decimal and summing them is how a "to the cent"
     # assertion quietly acquires a cent of error.
-    assert lev["capital_calls_total"] == pytest.approx(722_827.6438, abs=CENT)
+    assert lev["capital_calls_total"] == pytest.approx(710_249.0133, abs=CENT)
 
 
 def test_oracle_c_never_distributes_a_negative_number(oracle_c):
@@ -261,18 +274,21 @@ def test_oracle_c_am_fee_follows_the_calls_one_period_behind(oracle_c):
     _, _, su, lev = oracle_c
     assert su["total_equity"] == pytest.approx(2_825_000.00, abs=CENT)
     assert [r["am_fee"] for r in lev["years"]] == pytest.approx(
-        [28_250.00, 29_683.42, 32_151.18, 34_106.01, 35_478.28], abs=CENT)
-    # Year 2's fee is exactly 1% of equity plus year 1's call.
+        [25_425.00, 26_689.65, 28_883.69, 30_613.63, 31_817.24], abs=CENT)
+    # Year 2's fee is exactly 1% of the LPs' 90% of equity plus year 1's
+    # call. The call IS in the base — the manager administers called
+    # capital too — which is where this parts company with the XLSM,
+    # whose K61 is fixed at close.
     assert lev["years"][1]["am_fee"] == pytest.approx(
-        0.01 * (2_825_000.00 + 143_342.06), abs=CENT)
+        0.01 * (2_825_000.00 + 140_517.06) * 0.90, abs=CENT)
 
 
 def test_oracle_c_contributions_carry_the_calls_at_their_own_periods(oracle_c):
     _, _, _, lev = oracle_c
     assert lev["contributions"] == pytest.approx(
-        [2_825_000.00, 143_342.06, 246_775.48, 195_483.24, 137_226.87, 0.0],
+        [2_825_000.00, 140_517.06, 243_781.71, 192_215.75, 133_734.49, 0.0],
         abs=CENT)
-    assert lev["lp_net_irr"] == pytest.approx(-0.009442, abs=BP)
+    assert lev["lp_net_irr"] == pytest.approx(-0.008406, abs=BP)
     wf = lev["waterfall"]
     assert wf["gp"]["promote"] == pytest.approx(0.0, abs=CENT)
     # No promote was paid before the last call, so nothing is unrecovered.
@@ -331,10 +347,11 @@ def test_the_am_fee_stamp_row_carries_the_rate_and_the_base(oracle_a):
     row = next(r for r in lev["assumption_stamp"]
                if r["key"] == "am_fee_treatment")
     assert "1.00%" in row["label"]
-    assert "invested equity" in row["label"].lower()
+    assert "lp equity" in row["label"].lower()
+    assert "invested equity" not in row["label"].lower()
     assert "set by the caller" not in row["label"]
     assert row["rate"] == pytest.approx(0.01)
-    assert row["base"] == "invested_equity"
+    assert row["base"] == "lp_equity"
     # The other five questions still get answered.
     assert {r["key"] for r in lev["assumption_stamp"]} == {
         "pref_compounding", "accrual_base", "ordering", "am_fee_treatment",
@@ -450,14 +467,14 @@ def test_config_defaults_are_what_the_module_uses():
     """No second copy of the AM fee. `config.AM_FEE_PCT` is the source and
     a drifting mirror is the failure this pins."""
     assert cfg.AM_FEE_PCT == 0.01
-    assert cfg.AM_FEE_BASE == "invested_equity"
+    assert cfg.AM_FEE_BASE == "lp_equity"
     projection, _, _, lev = _build(price=10_000_000, y1_noi=600_000,
                                    growth=0.03, exit_cap=0.0625,
                                    terms=ORACLE_A, am_fee_pct=None)
     assert lev["am_fee_pct"] == cfg.AM_FEE_PCT
     assert lev["am_fee_base"] == cfg.AM_FEE_BASE
     assert [r["am_fee"] for r in lev["years"]] == pytest.approx(
-        [41_600.00] * 5, abs=CENT)
+        [37_440.00] * 5, abs=CENT)
 
 
 # ── One loan, three scenarios ───────────────────────────────────────
@@ -1095,7 +1112,7 @@ def test_the_results_lens_renders_the_headline_the_loan_and_the_stamp(oracle_a):
     assert ctx["has_levered"] is True
 
     labels = {row["label"]: row["cells"] for row in ctx["levered_rows"]}
-    assert labels["5-Year LP Net IRR"] == ["7.1%", "7.1%", "7.1%"]
+    assert labels["5-Year LP Net IRR"] == ["7.2%", "7.2%", "7.2%"]
     assert labels["5-Year LP MOIC"] == ["1.39x", "1.39x", "1.39x"]
     assert labels["GP Promote"] == ["$0", "$0", "$0"]
 
@@ -1108,13 +1125,13 @@ def test_the_results_lens_renders_the_headline_the_loan_and_the_stamp(oracle_a):
     assert loan["Equity Required"] == "$4,160,000"
 
     assert len(ctx["levered_years"]) == 5
-    assert ctx["levered_years"][0]["am_fee"] == "$41,600"
+    assert ctx["levered_years"][0]["am_fee"] == "$37,440"
 
     # No LP net IRR leaves the building without its stamp — six rows
     # since the catch-up confirmation, and each one changes the number.
     stamp = {row["label"] for row in ctx["levered_stamp"]}
     assert len(ctx["levered_stamp"]) == 6
-    assert any("of invested equity" in label for label in stamp)
+    assert any("of LP equity" in label for label in stamp)
 
 
 def test_the_results_lens_says_when_leverage_is_dilutive(oracle_a):
@@ -1229,9 +1246,9 @@ def test_the_levered_lens_reaches_the_memo(tmp_path, mock_cim_data, oracle_a):
     assert "Min Debt Yield" in text             # what bound it
     assert "DILUTIVE" in text                   # stated, not left to infer
     assert "LP Net IRR" in tables
-    assert "7.1%" in tables
+    assert "7.2%" in tables
     # The stamp is not optional: it is what makes "net" mean anything.
-    assert "1.00% of invested equity" in text
+    assert "1.00% of LP equity" in text
 
 
 def test_the_memo_and_workbook_build_with_no_levered_payload(tmp_path,
@@ -1340,10 +1357,10 @@ def test_the_returns_tab_template_actually_renders_the_lens(oracle_a):
     assert "Levered Returns" in html
     assert "$6,000,000" in html                  # the sized loan
     assert "Min Debt Yield" in html              # the binding covenant
-    assert "7.1%" in html                        # LP net IRR
-    assert "$41,600" in html                     # year-1 AM fee
+    assert "7.2%" in html                        # LP net IRR
+    assert "$37,440" in html                     # year-1 AM fee
     assert "dilutive" in html                    # said, not left to infer
-    assert "1.00% of invested equity" in html    # the stamp travels
+    assert "1.00% of LP equity" in html          # the stamp travels
 
 
 @pytest.mark.django_db

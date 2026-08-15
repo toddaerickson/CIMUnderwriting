@@ -344,9 +344,10 @@ output/
    MOVED. The first implementation of this row picked the other reading
    and moved every levered figure in the repo; the operator sent it to
    the workbook, which is the same correction the 8%/6% pref rate got
-   three days earlier — **twice now the XLSM has been the more considered
-   artifact, and it should be consulted BEFORE an ambiguous LPA sentence
-   is resolved in code, not after.**
+   three days earlier — and the AM-fee base in (d) below made it
+   **three times in six days that the XLSM has been the more considered
+   artifact. Consult the workbook BEFORE resolving an ambiguous fund
+   term in code, not after.**
    Both bases stay implemented and tested
    (`PROMOTE_BASIS_PROMOTE_THEN_SPLIT` shipped,
    `PROMOTE_BASIS_SPLIT_THEN_PROMOTE` beside it) rather than the loser
@@ -356,6 +357,28 @@ output/
    under the shipped basis every LP flow carries the factor `(1−c)` so
    the LP's IRR, MOIC and the levered max offer are INVARIANT to the GP's
    co-invest; under the alternative they fall.
+   (d) **The AM fee is charged on LP EQUITY, not on invested equity**
+   (`config.AM_FEE_BASE = "lp_equity"`, operator 2026-08-14: *"a GP does
+   not charge an asset management fee on their own personal or internal
+   co-investment"*). This is the one row in this decision where a
+   confirmation MOVED MONEY: the build charged the fee on GP+LP from
+   2026-08-01, overstating it by exactly the co-invest share — 11.1% too
+   much at a 10% co-invest — on every deal since. `invested_equity`
+   RAISES now; it was not renamed and no second base survives, per
+   decision 9. The workbook had it right the whole time
+   (`Underwriting!G244` is a dropdown reading "% of LP Equity",
+   `H245 = K61*G245/12`, and `K61` is LP Equity), which is why (c)'s
+   lesson now reads *three times*.
+   **Two consequences worth stating, because they read as bugs.**
+   The unlevered screen does not move at all — decision 3 keeps the fee
+   out of `total_basis`, so a fee change that touched an unlevered figure
+   would be the defect. And the levered max offer now RISES with the GP's
+   co-invest, which does NOT contradict the invariance asserted just
+   above: that invariance is a property of the PROMOTE, and the fee is a
+   separate deduction that shrinks as the GP funds more of the stack.
+   `tests/test_solver.py` therefore isolates the two — the promote's
+   invariance is asserted at `am_fee_pct=0.0`, and the fee's effect gets
+   a test of its own.
    **The pref rate is two rates** (`config.PREF_RATE_LEVERED` 8% /
    `PREF_RATE_UNLEVERED` 6%), resolved per deal by
    `model.waterfall.resolve_pref_rate` and overridable per deal on the
