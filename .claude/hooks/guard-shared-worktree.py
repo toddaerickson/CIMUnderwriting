@@ -106,7 +106,12 @@ judgement of ordinary `cd`/`pushd`/`env`/`&&`/`;`/`|` forms.
 
 Escape hatches for DELIBERATE solo work on the primary clone:
   * env  CIM_SOLO=1   (per-session — launch the session with it set), or
-  * file .git/cim-solo (per-clone — `touch "$(git rev-parse --git-dir)/cim-solo"`).
+  * file <primary .git>/cim-solo (per-clone —
+    `touch "$(git -C <primary> rev-parse --absolute-git-dir)/cim-solo"`).
+    `--absolute-git-dir` is not a flourish: `--git-dir` prints a relative
+    `.git`, which inside a linked worktree is a FILE, so the shorter form
+    fails with ENOTDIR — and without `-C <primary>` it resolves to the
+    worktree's own git dir, where `solo_mode` never looks.
 
 Pure-stdlib. Every non-firing path exits 0. Wired in .claude/settings.json as a
 PreToolUse hook on Edit|Write|MultiEdit|NotebookEdit and on Bash.
@@ -118,8 +123,8 @@ import subprocess
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from _shared_tree import (CARRYOVER_NOTES, primary_git_dir,   # noqa: E402
-                          solo_mode)
+from _shared_tree import (CARRYOVER_NOTES, SOLO_MARKER,   # noqa: E402
+                          primary_git_dir, solo_mode)
 
 FILE_TOOLS = ("Edit", "Write", "MultiEdit", "NotebookEdit")
 SEG_SPLIT = re.compile(r"&&|\|\||;|\||\n|\(|\)")
@@ -666,7 +671,10 @@ def _reason(target, sub=""):
         f"branch-switch/reset collision (CLAUDE.md: Simultaneous sessions). Isolate first:\n"
         f"  git worktree add .claude/worktrees/<slug> -b <branch> origin/main\n"
         f"then work there (cd into it, or `git -C <path>`). Deliberately solo on the "
-        f"primary clone? Re-launch with CIM_SOLO=1, or `touch \"$(git rev-parse --git-dir)/cim-solo\"`."
+        f"primary clone? Re-launch with CIM_SOLO=1, or "
+        f"`touch \"$(git -C {target} rev-parse --absolute-git-dir)/cim-solo\"` — both "
+        f"`-C` and `--absolute-git-dir` are load-bearing, since the bare form resolves "
+        f"to YOUR worktree's git dir, where solo mode is never read."
     )
 
 
@@ -764,8 +772,11 @@ def main():
                 "BLOCKED: a git-mutating command relocates (cd/pushd/env) to a path this "
                 "guard can't resolve, so it can't prove the target isn't the shared primary "
                 "tree. Run it from inside the worktree, or use `git -C <literal worktree "
-                "path>`. Deliberately solo? CIM_SOLO=1 or "
-                "`touch \"$(git rev-parse --git-dir)/cim-solo\"`."
+                "path>`. Deliberately solo? CIM_SOLO=1, or `touch "
+                f"\"{os.path.join(project_clone, SOLO_MARKER)}\"` — that path is already "
+                "resolved, so do not retype it as a `git rev-parse --git-dir` "
+                "substitution, which from a worktree points somewhere solo mode never "
+                "reads."
             )
         if verdict:
             deny(verdict)

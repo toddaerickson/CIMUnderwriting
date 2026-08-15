@@ -92,8 +92,18 @@ state across it.
 
 These rules used to sit under "Compact instructions", where they read as
 guidance about compaction. They are not — they are how work leaves this clone.
-Rules 1, 3 and 4 are cited BY NUMBER in the guard's runtime deny strings and in
-`tests/test_hook_shared_tree.py`, so extend this list; never renumber it.
+Some are cited BY NUMBER in `.claude/hooks/guard-shared-worktree.py` and in
+`tests/test_hook_shared_tree.py`, so extend this list; never renumber it. **Do
+not restate WHICH numbers here** — the first version of this line did, named
+the wrong three, and was wrong the day it was written. Grep, and scope the
+grep: `tests/test_template_writer.py` says "scoped-backlog rule N" about an
+unrelated rule set.
+
+**Every backticked `git …` command below is extracted at test time** by
+`SHIP_COMMANDS` in `tests/test_hook_shared_tree.py` and run through the real
+guard. Adding one here fails that test until you give it a verdict, which is
+the point: the defect this section exists to fix was a git command in this
+prose that the guard refuses.
 
 1. Before any file-mutating work, isolate:
    `git worktree add .claude/worktrees/<slug> -b <branch> origin/main`
@@ -107,25 +117,55 @@ Rules 1, 3 and 4 are cited BY NUMBER in the guard's runtime deny strings and in
    head ref deletes itself (`delete_branch_on_merge` is on). Local cleanup is
    `git worktree remove <path>` — unforced, the form the guard allows and the
    one git refuses on the main tree outright — then a BEST-EFFORT
-   `git branch -d`. **Expect `-d` to refuse after a squash merge**: the squash
-   is a different commit, so git's reachability test reports the branch as not
-   merged, and `-D` — which exists to bypass exactly that check — is denied by
-   the guard on purpose, because once the worktree is gone the ref is the only
-   durable copy of the work (rule 1). The stale local ref is therefore the
-   expected end state, not a cleanup step you failed; it is harmless, so leave
-   it. The guard's deny message does offer CIM_SOLO for pruning it, and a tidy
-   branch list is not worth opening that window. Never `git checkout` in the
-   primary tree to "restore" it — that clobbers another session's WIP.
+   `git branch -d`.
+   **`-d` may refuse or succeed after a squash merge, and BOTH are normal.**
+   It does not test against `main`. It tests whether the branch is reachable
+   from HEAD or from that branch's own UPSTREAM, and a squash puts your last
+   commit in reach of neither — except through the remote-tracking ref you
+   pushed to, which still holds it until something prunes it. All three cases,
+   measured on a scratch repo rather than reasoned:
+
+   | upstream at the time you run `-d` | result |
+   |---|---|
+   | `origin/main` — what `worktree add -b <branch> origin/main` leaves | refuses: "not fully merged" |
+   | `origin/<branch>` — you pushed with `-u` | **succeeds**, warning it was merged to the remote-tracking ref but not to HEAD |
+   | `origin/<branch>`, already pruned | refuses — and rule 8's `fetch --prune` is what turns case 2 into this one |
+
+   So do not read a refusal as a step you failed, or a success as the guard
+   having let something through. `-D` — which exists to bypass exactly that
+   check — is denied by the guard on purpose, because once the worktree is
+   gone the ref is the only durable copy of the work (rule 1). A ref left
+   behind is harmless; leave it. The guard's deny message does offer CIM_SOLO
+   for pruning it, and a tidy branch list is not worth opening that window.
+   Never `git checkout` in the primary tree to "restore" it — that clobbers
+   another session's WIP.
 4. Deliberate solo work on the primary clone: launch with `CIM_SOLO=1`, or
-   `touch "$(git rev-parse --git-dir)/cim-solo"` — the flag must be set in its
-   own Bash call (the guard evaluates pre-tool), and the marker must be
-   removed immediately after; leaving it disables the guard for every future
-   session.
+   `touch "$(git -C <primary> rev-parse --absolute-git-dir)/cim-solo"` — the
+   flag must be set in its own Bash call (the guard evaluates pre-tool), and
+   the marker must be removed immediately after; leaving it disables the guard
+   for every future session, not just yours.
+   **`--absolute-git-dir` and `-C <primary>` are both load-bearing**, and the
+   form this file shipped until now had neither. `rev-parse --git-dir` prints
+   a RELATIVE `.git`, and inside a linked worktree — where rule 1 puts you —
+   `.git` is a FILE, so the old `touch "$(git rev-parse --git-dir)/cim-solo"`
+   dies with `Not a directory`. Drop the `-C` instead and it is worse than an
+   error: it silently creates a marker in the worktree's OWN git dir, which
+   `_shared_tree.solo_mode()` never reads. It looks only in the primary git
+   dir, so the hatch reports itself open and the guard goes on denying you.
 5. **A PR THIS SESSION OPENED is yours to merge once CI is green** — squash,
-   whatever files it touches, no second ask (operator's standing call,
-   2026-08-15). It is written here, git-tracked, precisely so it cannot be
-   re-narrowed by a stale line in the session notes; scoping it per-PR there is
-   what had three separate sessions re-asking for permission already granted.
+   no second ask (operator's standing call, 2026-08-15). It is written here,
+   git-tracked, precisely so it cannot be re-narrowed by a stale line in the
+   session notes; scoping it per-PR there is what had three separate sessions
+   re-asking for permission already granted.
+   **One carve-out: a PR touching `.claude/hooks/` or `.claude/settings.json`
+   waits for the operator, green or not.** Not distrust of the change — the
+   composition. This grant plus rule 8 otherwise forms a closed loop with no
+   operator in it: a session may edit the guard in its worktree (allowed — the
+   guard protects only the primary tree), merge that itself, then make it live
+   in the primary tree, and every step is individually sanctioned while the
+   result is a session that weakened its own supervision. The
+   "never remove, weaken, or bypass" instruction at the top of this file has to
+   bind the merge step too, or it binds nothing.
    A PR another session or the operator opened is never yours to merge: you do
    not hold the context that produced it, and "it looks fine" is not review.
    Ask. **And "I opened it" is not derivable from GitHub** — every PR in this
@@ -139,46 +179,63 @@ Rules 1, 3 and 4 are cited BY NUMBER in the guard's runtime deny strings and in
    so nothing server-side refuses a red or untested merge. The reading IS the
    gate.
    **A skipped job is not a pass, and this has already fooled a session here.**
-   `test` is gated on
-   `if: github.event.action != 'edited' || github.event.changes.base != null`
-   and `smoke-pg` declares `needs: test`, so merely editing a PR's title or
-   body mints a run in which TWO of the three never execute, leaving only
-   `page-budget`. That run's overall conclusion is still `success`, and
+   `test` carries an `if:` that excludes the `edited` action unless the BASE
+   changed, and `smoke-pg` declares `needs: test` — read the two in
+   `test.yml` rather than trusting a copy here — so merely editing a PR's
+   title or body mints a run in which TWO of the three never execute, leaving
+   only `page-budget`. That run's overall conclusion is still `success`, and
    `gh pr checks <n>` prints `skipping` for the other two and EXITS 0 — so the
    exit code, the rollup and "the newest run" all report green on a PR nothing
    tested. Verified on #79: run 31893593150 ran all three; the two body-edit
    runs after it skipped `test` and `smoke-pg`. Gate on the newest run that
    actually RAN the suite.
-7. **Then clean up, in this order**: `gh pr merge --squash`, `git worktree
-   remove <your worktree>`, best-effort `git branch -d` (rule 3), and write
-   what landed into `<primary .git>/cim-session-notes.md` — the PR number, the
-   squash commit, what is still open. That note is also the only durable record
-   of which session opened which PR, which is what rule 5 leans on.
-   **Do not pass `--delete-branch`.** Its remote half is redundant: this repo
-   has `delete_branch_on_merge` on, and `git ls-remote --heads origin` shows
-   only `main`. Its LOCAL half makes gh run git inside this clone, which the
-   guard cannot see at all — it classifies only Bash segments whose command
-   WORD is `git` — so the flag quietly performs the `branch -D` the guard
-   spent six versions learning to refuse. Reaching for an unobserved path
-   because a guarded one said no is how a safety tool becomes decorative.
+7. **Then clean up in rule 3's order**, and finish by writing what landed into
+   `<primary .git>/cim-session-notes.md` — the PR number, the squash commit,
+   what is still open. That note is the only durable record of which session
+   opened which PR, which is what rule 5 leans on; it is the step with no
+   command to copy, so it is the one that gets skipped.
+   **Do not pass `--delete-branch`.** Its remote half is redundant under
+   `delete_branch_on_merge` (rule 3). Its LOCAL half makes gh run git inside
+   this clone, which the guard cannot see at all — it classifies only Bash
+   segments whose command WORD is `git`. And it is not one denied command but
+   THREE: read against cli/cli v2.97.0, `git/client.go` runs a literal
+   `branch -D`, and when the head branch is the current one
+   `pkg/cmd/pr/merge/merge.go` runs `checkout` and `pull` in the primary tree
+   first. The flag performs, unobserved, the exact three things the guard
+   spent six versions learning to refuse. Reaching for an unwatched path
+   because a watched one said no is how a safety tool becomes decorative.
 8. **A merged change under `.claude/` is not live until the primary tree
    syncs.** `settings.json` resolves hook paths through `${CLAUDE_PROJECT_DIR}`,
    so your worktree runs your copy while a session rooted in the primary clone
    keeps running its own — a hook fix can be merged and firing nowhere that
    matters. Not hypothetical: #82 taught the guard to allow the one file rule 7
    orders you to write, and the primary tree went on denying it.
-   You may run the sync yourself, but only when all five hold, CHECKED and not
-   assumed: `git -C <primary> status --porcelain` is EMPTY; its current branch
-   is `main`; `git -C <primary> rev-list --count origin/main..HEAD` is `0`;
-   `git worktree list` shows no linked worktree but your own; and
+   You may run the sync yourself. **Start with `git fetch origin --prune`** —
+   before the checks, not after, because two of them read remote-tracking refs
+   and a stale ref makes both answer "nothing to do", which reads exactly like
+   success. Then all four must hold, CHECKED and not assumed:
+   `git -C <primary> status --porcelain` is EMPTY; its current branch is
+   `main`; `git -C <primary> rev-list --count origin/main..HEAD` is `0`; and
    `<primary .git>/cim-solo` does NOT already exist — if it does, another
    session is inside its own hatch and your `rm` would strip its protection
-   mid-flight. Then `git fetch origin --prune` FIRST, or you sync to a stale
-   remote-tracking ref and read the no-op as success. Then
-   `touch "$(git -C <primary> rev-parse --git-dir)/cim-solo"` in its OWN Bash
-   call (rule 4), then ONE call: `git -C <primary> pull --ff-only; rm -f
-   <marker>` — `;` and not `&&`, so a failed pull still clears the marker —
-   then a third call confirming it is gone.
+   mid-flight.
+   Then `touch "$(git -C <primary> rev-parse --absolute-git-dir)/cim-solo"` in
+   its OWN Bash call (rule 4 — and read the note there before retyping it from
+   memory, because the obvious form of this command does not work), then ONE
+   call: `git -C <primary> pull --ff-only; rm -f <marker>` — `;` and not `&&`,
+   so a failed pull still clears the marker — then a third call confirming it
+   is gone.
+   **While that marker exists the guard is off for the whole clone**, not just
+   for you: `solo_mode()` is a file test with no notion of who wrote it, so a
+   session starting between your `touch` and your `rm` runs completely
+   unguarded against the primary tree. The checks above are read once and held
+   by nothing. Keep the window to those two calls, and never widen it "while
+   I'm in here anyway".
+   A note on what is NOT a precondition: `git worktree list` will show linked
+   worktrees, including other sessions', and that is fine — a sync only moves
+   `main` in the primary tree and does not touch them. The earlier version of
+   this rule demanded "no linked worktree but your own", which was both
+   unnecessary and unsatisfiable, since rule 7 removes your own first.
    Expect the PostToolUse detector to report that the primary tree's HEAD
    moved, in your session and in every concurrent one. For THIS operation that
    report is the receipt, not a collision to undo.
