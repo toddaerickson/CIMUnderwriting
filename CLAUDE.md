@@ -88,6 +88,105 @@ state across it.
   reads `CARRYOVER_NOTES` from there too, so a rename cannot silently
   re-deny the file — three hooks, one definition.
 
+## Shipping work (worktree → PR → CI → merge → cleanup)
+
+These rules used to sit under "Compact instructions", where they read as
+guidance about compaction. They are not — they are how work leaves this clone.
+Rules 1, 3 and 4 are cited BY NUMBER in the guard's runtime deny strings and in
+`tests/test_hook_shared_tree.py`, so extend this list; never renumber it.
+
+1. Before any file-mutating work, isolate:
+   `git worktree add .claude/worktrees/<slug> -b <branch> origin/main`
+   and do everything there. Commit early — branch refs are durable even if
+   the worktree dir is lost; uncommitted files are not.
+2. The session-start branch line is a point-in-time snapshot. Before every
+   commit, re-assert `git branch --show-current` and read `git diff` in that
+   exact directory; never commit foreign edits (per-path `git add`, never `-A`).
+3. Once your branch is pushed and the PR is open, every remaining ship step is
+   working-tree-independent: `gh pr merge --squash`, after which the remote
+   head ref deletes itself (`delete_branch_on_merge` is on). Local cleanup is
+   `git worktree remove <path>` — unforced, the form the guard allows and the
+   one git refuses on the main tree outright — then a BEST-EFFORT
+   `git branch -d`. **Expect `-d` to refuse after a squash merge**: the squash
+   is a different commit, so git's reachability test reports the branch as not
+   merged, and `-D` — which exists to bypass exactly that check — is denied by
+   the guard on purpose, because once the worktree is gone the ref is the only
+   durable copy of the work (rule 1). The stale local ref is therefore the
+   expected end state, not a cleanup step you failed; it is harmless, so leave
+   it. The guard's deny message does offer CIM_SOLO for pruning it, and a tidy
+   branch list is not worth opening that window. Never `git checkout` in the
+   primary tree to "restore" it — that clobbers another session's WIP.
+4. Deliberate solo work on the primary clone: launch with `CIM_SOLO=1`, or
+   `touch "$(git rev-parse --git-dir)/cim-solo"` — the flag must be set in its
+   own Bash call (the guard evaluates pre-tool), and the marker must be
+   removed immediately after; leaving it disables the guard for every future
+   session.
+5. **A PR THIS SESSION OPENED is yours to merge once CI is green** — squash,
+   whatever files it touches, no second ask (operator's standing call,
+   2026-08-15). It is written here, git-tracked, precisely so it cannot be
+   re-narrowed by a stale line in the session notes; scoping it per-PR there is
+   what had three separate sessions re-asking for permission already granted.
+   A PR another session or the operator opened is never yours to merge: you do
+   not hold the context that produced it, and "it looks fine" is not review.
+   Ask. **And "I opened it" is not derivable from GitHub** — every PR in this
+   repo is authored by the same account, so `gh pr view --json author` cannot
+   tell yours from anyone's. The evidence is your own worktree plus the line
+   you wrote in the session notes (rule 7). After a compact, if the notes do
+   not say you opened it, you did not.
+6. **Green means all three jobs concluded SUCCESS on the head SHA** — `test`,
+   `page-budget` and `smoke-pg` in `.github/workflows/test.yml`. Read the three
+   job conclusions, never the rollup: `main` carries no required status checks,
+   so nothing server-side refuses a red or untested merge. The reading IS the
+   gate.
+   **A skipped job is not a pass, and this has already fooled a session here.**
+   `test` is gated on
+   `if: github.event.action != 'edited' || github.event.changes.base != null`
+   and `smoke-pg` declares `needs: test`, so merely editing a PR's title or
+   body mints a run in which TWO of the three never execute, leaving only
+   `page-budget`. That run's overall conclusion is still `success`, and
+   `gh pr checks <n>` prints `skipping` for the other two and EXITS 0 — so the
+   exit code, the rollup and "the newest run" all report green on a PR nothing
+   tested. Verified on #79: run 31893593150 ran all three; the two body-edit
+   runs after it skipped `test` and `smoke-pg`. Gate on the newest run that
+   actually RAN the suite.
+7. **Then clean up, in this order**: `gh pr merge --squash`, `git worktree
+   remove <your worktree>`, best-effort `git branch -d` (rule 3), and write
+   what landed into `<primary .git>/cim-session-notes.md` — the PR number, the
+   squash commit, what is still open. That note is also the only durable record
+   of which session opened which PR, which is what rule 5 leans on.
+   **Do not pass `--delete-branch`.** Its remote half is redundant: this repo
+   has `delete_branch_on_merge` on, and `git ls-remote --heads origin` shows
+   only `main`. Its LOCAL half makes gh run git inside this clone, which the
+   guard cannot see at all — it classifies only Bash segments whose command
+   WORD is `git` — so the flag quietly performs the `branch -D` the guard
+   spent six versions learning to refuse. Reaching for an unobserved path
+   because a guarded one said no is how a safety tool becomes decorative.
+8. **A merged change under `.claude/` is not live until the primary tree
+   syncs.** `settings.json` resolves hook paths through `${CLAUDE_PROJECT_DIR}`,
+   so your worktree runs your copy while a session rooted in the primary clone
+   keeps running its own — a hook fix can be merged and firing nowhere that
+   matters. Not hypothetical: #82 taught the guard to allow the one file rule 7
+   orders you to write, and the primary tree went on denying it.
+   You may run the sync yourself, but only when all five hold, CHECKED and not
+   assumed: `git -C <primary> status --porcelain` is EMPTY; its current branch
+   is `main`; `git -C <primary> rev-list --count origin/main..HEAD` is `0`;
+   `git worktree list` shows no linked worktree but your own; and
+   `<primary .git>/cim-solo` does NOT already exist — if it does, another
+   session is inside its own hatch and your `rm` would strip its protection
+   mid-flight. Then `git fetch origin --prune` FIRST, or you sync to a stale
+   remote-tracking ref and read the no-op as success. Then
+   `touch "$(git -C <primary> rev-parse --git-dir)/cim-solo"` in its OWN Bash
+   call (rule 4), then ONE call: `git -C <primary> pull --ff-only; rm -f
+   <marker>` — `;` and not `&&`, so a failed pull still clears the marker —
+   then a third call confirming it is gone.
+   Expect the PostToolUse detector to report that the primary tree's HEAD
+   moved, in your session and in every concurrent one. For THIS operation that
+   report is the receipt, not a collision to undo.
+   If any precondition fails, do not stash and do not force. A stale hook copy
+   in the primary tree is degraded enforcement, not a blocked session, and it
+   never affects work done in a worktree branched from `origin/main`. Say so in
+   the session notes and leave the sync to the operator.
+
 # Compact instructions
 
 When compacting this session, preserve above all else: the absolute path of
@@ -102,24 +201,6 @@ nowhere.
 persist between Bash calls. A relative path in a later command therefore
 resolves against the primary tree, not your worktree. Use absolute paths and
 `git -C <worktree>` in every command that writes.
-
-Working rules:
-1. Before any file-mutating work, isolate:
-   `git worktree add .claude/worktrees/<slug> -b <branch> origin/main`
-   and do everything there. Commit early — branch refs are durable even if
-   the worktree dir is lost; uncommitted files are not.
-2. The session-start branch line is a point-in-time snapshot. Before every
-   commit, re-assert `git branch --show-current` and read `git diff` in that
-   exact directory; never commit foreign edits (per-path `git add`, never `-A`).
-3. Once your branch is pushed and the PR is open, every remaining ship step is
-   working-tree-independent: `gh pr merge --squash`, remote ref delete via gh,
-   local ref delete via `git branch -D`. Never `git checkout` in the primary
-   tree to "restore" it — that clobbers another session's WIP.
-4. Deliberate solo work on the primary clone: launch with `CIM_SOLO=1`, or
-   `touch "$(git rev-parse --git-dir)/cim-solo"` — the flag must be set in its
-   own Bash call (the guard evaluates pre-tool), and the marker must be
-   removed immediately after; leaving it disables the guard for every future
-   session.
 
 ## When the user provides a CIM PDF
 1. Run `python run.py` and provide the filename
