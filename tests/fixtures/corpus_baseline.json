@@ -1,0 +1,93 @@
+{
+  "1350 Tracy Lynn St, Abilene, TX 79601 AAA Storage": {
+    "all_none_lines": 4,
+    "chars_per_page": 722,
+    "degenerate_tables": 26,
+    "expense_lines": 1,
+    "fields_populated": 22,
+    "fields_total": 51,
+    "image_only_pages": 4,
+    "income_lines": 3,
+    "lines_with_values": 0,
+    "pages": 19,
+    "tables": 40
+  },
+  "Bastrop Guardian Self-Storage, 2.69 acres of Vacant Land": {
+    "all_none_lines": 1,
+    "chars_per_page": 928,
+    "degenerate_tables": 7,
+    "expense_lines": 1,
+    "fields_populated": 15,
+    "fields_total": 51,
+    "image_only_pages": 7,
+    "income_lines": 0,
+    "lines_with_values": 0,
+    "pages": 44,
+    "tables": 22
+  },
+  "SS 2Property KS Wichita People's Choice Storage": {
+    "all_none_lines": 12,
+    "chars_per_page": 759,
+    "degenerate_tables": 36,
+    "expense_lines": 42,
+    "fields_populated": 21,
+    "fields_total": 51,
+    "image_only_pages": 14,
+    "income_lines": 27,
+    "lines_with_values": 57,
+    "pages": 58,
+    "tables": 57
+  },
+  "SS TERTIARY OH exurbs of columbus Premier Two Properties": {
+    "all_none_lines": 36,
+    "chars_per_page": 1139,
+    "degenerate_tables": 10,
+    "expense_lines": 40,
+    "fields_populated": 21,
+    "fields_total": 51,
+    "image_only_pages": 5,
+    "income_lines": 25,
+    "lines_with_values": 29,
+    "pages": 40,
+    "tables": 81
+  },
+  "Self Storage \u2013 Rogers, Arkansas 67k nrsf": {
+    "all_none_lines": 0,
+    "chars_per_page": 206,
+    "degenerate_tables": 1,
+    "expense_lines": 0,
+    "fields_populated": 5,
+    "fields_total": 51,
+    "image_only_pages": 6,
+    "income_lines": 0,
+    "lines_with_values": 0,
+    "pages": 10,
+    "tables": 2
+  },
+  "US STORAGE CENTERS (MANAGED) willowbrook rd Dallas TX": {
+    "all_none_lines": 0,
+    "chars_per_page": 890,
+    "degenerate_tables": 3,
+    "expense_lines": 21,
+    "fields_populated": 18,
+    "fields_total": 51,
+    "image_only_pages": 6,
+    "income_lines": 7,
+    "lines_with_values": 28,
+    "pages": 21,
+    "tables": 14
+  },
+  "storwise self-storage opportunity kerrville tx": {
+    "all_none_lines": 6,
+    "chars_per_page": 1260,
+    "degenerate_tables": 1,
+    "expense_lines": 4,
+    "fields_populated": 19,
+    "fields_total": 51,
+    "image_only_pages": 0,
+    "income_lines": 2,
+    "lines_with_values": 0,
+    "pages": 14,
+    "tables": 11
+  }
+}

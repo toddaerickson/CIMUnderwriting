@@ -11,6 +11,9 @@ from dataclasses import dataclass, field, fields
 from typing import Optional
 
 from extract.location import best_city_state, norm_text
+from extract.tables import (
+    ROLE_CURRENT, ROLE_T3, ROLE_YEAR_PREFIX, assign_periods, find_header,
+)
 
 
 @dataclass
@@ -127,12 +130,23 @@ class CIMData:
     capex_estimate: Optional[float] = None
     mgmt_fee_pct: Optional[float] = None
 
+    #: Financial lines the CIM DID state and the parser refused to price,
+    #: because the table's columns could not be named. Rows of
+    #: `{"label", "page", "reason"}`; `engine.run_analysis` turns them into
+    #: run warnings. This is diagnostics ABOUT extraction, not an extracted
+    #: field, which is why `extraction_report` skips it — an empty list is
+    #: the GOOD outcome, and counting it would report a clean parse as one
+    #: more missing field.
+    unmapped_financial_lines: list = field(default_factory=list)
+
     def extraction_report(self) -> dict:
         """Return a report of populated vs missing fields."""
         total = 0
         populated = 0
         missing_fields = []
         for f in fields(self):
+            if f.name == "unmapped_financial_lines":
+                continue
             if f.name in ("unit_mix", "income_lines", "expense_lines", "comp_data"):
                 total += 1
                 if getattr(self, f.name):
@@ -607,6 +621,12 @@ def _parse_financial_tables(tables: list, data: CIMData):
 
     for table_info in tables:
         table = table_info["data"]
+        page = table_info.get("page")
+        # ONE header read per table, not per row — a header is a property of
+        # the table, and re-deriving it inside the row loop would let two rows
+        # of the same table disagree about what their columns mean.
+        roles = find_header(table)
+
         for row in table:
             if len(row) < 2:
                 continue
@@ -619,19 +639,25 @@ def _parse_financial_tables(tables: list, data: CIMData):
             is_expense = any(kw in label for kw in expense_keywords)
 
             if is_income or is_expense:
-                values = []
-                for cell in row[1:]:
-                    val = _parse_currency(cell)
-                    if val is not None:
-                        values.append(val)
-
                 line = FinancialLine(label=row[0].strip())
-                if len(values) >= 1:
-                    line.t12 = values[-1]  # Assume last column is most recent
-                if len(values) >= 2:
-                    line.t3 = values[-2]   # Second to last might be T3
-                if len(values) >= 3:
-                    line.cim_yr1 = values[0]  # First might be pro forma
+                periods = assign_periods(roles, row) if roles else None
+
+                if periods is None:
+                    # REFUSED, not filled: the columns could not be named, so
+                    # no period gets a number. `analysis.fills` draws exactly
+                    # this line — "the value was declined, not substituted,
+                    # and that is a run warning" — and the alternative is the
+                    # inversion this module exists to end.
+                    data.unmapped_financial_lines.append({
+                        "label": line.label, "page": page,
+                        "reason": ("no period header on this table"
+                                   if not roles else
+                                   "columns do not line up with the header"),
+                    })
+                else:
+                    line.t12 = periods.get(ROLE_CURRENT)
+                    line.cim_yr1 = periods.get(f"{ROLE_YEAR_PREFIX}1")
+                    line.t3 = periods.get(ROLE_T3)
 
                 if is_income:
                     data.income_lines.append(line)
@@ -683,20 +709,10 @@ def _parse_number(s: str) -> float:
         return 0.0
 
 
-def _parse_currency(s: str) -> float | None:
-    """Parse a currency value like '$1,234,567' or '(1,234)' for negatives."""
-    if not s or not isinstance(s, str):
-        return None
-    s = s.strip()
-    negative = False
-    if s.startswith("(") and s.endswith(")"):
-        negative = True
-        s = s[1:-1]
-    s = s.replace("$", "").replace(",", "").replace(" ", "").strip()
-    if not s:
-        return None
-    try:
-        val = float(s)
-        return -val if negative else val
-    except ValueError:
-        return None
+# `_parse_currency` lived here and had exactly one caller, the positional
+# guess in `_parse_financial_tables`. It is DELETED rather than left for
+# reuse (scoped-backlog rule 2, deleted not re-defaulted): the next caller
+# would rebuild the compacted `values` list it was written to feed, which is
+# the shape that made a header map impossible. `extract.tables.parse_cell`
+# replaces it and is strictly better on the corpus — it reads `$ (222,391)`,
+# which this returned None for because the `$` sits outside the parenthesis.

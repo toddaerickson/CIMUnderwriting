@@ -49,6 +49,23 @@ REPO = pathlib.Path(__file__).resolve().parent.parent
 #: literal at all in its write paths. What remains uncovered is a NEW
 #: modeling literal appearing in `memo_writer` or `excel_writer`; that is
 #: a real gap, recorded here rather than papered over.
+#:
+#: `extract/` is the second stated residual, measured 2026-08-15 when the
+#: column mapper landed there: 31 bare literals, and reading them decides
+#: the question rather than arguing it. Twelve are HTTP (`timeout=15`,
+#: `status_code != 200`) and string-formatting widths (`'='*60`); the rest
+#: are parsing bounds — `len(city) < 3`, `window=110`, `ord(c) < 128`. None
+#: prices a deal. But `extract/rent_survey.py`'s comp filters
+#: (`20 <= sf <= 1500`, `5 <= price <= 2000`) DO decide which scraped comps
+#: reach the rent analysis, and those are modeling numbers by any honest
+#: reading. They are left outside the sweep because bringing `extract/` in
+#: means 31 by-name entries whose reasons are mostly "network timeout" —
+#: the second-copy-of-the-code failure this module's own header warns
+#: about — and because the survey filters belong to whichever PR next
+#: touches that file, not to a column-mapping PR. The financial-value
+#: literal that WOULD matter in `extract/` is structurally excluded a
+#: different way: `extract.tables` invents no number and refuses instead
+#: (`analysis.fills`, "a REFUSAL is not a fill").
 SWEPT = ("analysis", "model")
 
 #: Values that carry no underwriting meaning in any context: identity and
