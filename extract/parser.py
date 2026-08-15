@@ -510,16 +510,23 @@ def _parse_pricing(text: str, data: CIMData):
             rank = 1                      # covers the whole offering
 
         val = _first_price_in(tail)
-        if (val is None or val < MIN_PLAUSIBLE_ASKING_PRICE) and i + 1 < len(lines):
+        if val is None or val < MIN_PLAUSIBLE_ASKING_PRICE:
             # Header-row form: the label heads a column and the value sits in
             # the row beneath (`ListingPrice CapRate (Year One)` over
             # `$3,500,000 7.83% 434`). Reached whenever the label's own line
             # yields no PLAUSIBLE price — not merely when it holds no digits —
             # because `LIST PRICE 2025 NOI STABILIZED MARGIN` is a header row
             # whose only same-line number is the year of the NOI column.
-            nxt = _first_price_in(lines[i + 1])
-            if nxt is not None and nxt >= MIN_PLAUSIBLE_ASKING_PRICE:
-                val = nxt
+            for probe in lines[i + 1:i + 3]:
+                if not re.search(r"\d", probe):
+                    continue      # a wrapped header cell, e.g. `(STABILIZED)`
+                nxt = _first_price_in(probe)
+                if nxt is not None and nxt >= MIN_PLAUSIBLE_ASKING_PRICE:
+                    val = nxt
+                # The FIRST row carrying digits decides, whether or not it
+                # yielded a price. Scanning past it for something plausible is
+                # how a label ends up owning a number from another table.
+                break
         if val is None or val < MIN_PLAUSIBLE_ASKING_PRICE:
             continue
         if rank < best_rank:

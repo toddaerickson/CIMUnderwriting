@@ -126,6 +126,25 @@ def test_a_header_row_whose_only_figure_is_a_column_year_still_reads_beneath():
     assert price(text) == 5_600_000
 
 
+def test_a_wrapped_header_cell_between_label_and_values_is_stepped_over():
+    """The same header can wrap: `(STABILIZED)` is the second half of the
+    STABILIZED MARGIN column heading, not a row. Only a DIGIT-FREE line is
+    stepped over, and only one — the first row carrying digits decides."""
+    text = ("LIST PRICE 2025 NOI STABILIZED MARGIN\n"
+            "(STABILIZED)\n"
+            "$7,250,000 $411,079 5.6% 66.5%")
+    assert price(text) == 7_250_000
+
+
+def test_the_first_digit_bearing_row_decides_even_when_it_is_not_a_price():
+    """Otherwise a label scans forward until something plausible turns up, and
+    ends up owning a figure from a different table."""
+    text = ("OFFERING PRICE: CONTACT BROKER FOR PRICING\n"
+            "ADDRESS: 20603 CLAY RD\n"
+            "$8,400,000")
+    assert price(text) is None
+
+
 @pytest.mark.parametrize("text", [
     "OFFERING PRICE: CONTACT VERSAL FOR PRICING\nADDRESS: 20603 CLAY RD",
     "PURCHASE PRICE\n11017 County Line Road",
