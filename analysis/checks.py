@@ -74,6 +74,40 @@ SOURCES_USES_TOLERANCE_ABS = 0.01
 # this absorbs representation error and nothing an analyst could enter.
 EXIT_CAP_DERIVATION_EPSILON = 1e-9
 
+# ── Order-of-magnitude tripwires ────────────────────────────────────
+# These are NOT benchmark bands, and the distinction is the whole point.
+# `opex_per_nrsf_band` asks whether a figure matches what a well-run
+# facility spends. These ask something cruder and prior to it: is this
+# number even the right ORDER OF MAGNITUDE, or did an input arrive in the
+# wrong units — or, as at Abilene, from a different property than the one
+# it is being divided by?
+#
+# The case that motivated them: a four-property portfolio CIM whose
+# portfolio NOI was underwritten against ONE property's square footage and
+# asking price. That produced $88.60/SF of NOI, a 123% entry cap and a
+# 125.7% base-case IRR which PASSED the 10% IRR gate — every downstream
+# figure wrong by an order of magnitude, and not one existing check fired,
+# because each of them was individually satisfied.
+#
+# So the bands are deliberately far wider than any deal anyone would
+# underwrite. They are not tuned and are not meant to be: a failure here
+# means an INPUT IS WRONG, never that a deal is unusual. Anything narrow
+# enough to be interesting is `opex_*_band`'s job, one severity down.
+#
+# Hard-coded rather than settings-editable for the same reason
+# EXPENSE_FLOOR_FRACTION above is: an operator tuning the threshold at
+# which the model admits it cannot read its own inputs is not a setting,
+# it is a way to turn this off. Blocking findings can be accepted per-run
+# by the analyst, which is the intended escape hatch for the rare
+# legitimate outlier.
+#
+# The NOI floor sits at $1.00 rather than nearer the benchmark because a
+# genuinely pre-stabilized asset in lease-up can post very thin NOI per
+# SF, and refusing that deal for the wrong reason is exactly the error
+# design decision 9 warns about with occupancy.
+PLAUSIBLE_NOI_PER_NRSF = (1.00, 30.00)
+PLAUSIBLE_ENTRY_CAP = (0.02, 0.20)
+
 
 def noi_recon_tolerance(revenue: float) -> float:
     """Income-identity tolerance. Canonical definition — webapp.forms
@@ -119,6 +153,11 @@ class CheckInput:
     ttm_total_expenses: float | None = None
     ttm_noi: float | None = None
     ttm_months: int | None = None   # months of actuals behind the TTM figures
+    # Pricing. Carried for `entry_cap_plausible` only — no other check
+    # reads it, and the register deliberately does not evaluate whether a
+    # price is GOOD (that is the gates' and the solvers' job), only
+    # whether the price and the NOI describe the same asset.
+    asking_price: float | None = None
     # Size & occupancy
     nrsf: float | None = None
     unit_mix: tuple = ()            # dicts with count / sf / rate (monthly $)
@@ -359,6 +398,80 @@ def _opex_per_nrsf_band(inp):
     side = "below" if per_sf < low else "above"
     return (FAIL, f"Total OpEx of {_psf(per_sf)} is {side} the "
                   f"{_psf(low)}–{_psf(high)} benchmark band.", values)
+
+
+def _noi_per_nrsf_plausible(inp):
+    """Does the NOI describe the same asset as the NRSF?
+
+    Blocking, where `opex_per_nrsf_band` beside it is advisory: an OpEx
+    line outside its band is a judgment to argue with, whereas NOI an
+    order of magnitude off its own square footage means the projection,
+    every scenario, both solvers and the IRR gate are all being computed
+    on a number that is not this property's.
+    """
+    noi, nrsf = inp.ttm_noi, inp.nrsf
+    low, high = PLAUSIBLE_NOI_PER_NRSF
+    per_sf = (noi / nrsf) if (noi is not None and nrsf) else None
+    values = {"noi_per_nrsf": per_sf, "ttm_noi": noi, "nrsf": nrsf,
+              "low": low, "high": high}
+    if per_sf is None:
+        return (SKIPPED, "Needs both TTM NOI and NRSF.", values)
+    if low <= per_sf <= high:
+        return (PASS, f"TTM NOI of {_psf(per_sf)} is a plausible figure "
+                      f"for {nrsf:,.0f} SF.", values)
+    if per_sf > high:
+        return (FAIL, f"TTM NOI of ${noi:,.0f} against {nrsf:,.0f} SF is "
+                      f"{_psf(per_sf)} — above the {_psf(high)} ceiling for "
+                      f"a plausible self-storage asset. The usual cause is "
+                      f"a portfolio-level NOI divided by ONE property's "
+                      f"square footage, or a monthly figure read as annual. "
+                      f"Every return in this model is computed from this "
+                      f"number.", values)
+    return (FAIL, f"TTM NOI of ${noi:,.0f} against {nrsf:,.0f} SF is "
+                  f"{_psf(per_sf)} — below the {_psf(low)} floor for a "
+                  f"plausible self-storage asset. A property still in "
+                  f"lease-up can legitimately sit here; anything else "
+                  f"points at an NOI or NRSF that do not describe the "
+                  f"same asset.", values)
+
+
+def _entry_cap_plausible(inp):
+    """Does the NOI describe the same asset as the ASKING PRICE?
+
+    The sibling of `noi_per_nrsf_plausible` on the other axis, and worth
+    stating separately because the two fail independently: a portfolio
+    NOI against one property's SF trips the first, against one property's
+    price trips this one, and the Abilene CIM tripped both.
+
+    It also guards a specific downstream surprise. `project_cash_flows`
+    floors the exit cap at the entry cap (decision 4), so an implausible
+    entry cap silently reprices the exit for every scenario, while the
+    sensitivity grid — which sweeps exit caps UNCOERCED by design — does
+    not follow it. The two surfaces then disagree, and the disagreement
+    reads as a bug in the grid rather than as the bad input it is.
+    """
+    noi, price = inp.ttm_noi, inp.asking_price
+    low, high = PLAUSIBLE_ENTRY_CAP
+    cap = (noi / price) if (noi is not None and price) else None
+    values = {"entry_cap": cap, "ttm_noi": noi, "asking_price": price,
+              "low": low, "high": high}
+    if cap is None:
+        return (SKIPPED, "Needs both TTM NOI and an asking price.", values)
+    if low <= cap <= high:
+        return (PASS, f"Entry cap of {_cap(cap)} is a plausible going-in "
+                      f"yield.", values)
+    side = "above" if cap > high else "below"
+    hint = ("The usual cause is a portfolio-level NOI against one "
+            "property's asking price."
+            if cap > high else
+            "Check whether the asking price covers more property than the "
+            "NOI does.")
+    return (FAIL, f"TTM NOI of ${noi:,.0f} against an asking price of "
+                  f"${price:,.0f} is an entry cap of {_cap(cap)} — {side} "
+                  f"the {_cap(low)}–{_cap(high)} range any real transaction "
+                  f"occupies. {hint} Note the exit cap is floored at the "
+                  f"entry cap, so this figure also silently reprices the "
+                  f"exit in every scenario.", values)
 
 
 def _expense_line_floor(inp):
@@ -728,6 +841,12 @@ CHECKS = (
               "physical_occupancy, economic_occupancy", _occupancy_sanity),
     CheckSpec("egr_le_gpr", "EGR ≤ GPR", BLOCKING,
               "ttm_gpr, ttm_egr", _egr_le_gpr),
+    CheckSpec("noi_per_nrsf_plausible", "NOI per NRSF is the right order "
+              "of magnitude", BLOCKING, "ttm_noi, nrsf",
+              _noi_per_nrsf_plausible),
+    CheckSpec("entry_cap_plausible", "Entry cap is the right order of "
+              "magnitude", BLOCKING, "ttm_noi, asking_price",
+              _entry_cap_plausible),
     CheckSpec("sources_uses_ties", "Sources & Uses ties to DCF basis",
               BLOCKING, "sources_uses, scenario_results[*].total_basis",
               _sources_uses_ties),
@@ -854,6 +973,7 @@ def input_from_cim(cim, financial_analysis=None, physical_analysis=None,
         ttm_total_expenses=cim.ttm_total_expenses,
         ttm_noi=cim.ttm_noi,
         ttm_months=cim.ttm_months,
+        asking_price=cim.asking_price,
         nrsf=cim.nrsf,
         unit_mix=_unit_mix_dicts(cim.unit_mix),
         physical_occupancy=cim.physical_occupancy,

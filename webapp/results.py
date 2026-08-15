@@ -261,6 +261,7 @@ def _unconverged(solved) -> bool:
 
 def returns_context(r) -> dict:
     scen = r.get("scenario_results") or {}
+    base = scen.get("base") or {}
     va = r.get("va_results") or {}
     sens = r.get("sensitivity") or {}
     sens_rows = []
@@ -323,6 +324,28 @@ def returns_context(r) -> dict:
         "has_sensitivity": bool(sens.get("irr_grid")),
         "sens_caps": [fmt_pct(c, digits=2) for c in sens.get("cap_values") or []],
         "sens_rows": sens_rows,
+        # The grid sweeps exit caps WITHOUT the entry-cap floor that
+        # `project_cash_flows` applies — deliberately, because coercing
+        # here would raise every cell below the entry cap to it and
+        # flatten the axis the table exists to show
+        # (model.returns_model._build_sensitivity says so).
+        #
+        # The consequence only bites when the base case WAS floored: the
+        # two surfaces are then priced at different exit caps, the grid
+        # cannot reconcile to the headline IRR at any cell, and a reader
+        # comparing the two reasonably concludes the grid is broken. A QA
+        # pass did exactly that (2026-08-14) and filed it as a defect in
+        # the grid; it is neither surface being wrong, it is one input
+        # producing an entry cap the floor then binds on.
+        #
+        # Reported HERE as well as in the check register, which already
+        # carries `exit_cap_coercion`: that register renders on the
+        # Summary tab, and the person comparing a tile to a table is
+        # standing on Returns.
+        "sens_base_coerced": bool(base.get("exit_cap_coerced")),
+        "sens_requested_cap": fmt_pct(base.get("requested_exit_cap"),
+                                      digits=2),
+        "sens_applied_cap": fmt_pct(base.get("exit_cap"), digits=2),
     }
 
 

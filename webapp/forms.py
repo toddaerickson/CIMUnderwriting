@@ -277,6 +277,7 @@ def check_input_from_cleaned(cleaned, unit_mix=None) -> checks.CheckInput:
         ttm_total_expenses=cleaned.get("ttm_total_expenses"),
         ttm_noi=cleaned.get("ttm_noi"),
         ttm_months=cleaned.get("ttm_months"),
+        asking_price=cleaned.get("asking_price"),
         nrsf=cleaned.get("nrsf"),
         unit_mix=tuple(unit_mix or ()),
         physical_occupancy=_pct_decimal(cleaned.get("physical_occupancy")),

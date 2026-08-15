@@ -4,13 +4,18 @@
     "advisory_failed": 6,
     "blocking_failed": 0,
     "failed": 6,
-    "passed": 7,
+    "passed": 9,
     "skipped": 1,
-    "total": 14
+    "total": 16
   },
   "checks": [
     [
       "egr_le_gpr",
+      "blocking",
+      "pass"
+    ],
+    [
+      "entry_cap_plausible",
       "blocking",
       "pass"
     ],
@@ -37,6 +42,11 @@
     [
       "market_exit_cap",
       "advisory",
+      "pass"
+    ],
+    [
+      "noi_per_nrsf_plausible",
+      "blocking",
       "pass"
     ],
     [
@@ -879,29 +889,37 @@
         },
         "A10": {
           "fill": "00DDF3E4",
-          "v": "Exit cap derivation"
+          "v": "Entry cap is the right order of magnitude"
         },
         "A11": {
           "fill": "00DDF3E4",
-          "v": "Loan term vs hold period"
+          "v": "Exit cap derivation"
         },
         "A12": {
           "fill": "00DDF3E4",
-          "v": "Occupancy coherence"
+          "v": "Loan term vs hold period"
         },
         "A13": {
           "fill": "00DDF3E4",
-          "v": "OpEx / Revenue band"
+          "v": "NOI per NRSF is the right order of magnitude"
         },
         "A14": {
           "fill": "00DDF3E4",
-          "v": "Revenue \u2212 Expenses = NOI"
+          "v": "Occupancy coherence"
         },
         "A15": {
           "fill": "00DDF3E4",
-          "v": "Sources & Uses ties to DCF basis"
+          "v": "OpEx / Revenue band"
         },
         "A16": {
+          "fill": "00DDF3E4",
+          "v": "Revenue \u2212 Expenses = NOI"
+        },
+        "A17": {
+          "fill": "00DDF3E4",
+          "v": "Sources & Uses ties to DCF basis"
+        },
+        "A18": {
           "v": "TTM annualization basis"
         },
         "A2": {
@@ -937,7 +955,7 @@
         },
         "B10": {
           "fill": "00DDF3E4",
-          "v": "Advisory"
+          "v": "Blocking"
         },
         "B11": {
           "fill": "00DDF3E4",
@@ -945,11 +963,11 @@
         },
         "B12": {
           "fill": "00DDF3E4",
-          "v": "Blocking"
+          "v": "Advisory"
         },
         "B13": {
           "fill": "00DDF3E4",
-          "v": "Advisory"
+          "v": "Blocking"
         },
         "B14": {
           "fill": "00DDF3E4",
@@ -957,9 +975,17 @@
         },
         "B15": {
           "fill": "00DDF3E4",
-          "v": "Blocking"
+          "v": "Advisory"
         },
         "B16": {
+          "fill": "00DDF3E4",
+          "v": "Blocking"
+        },
+        "B17": {
+          "fill": "00DDF3E4",
+          "v": "Blocking"
+        },
+        "B18": {
           "v": "Advisory"
         },
         "B2": {
@@ -1018,6 +1044,14 @@
           "v": "PASS"
         },
         "C16": {
+          "fill": "00DDF3E4",
+          "v": "PASS"
+        },
+        "C17": {
+          "fill": "00DDF3E4",
+          "v": "PASS"
+        },
+        "C18": {
           "v": "SKIPPED"
         },
         "C2": {
@@ -1053,29 +1087,37 @@
         },
         "D10": {
           "fill": "00DDF3E4",
-          "v": "Self Storage in the mid band anchors at 6.250% (table as of 2026-Q3). Derived caps \u2014 Bear 7.750% = 6.250% +100 bp spread +50 bp drift over 5 yrs; Base 6.625% = 6.250% +0 bp spread +37.5 bp drift over 5 yrs; Bull 5.500% = 6.250% -100 bp spread +25 bp drift over 5 yrs."
+          "v": "Entry cap of 7.444% is a plausible going-in yield."
         },
         "D11": {
           "fill": "00DDF3E4",
-          "v": "The loan's 10-year term outlasts the 5-year hold."
+          "v": "Self Storage in the mid band anchors at 6.250% (table as of 2026-Q3). Derived caps \u2014 Bear 7.750% = 6.250% +100 bp spread +50 bp drift over 5 yrs; Base 6.625% = 6.250% +0 bp spread +37.5 bp drift over 5 yrs; Bull 5.500% = 6.250% -100 bp spread +25 bp drift over 5 yrs."
         },
         "D12": {
           "fill": "00DDF3E4",
-          "v": "Occupancy inputs are in range and economic does not exceed physical."
+          "v": "The loan's 10-year term outlasts the 5-year hold."
         },
         "D13": {
           "fill": "00DDF3E4",
-          "v": "OpEx/Revenue of 39.8% is inside the 35.0%\u201355.0% band."
+          "v": "TTM NOI of $11.17/SF is a plausible figure for 60,000 SF."
         },
         "D14": {
           "fill": "00DDF3E4",
-          "v": "Revenue $1,098,000 \u2212 Expenses $428,000 = $670,000, matching TTM NOI within the $10,980 tolerance."
+          "v": "Occupancy inputs are in range and economic does not exceed physical."
         },
         "D15": {
           "fill": "00DDF3E4",
-          "v": "Uses, Sources and the DCF basis all equal $9,148,500 (DCF basis $9,090,000 + financing costs $58,500)."
+          "v": "OpEx/Revenue of 39.8% is inside the 35.0%\u201355.0% band."
         },
         "D16": {
+          "fill": "00DDF3E4",
+          "v": "Revenue $1,098,000 \u2212 Expenses $428,000 = $670,000, matching TTM NOI within the $10,980 tolerance."
+        },
+        "D17": {
+          "fill": "00DDF3E4",
+          "v": "Uses, Sources and the DCF basis all equal $9,148,500 (DCF basis $9,090,000 + financing costs $58,500)."
+        },
+        "D18": {
           "v": "The CIM does not state how many months of actuals its TTM figures cover."
         },
         "D2": {
@@ -1111,29 +1153,37 @@
         },
         "E10": {
           "fill": "00DDF3E4",
-          "v": "market_cap, scenario_results[*].exit_cap_detail, va_results[*].exit_cap_detail"
+          "v": "ttm_noi, asking_price"
         },
         "E11": {
           "fill": "00DDF3E4",
-          "v": "debt.terms.term_years, debt.annual_debt_service"
+          "v": "market_cap, scenario_results[*].exit_cap_detail, va_results[*].exit_cap_detail"
         },
         "E12": {
           "fill": "00DDF3E4",
-          "v": "physical_occupancy, economic_occupancy"
+          "v": "debt.terms.term_years, debt.annual_debt_service"
         },
         "E13": {
           "fill": "00DDF3E4",
-          "v": "financial_analysis.expense_ratio_check.opex_revenue_ratio"
+          "v": "ttm_noi, nrsf"
         },
         "E14": {
           "fill": "00DDF3E4",
-          "v": "ttm_total_revenue, ttm_total_expenses, ttm_noi"
+          "v": "physical_occupancy, economic_occupancy"
         },
         "E15": {
           "fill": "00DDF3E4",
-          "v": "sources_uses, scenario_results[*].total_basis"
+          "v": "financial_analysis.expense_ratio_check.opex_revenue_ratio"
         },
         "E16": {
+          "fill": "00DDF3E4",
+          "v": "ttm_total_revenue, ttm_total_expenses, ttm_noi"
+        },
+        "E17": {
+          "fill": "00DDF3E4",
+          "v": "sources_uses, scenario_results[*].total_basis"
+        },
+        "E18": {
           "v": "ttm_months"
         },
         "E2": {
@@ -4724,7 +4774,7 @@
         "1. Investment Summary",
         "Occupancy check: economic occupancy of 90.0% vs physical of 93.0% (3-pt spread) \u2014 within normal operating range; upside must come from rate growth or expense control rather than collections recovery.",
         "Model Checks",
-        "6 of 14 integrity checks flagged. Blocking findings were accepted by the analyst with the discrepancy recorded; advisory findings do not stop the model but change how its outputs should be read.",
+        "6 of 16 integrity checks flagged. Blocking findings were accepted by the analyst with the discrepancy recorded; advisory findings do not stop the model but change how its outputs should be read.",
         "1 model input was not stated in the CIM and was filled from a default or a benchmark. Every one is listed with its source in Appendix A; the returns below are computed on them.",
         "Screening Gates",
         "Returns Snapshot (Unlevered)",

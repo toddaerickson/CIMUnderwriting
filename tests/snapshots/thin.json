@@ -4,15 +4,20 @@
     "advisory_failed": 5,
     "blocking_failed": 0,
     "failed": 5,
-    "passed": 6,
+    "passed": 8,
     "skipped": 3,
-    "total": 14
+    "total": 16
   },
   "checks": [
     [
       "egr_le_gpr",
       "blocking",
       "skipped"
+    ],
+    [
+      "entry_cap_plausible",
+      "blocking",
+      "pass"
     ],
     [
       "exit_cap_coercion",
@@ -37,6 +42,11 @@
     [
       "market_exit_cap",
       "advisory",
+      "pass"
+    ],
+    [
+      "noi_per_nrsf_plausible",
+      "blocking",
       "pass"
     ],
     [
@@ -885,27 +895,35 @@
         },
         "A10": {
           "fill": "00DDF3E4",
-          "v": "Occupancy coherence"
+          "v": "Loan term vs hold period"
         },
         "A11": {
           "fill": "00DDF3E4",
-          "v": "Revenue \u2212 Expenses = NOI"
+          "v": "NOI per NRSF is the right order of magnitude"
         },
         "A12": {
           "fill": "00DDF3E4",
-          "v": "Sources & Uses ties to DCF basis"
+          "v": "Occupancy coherence"
         },
         "A13": {
           "fill": "00DDF3E4",
-          "v": "Total OpEx $/NRSF band"
+          "v": "Revenue \u2212 Expenses = NOI"
         },
         "A14": {
-          "v": "EGR \u2264 GPR"
+          "fill": "00DDF3E4",
+          "v": "Sources & Uses ties to DCF basis"
         },
         "A15": {
-          "v": "TTM annualization basis"
+          "fill": "00DDF3E4",
+          "v": "Total OpEx $/NRSF band"
         },
         "A16": {
+          "v": "EGR \u2264 GPR"
+        },
+        "A17": {
+          "v": "TTM annualization basis"
+        },
+        "A18": {
           "v": "Unit mix rents vs GPR"
         },
         "A2": {
@@ -933,15 +951,15 @@
         },
         "A8": {
           "fill": "00DDF3E4",
-          "v": "Exit cap derivation"
+          "v": "Entry cap is the right order of magnitude"
         },
         "A9": {
           "fill": "00DDF3E4",
-          "v": "Loan term vs hold period"
+          "v": "Exit cap derivation"
         },
         "B10": {
           "fill": "00DDF3E4",
-          "v": "Blocking"
+          "v": "Advisory"
         },
         "B11": {
           "fill": "00DDF3E4",
@@ -953,15 +971,23 @@
         },
         "B13": {
           "fill": "00DDF3E4",
-          "v": "Advisory"
+          "v": "Blocking"
         },
         "B14": {
+          "fill": "00DDF3E4",
           "v": "Blocking"
         },
         "B15": {
+          "fill": "00DDF3E4",
           "v": "Advisory"
         },
         "B16": {
+          "v": "Blocking"
+        },
+        "B17": {
+          "v": "Advisory"
+        },
+        "B18": {
           "v": "Advisory"
         },
         "B2": {
@@ -989,7 +1015,7 @@
         },
         "B8": {
           "fill": "00DDF3E4",
-          "v": "Advisory"
+          "v": "Blocking"
         },
         "B9": {
           "fill": "00DDF3E4",
@@ -1012,12 +1038,20 @@
           "v": "PASS"
         },
         "C14": {
-          "v": "SKIPPED"
+          "fill": "00DDF3E4",
+          "v": "PASS"
         },
         "C15": {
-          "v": "SKIPPED"
+          "fill": "00DDF3E4",
+          "v": "PASS"
         },
         "C16": {
+          "v": "SKIPPED"
+        },
+        "C17": {
+          "v": "SKIPPED"
+        },
+        "C18": {
           "v": "SKIPPED"
         },
         "C2": {
@@ -1053,27 +1087,35 @@
         },
         "D10": {
           "fill": "00DDF3E4",
-          "v": "Occupancy inputs are in range and economic does not exceed physical."
+          "v": "The loan's 10-year term outlasts the 5-year hold."
         },
         "D11": {
           "fill": "00DDF3E4",
-          "v": "Revenue $486,000 \u2212 Expenses $214,000 = $272,000, matching TTM NOI within the $4,860 tolerance."
+          "v": "TTM NOI of $6.80/SF is a plausible figure for 40,000 SF."
         },
         "D12": {
           "fill": "00DDF3E4",
-          "v": "Uses, Sources and the DCF basis all equal $4,269,300 (DCF basis $4,242,000 + financing costs $27,300)."
+          "v": "Occupancy inputs are in range and economic does not exceed physical."
         },
         "D13": {
           "fill": "00DDF3E4",
-          "v": "Total OpEx of $2.58/SF is inside the $2.22/SF\u2013$4.57/SF band."
+          "v": "Revenue $486,000 \u2212 Expenses $214,000 = $272,000, matching TTM NOI within the $4,860 tolerance."
         },
         "D14": {
-          "v": "GPR or EGR not present."
+          "fill": "00DDF3E4",
+          "v": "Uses, Sources and the DCF basis all equal $4,269,300 (DCF basis $4,242,000 + financing costs $27,300)."
         },
         "D15": {
-          "v": "The CIM does not state how many months of actuals its TTM figures cover."
+          "fill": "00DDF3E4",
+          "v": "Total OpEx of $2.58/SF is inside the $2.22/SF\u2013$4.57/SF band."
         },
         "D16": {
+          "v": "GPR or EGR not present."
+        },
+        "D17": {
+          "v": "The CIM does not state how many months of actuals its TTM figures cover."
+        },
+        "D18": {
           "v": "No unit mix or no stated GPR \u2014 reconciliation not testable."
         },
         "D2": {
@@ -1101,35 +1143,43 @@
         },
         "D8": {
           "fill": "00DDF3E4",
-          "v": "Self Storage in the aging band anchors at 6.750% (table as of 2026-Q3). Derived caps \u2014 Bear 8.250% = 6.750% +100 bp spread +50 bp drift over 5 yrs; Base 7.125% = 6.750% +0 bp spread +37.5 bp drift over 5 yrs; Bull 6.000% = 6.750% -100 bp spread +25 bp drift over 5 yrs."
+          "v": "Entry cap of 6.476% is a plausible going-in yield."
         },
         "D9": {
           "fill": "00DDF3E4",
-          "v": "The loan's 10-year term outlasts the 5-year hold."
+          "v": "Self Storage in the aging band anchors at 6.750% (table as of 2026-Q3). Derived caps \u2014 Bear 8.250% = 6.750% +100 bp spread +50 bp drift over 5 yrs; Base 7.125% = 6.750% +0 bp spread +37.5 bp drift over 5 yrs; Bull 6.000% = 6.750% -100 bp spread +25 bp drift over 5 yrs."
         },
         "E10": {
           "fill": "00DDF3E4",
-          "v": "physical_occupancy, economic_occupancy"
+          "v": "debt.terms.term_years, debt.annual_debt_service"
         },
         "E11": {
           "fill": "00DDF3E4",
-          "v": "ttm_total_revenue, ttm_total_expenses, ttm_noi"
+          "v": "ttm_noi, nrsf"
         },
         "E12": {
           "fill": "00DDF3E4",
-          "v": "sources_uses, scenario_results[*].total_basis"
+          "v": "physical_occupancy, economic_occupancy"
         },
         "E13": {
           "fill": "00DDF3E4",
-          "v": "financial_analysis.expense_ratio_check.opex_per_nrsf"
+          "v": "ttm_total_revenue, ttm_total_expenses, ttm_noi"
         },
         "E14": {
-          "v": "ttm_gpr, ttm_egr"
+          "fill": "00DDF3E4",
+          "v": "sources_uses, scenario_results[*].total_basis"
         },
         "E15": {
-          "v": "ttm_months"
+          "fill": "00DDF3E4",
+          "v": "financial_analysis.expense_ratio_check.opex_per_nrsf"
         },
         "E16": {
+          "v": "ttm_gpr, ttm_egr"
+        },
+        "E17": {
+          "v": "ttm_months"
+        },
+        "E18": {
           "v": "unit_mix, ttm_gpr"
         },
         "E2": {
@@ -1157,11 +1207,11 @@
         },
         "E8": {
           "fill": "00DDF3E4",
-          "v": "market_cap, scenario_results[*].exit_cap_detail, va_results[*].exit_cap_detail"
+          "v": "ttm_noi, asking_price"
         },
         "E9": {
           "fill": "00DDF3E4",
-          "v": "debt.terms.term_years, debt.annual_debt_service"
+          "v": "market_cap, scenario_results[*].exit_cap_detail, va_results[*].exit_cap_detail"
         }
       },
       "Inputs": {
@@ -4744,7 +4794,7 @@
         "1. Investment Summary",
         "Occupancy check: the CIM quotes physical occupancy only. Request economic occupancy (collected rent vs gross potential at street rates) before proceeding \u2014 a broker quoting a single occupancy figure is almost always quoting physical, and the spread between the two is where CIMs hide weakness.",
         "Model Checks",
-        "5 of 14 integrity checks flagged. Blocking findings were accepted by the analyst with the discrepancy recorded; advisory findings do not stop the model but change how its outputs should be read.",
+        "5 of 16 integrity checks flagged. Blocking findings were accepted by the analyst with the discrepancy recorded; advisory findings do not stop the model but change how its outputs should be read.",
         "10 model inputs were not stated in the CIM and were filled from a default or a benchmark. Every one is listed with its source in Appendix A; the returns below are computed on them.",
         "Screening Gates",
         "Returns Snapshot (Unlevered)",
