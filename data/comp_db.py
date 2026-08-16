@@ -178,7 +178,23 @@ class CompDatabase:
                 in_place_rent = rent_est.get("monthly_per_sf")
 
         with self._connect() as conn:
-            # Delete existing record for this PDF (upsert)
+            # Delete existing record for this PDF (upsert) — CHILDREN FIRST.
+            #
+            # The schema declares FOREIGN KEYs but nothing enables the
+            # `foreign_keys` pragma and no constraint carries ON DELETE
+            # CASCADE, so deleting the parent alone strands every child row.
+            # Re-analysing one deal therefore leaked its whole unit_mix,
+            # expense_lines and data_sources set on each run; a live DB had
+            # accumulated 124 orphaned unit_mix and 279 orphaned expense_lines
+            # rows this way. They are invisible to results (every benchmark
+            # query JOINs properties) but they would silently reattach to an
+            # unrelated property if AUTOINCREMENT were ever reset, and they
+            # make any orphan count useless as a health check.
+            old = conn.execute("SELECT id FROM properties WHERE pdf_filename = ?",
+                               (pdf_filename,)).fetchall()
+            for (old_id,) in old:
+                for tbl in ("data_sources", "unit_mix", "expense_lines"):
+                    conn.execute(f"DELETE FROM {tbl} WHERE property_id = ?", (old_id,))
             conn.execute("DELETE FROM properties WHERE pdf_filename = ?",
                          (pdf_filename,))
 

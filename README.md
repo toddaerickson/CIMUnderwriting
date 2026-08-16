@@ -73,10 +73,29 @@ python scripts/import_regal_database.py --dry-run      # report only, no writes
 python scripts/import_regal_database.py --reset        # drop prior [regal: rows first
 ```
 
-It maps the workbook's CAD sheets into `properties` and its unit-rate sheets
-into `unit_mix` (tagged with a `[regal:` filename prefix), so the existing
-rent/expense/revenue benchmark queries immediately see real facilities. Reruns
-are idempotent and never touch rows that came from actual CIM analyses.
+It maps the workbook's four County Appraisal District sheets into `properties`
+— NRSF, year built, acreage, location — plus provenance rows in `data_sources`
+(tier 3). Rows are tagged `pdf_filename = "[regal:<sheet>:<key>].xlsx"`; note
+the trailing `.xlsx`, because a sweep written against the bracketed prefix alone
+matches nothing. Reruns are idempotent and never touch rows that came from
+actual CIM analyses; `--reset` sweeps only `[regal:` rows.
+
+Two things it deliberately does **not** do, and the reason matters if you are
+about to seed a different workbook:
+
+- **It writes no rents.** This workbook's data is ~2013–2016, and its unit-rate
+  columns are decade-old asking rents. Seeding them made 158 of 166 Texas rent
+  comps one stale portfolio presenting as current, which moved a $1.20/SF
+  subject's rent gap from +12.1% to +9.0%. Nothing downstream filters comps by
+  age, so stale rents are worse than none — `query_rent_comps` returning `None`
+  falls back to the CIM's own stated market rent.
+- **It writes no `price_per_sf`.** The CAD figure is a tax-appraised value; that
+  column is filled by real analyses with broker asking price ÷ NRSF. The
+  appraised figure is kept in `data_sources` under `cad_appraised_per_sf`.
+
+`analysis_date` carries the **source's** vintage (2015/2016 here), not the
+import time, so imported rows sort below real analyses under
+`ORDER BY analysis_date DESC` and read as what they are.
 
 ## Investment Criteria
 
