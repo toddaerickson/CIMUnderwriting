@@ -114,9 +114,23 @@ def extract_pdf_data(pdf_path: str, cim_overrides: dict = None,
     # Step 2: Parse CIM
     _progress(2, 4, "Parsing CIM data...")
     from extract.parser import parse_cim
-    cim_data = parse_cim(raw)
+    stem = os.path.splitext(os.path.basename(pdf_path))[0]
+    cim_data = parse_cim(raw, filename=stem)
     result.cim_data = cim_data
     result.extraction_report = cim_data.extraction_report()
+
+    # A portfolio CIM must be loud, not silently underwritten as one asset.
+    # result.errors flows to Deal.extract_warnings and the assumptions page,
+    # so this surfaces without new UI.
+    if getattr(cim_data, "portfolio_signal", None):
+        ev = cim_data.portfolio_signal.get("evidence", [])
+        result.errors.append(
+            "Possible multi-property / portfolio CIM"
+            + (f": {'; '.join(ev)}" if ev else "")
+            + ". Extracted figures may mix portfolio- and property-level "
+              "values — confirm every field before running analysis, or "
+              "upload each property separately."
+        )
 
     # Step 3: Apply manual overrides from GUI
     if cim_overrides:

@@ -20,6 +20,22 @@
   </div>
   {% endif %}
 
+  {% if deal.portfolio_suspect %}
+  <div class="mb-3 rounded-md border border-amber-300 bg-amber-50 px-4 py-2">
+    <div class="text-sm font-semibold text-amber-900">Possible multi-property / portfolio CIM</div>
+    <p class="mt-1 text-xs text-amber-800">
+      This document appears to describe more than one property
+      {% if deal.portfolio_evidence %}— {{ deal.portfolio_evidence|join:"; " }}{% endif %}.
+      The fields below were extracted from a single pass over the whole
+      document, so they may mix <strong>portfolio-level</strong> and
+      <strong>per-property</strong> figures (for example a portfolio asking
+      price divided by one property's square footage).
+      <strong>Confirm every value before running analysis</strong>, or upload
+      each property separately.
+    </p>
+  </div>
+  {% endif %}
+
   {% if missing_fields %}
   <details class="mb-3 text-xs text-slate-600">
     <summary class="cursor-pointer select-none">Missing fields ({{ missing_fields|length }})</summary>

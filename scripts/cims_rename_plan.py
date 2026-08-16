@@ -55,6 +55,10 @@ from extract.location import (  # noqa: E402
     norm_text, tidy_city,
 )
 
+# One definition of "is this a portfolio", shared with extract/parser.py —
+# the analysis pipeline surfaces the same signal the filing tags.
+from extract.portfolio import is_portfolio  # noqa: E402
+
 # ---------------------------------------------------------------- constants
 
 # Marcus & Millichap activity IDs, e.g. ZAH0320384 -- externally-recognised deal keys.
@@ -161,18 +165,6 @@ def classify(text: str):
     if len(classes) > 1 and scores[classes[1]] >= max(3, scores[top] * 0.35):
         return f"{top}+{classes[1]}", scores
     return top, scores
-
-
-PORTFOLIO_RE = re.compile(
-    r"\b(two|three|four|five|six|\d{1,2})[\s-]*(propert(y|ies)|facilit(y|ies)|site|store|"
-    r"asset)s?[\s-]*(portfolio|offering)?\b(?=.{0,40}(portfolio|offering|package))"
-    r"|\b(propert(y|ies)|storage|asset)\s+portfolio\b"
-    r"|\bportfolio\s+(of|offering|sale)\b"
-    r"|\bmulti[\s-]?(property|site)\b", re.IGNORECASE)
-
-
-def is_portfolio(*texts) -> bool:
-    return any(PORTFOLIO_RE.search(t or "") for t in texts)
 
 
 def stage_tags(text: str):

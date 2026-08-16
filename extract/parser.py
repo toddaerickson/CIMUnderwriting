@@ -156,6 +156,12 @@ class CIMData:
     capex_estimate: Optional[float] = None
     mgmt_fee_pct: Optional[float] = None
 
+    # Multi-property detection. None for a single-asset CIM; a dict from
+    # extract.portfolio.portfolio_signal().as_dict() when the document looks
+    # like a portfolio. Presence is the flag — the analysis pipeline must
+    # surface it, not silently underwrite a mixed bag as one property.
+    portfolio_signal: Optional[dict] = None
+
     #: Financial lines the CIM DID state and the parser refused to price,
     #: because the table's columns could not be named. Rows of
     #: `{"label", "page", "reason"}`; `engine.run_analysis` turns them into
@@ -171,7 +177,9 @@ class CIMData:
         populated = 0
         missing_fields = []
         for f in fields(self):
-            if f.name == "unmapped_financial_lines":
+            # Both are metadata ABOUT extraction, not extracted values —
+            # counting either would move confidence or pad "Missing fields".
+            if f.name in ("unmapped_financial_lines", "portfolio_signal"):
                 continue
             if f.name in ("unit_mix", "income_lines", "expense_lines", "comp_data"):
                 total += 1
@@ -194,13 +202,15 @@ class CIMData:
         }
 
 
-def parse_cim(raw: dict) -> CIMData:
+def parse_cim(raw: dict, filename: str = "") -> CIMData:
     """
     Parse raw PDF extraction into structured CIMData.
 
     Args:
         raw: dict from pdf_reader.extract_pdf() with keys
              "text", "tables", "page_count", "pages"
+        filename: PDF stem (optional) — an extra wording source for the
+             portfolio detector (filing prefixes like "SS 2Property ...").
 
     Returns:
         CIMData with as many fields populated as possible.
@@ -217,6 +227,14 @@ def parse_cim(raw: dict) -> CIMData:
     _parse_financials(text, tables, data)
     _parse_supply(text, data)
     _compute_derived(data)
+
+    # A portfolio CIM (two properties sold as one offering) must be surfaced,
+    # not silently collapsed into one wrong deal. Detection is conservative —
+    # evidence for a human to confirm, never a hard block.
+    from extract.portfolio import portfolio_signal
+    signal = portfolio_signal(pages, filename=filename)
+    if signal.is_portfolio:
+        data.portfolio_signal = signal.as_dict()
 
     return data
 
