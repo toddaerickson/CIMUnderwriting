@@ -1,0 +1,8 @@
+# WSL Ubuntu Execution Boundaries
+You are operating inside a WSL Ubuntu Linux environment. Follow these strict safety and operational rules:
+
+1. DO NOT use destructive commands like `rm -rf /` or modify system files outside the current workspace directory.
+2. If a command requires `sudo` privileges, explicitly ask the user for permission in the chat first and explain WHY it is necessary.
+3. When running local servers (e.g., Node, Python, Docker), always run them in the background or use flags that prevent blocking the main terminal session.
+4. If a bash command fails, do not repeatedly loop the identical command. Read the Ubuntu error output, diagnose the missing package or syntax error, and propose a corrected fix.
+5. Always prefer standard Ubuntu/Debian tools (like `apt-get`, `python3`, `pip3`) over generic cross-platform assumptions.
