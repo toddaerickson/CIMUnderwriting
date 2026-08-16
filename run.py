@@ -37,8 +37,17 @@ def stage_parse(ctx: AnalysisContext):
     """[2/7] Parse CIM data from extracted text, apply overrides, enrich."""
     logger.info("\n[2/7] Parsing CIM data...")
     from extract.parser import parse_cim
-    ctx.cim_data = parse_cim(ctx.raw_pdf)
+    stem = os.path.splitext(os.path.basename(ctx.pdf_path or ""))[0]
+    ctx.cim_data = parse_cim(ctx.raw_pdf, filename=stem)
     ctx.snapshot("after_parse")
+
+    if getattr(ctx.cim_data, "portfolio_signal", None):
+        # The one canonical sentence — same text the engine appends to run
+        # warnings and the memo prints, so the CLI cannot drift from them.
+        from extract.portfolio import warning_text
+        logger.warning(
+            "  %s", warning_text(
+                ctx.cim_data.portfolio_signal.get("evidence", [])))
 
     report = ctx.cim_data.extraction_report()
     logger.info("  Extraction confidence: %s%%", report['confidence_pct'])

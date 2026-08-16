@@ -126,6 +126,40 @@ def test_start_extract_success(deals_dir, fake_extract):
     assert deal.nrsf == 45000.0
 
 
+
+@pytest.mark.django_db
+def test_start_extract_sets_portfolio_suspect(deals_dir, monkeypatch):
+    """A portfolio CIM must land on the Deal row as portfolio_suspect, so
+    the assumptions page can surface it instead of silently underwriting."""
+    from webapp import services
+
+    def _fake(pdf_path, cim_overrides=None, progress=None):
+        from extract.parser import CIMData
+        from engine import AnalysisResult
+        cim = CIMData(
+            property_name="People's Choice Storage - Wichita",
+            city="Wichita", state="KS",
+            portfolio_signal={"is_portfolio": True,
+                              "evidence": ["2 distinct property addresses on the cover page"],
+                              "cities": ["Wichita"], "states": ["KS"],
+                              "addresses": ["3401 North Hillside Street",
+                                            "6209 West Kellogg Drive"]})
+        r = AnalysisResult(pdf_path=pdf_path)
+        r.cim_data = cim
+        r.extraction_report = cim.extraction_report()
+        r.errors = []
+        return r
+
+    monkeypatch.setattr("webapp.services.extract_pdf_data", _fake)
+    deal = _make_upload_deal(deals_dir)
+    services.start_extract(deal)
+    deal.refresh_from_db()
+    assert deal.portfolio_suspect is True
+    assert deal.portfolio_evidence
+    assert "addresses" in deal.portfolio_evidence[0]
+    # cim_json still round-trips the signal
+    assert deal.cim_json["portfolio_signal"]["is_portfolio"] is True
+
 @pytest.mark.django_db
 def test_start_extract_failure_records_error(deals_dir, monkeypatch):
     from webapp import services

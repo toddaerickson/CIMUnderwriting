@@ -494,6 +494,9 @@ def _extract_worker(deal_pk, pdf_path, stamp):
             updates["acreage"] = cim.acreage
         if cim.asking_price:
             updates["asking_price"] = cim.asking_price
+        sig = getattr(cim, "portfolio_signal", None) or {}
+        updates["portfolio_suspect"] = bool(sig.get("is_portfolio"))
+        updates["portfolio_evidence"] = sig.get("evidence", [])
         matched = Deal.objects.filter(
             pk=deal_pk, extract_requested_at=stamp).update(**updates)
         if not matched:

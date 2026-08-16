@@ -35,6 +35,13 @@ class Deal(models.Model):
     extraction_report = models.JSONField(null=True, blank=True)
     assumption_overrides = models.JSONField(default=dict, blank=True)
 
+    # Portfolio detection. A CIM describing more than one property must be
+    # flagged, not silently underwritten as a single asset. Set at
+    # extraction from CIMData.portfolio_signal; evidence is a list of the
+    # human-readable reasons that tripped the detector.
+    portfolio_suspect = models.BooleanField(default=False)
+    portfolio_evidence = models.JSONField(default=list, blank=True)
+
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 

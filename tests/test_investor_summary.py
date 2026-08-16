@@ -213,6 +213,42 @@ def test_budget_fits_the_longest_realistic_deal():
     assert p2.total_pt <= PAGE_BUDGET_PT, f"page 2 {p2.total_pt:.0f}pt"
 
 
+# ── Portfolio notice (portfolio-suspect CIMs) ────────────────────────
+
+_PORTFOLIO_SIGNAL = {
+    "is_portfolio": True,
+    "evidence": ["multiple cities on the cover page: Granville, New Albany"]}
+
+
+def test_portfolio_notice_renders_and_is_budgeted(tmp_path):
+    """The LP document is the one surface that leaves the firm, so a
+    portfolio-suspect deal must carry the caveat there — charged to the
+    page-1 budget like every real block."""
+    _, p1, _ = _build(cim_data=_CIM(portfolio_signal=_PORTFOLIO_SIGNAL))
+    assert any(lbl == "portfolio/notice" for lbl, _ in p1.blocks)
+    assert p1.total_pt <= PAGE_BUDGET_PT, f"page 1 {p1.total_pt:.0f}pt"
+
+    text = _text(_generate(
+        tmp_path, cim_data=_CIM(portfolio_signal=_PORTFOLIO_SIGNAL)))
+    assert "more than one property" in text
+    # Investor-facing: the detection EVIDENCE stays out of the LP document —
+    # that is analyst diligence detail, and the IC memo carries it.
+    assert "multiple cities" not in text
+
+
+def test_no_portfolio_notice_for_a_single_asset(tmp_path):
+    _, p1, _ = _build()
+    assert not any(lbl == "portfolio/notice" for lbl, _ in p1.blocks)
+    assert "more than one property" not in _text(_generate(tmp_path))
+
+
+def test_portfolio_notice_fits_the_longest_realistic_deal():
+    kw = longest_realistic_deal()
+    kw["cim_data"].portfolio_signal = dict(_PORTFOLIO_SIGNAL)
+    _, p1, _ = _is_build(**{k: kw[k] for k in _BUILD_ARGS})
+    assert p1.total_pt <= PAGE_BUDGET_PT, f"page 1 {p1.total_pt:.0f}pt"
+
+
 def test_over_budget_raises_rather_than_shrinking(tmp_path):
     """No silent shrink-to-fit. The document goes to investors; a page
     that quietly lost a block is worse than a loud failure."""
