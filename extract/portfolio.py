@@ -105,6 +105,29 @@ def cover_street_addresses(pages) -> list:
 
 # ── Signal ─────────────────────────────────────────────────────────
 
+def warning_text(evidence=None) -> str:
+    """THE portfolio warning sentence, for every analysis surface.
+
+    One definition — engine.run_analysis (run warnings on the results
+    page), run.py (the CLI log) and output/memo_writer (the IC memo) all
+    render this string, so the surfaces cannot drift apart. The
+    assumptions-page banner and the LP investor summary carry their own
+    audience-specific prose and are deliberately not consumers.
+
+    ASCII only: the memo path feeds it through python-docx and the
+    summary budget measures ASCII-folded text.
+    """
+    ev = "; ".join(str(e) for e in (evidence or []) if e)
+    return (
+        "Possible multi-property / portfolio CIM"
+        + (f" ({ev})" if ev else "")
+        + ". Extracted figures may mix portfolio- and property-level "
+          "values - confirm every field against the document before "
+          "relying on this analysis, or underwrite each property "
+          "separately."
+    )
+
+
 @dataclass
 class PortfolioSignal:
     """What a detection run found. `evidence` is non-empty iff flagged."""

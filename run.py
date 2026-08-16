@@ -42,12 +42,12 @@ def stage_parse(ctx: AnalysisContext):
     ctx.snapshot("after_parse")
 
     if getattr(ctx.cim_data, "portfolio_signal", None):
-        ev = ctx.cim_data.portfolio_signal.get("evidence", [])
+        # The one canonical sentence — same text the engine appends to run
+        # warnings and the memo prints, so the CLI cannot drift from them.
+        from extract.portfolio import warning_text
         logger.warning(
-            "  POSSIBLE MULTI-PROPERTY / PORTFOLIO CIM%s. Figures may mix "
-            "portfolio- and property-level values — review before relying "
-            "on the output.",
-            f" ({'; '.join(ev)})" if ev else "")
+            "  %s", warning_text(
+                ctx.cim_data.portfolio_signal.get("evidence", [])))
 
     report = ctx.cim_data.extraction_report()
     logger.info("  Extraction confidence: %s%%", report['confidence_pct'])

@@ -49,6 +49,11 @@ def generate_memo(property_name: str, cim_data, gate_results: list,
     # ── Title Page ──────────────────────────────────────────────
     _add_title_page(doc, cim_data)
 
+    # A portfolio-suspect CIM gets its caveat BEFORE section 1: every
+    # number after this line may mix portfolio- and property-level values,
+    # so the reader must meet the warning before the first number.
+    _add_portfolio_warning(doc, cim_data)
+
     # ── Section 1: Investment Summary ───────────────────────────
     _add_section_1(doc, cim_data, gate_results, scenario_results, max_offer,
                    checks, assumption_fill_log)
@@ -142,6 +147,29 @@ def _add_title_page(doc, cim_data):
     p4.add_run("\n\nPrepared by CIM Analyst\nConfidential").font.size = Pt(11)
 
     doc.add_page_break()
+
+
+def _add_portfolio_warning(doc, cim_data):
+    """The portfolio caveat, before the first number (page 1 of the body).
+
+    Renders THE shared sentence (`extract.portfolio.warning_text`) so the
+    memo cannot drift from the run warnings the results page shows, then
+    the evidence lines — this is the analyst-facing document, so the
+    evidence belongs here. No-op for a single-asset CIM.
+    """
+    signal = getattr(cim_data, "portfolio_signal", None)
+    if not signal:
+        return
+
+    from extract.portfolio import warning_text
+
+    p = doc.add_paragraph()
+    run = p.add_run("PORTFOLIO CIM — READ FIRST: " + warning_text())
+    run.bold = True
+    run.font.color.rgb = RGBColor(153, 0, 0)
+
+    for ev in signal.get("evidence", []):
+        doc.add_paragraph(str(ev), style="List Bullet")
 
 
 def _add_section_1(doc, cim_data, gate_results, scenario_results, max_offer,
@@ -1342,6 +1370,7 @@ def _is_build(property_name, cim_data, market_analysis, physical_analysis,
     page2 = PageBudget("Page 2")
 
     _is_gc_notice(doc, page1)
+    _is_portfolio_notice(doc, page1, cim_data)
     _is_header(doc, page1, cim_data, profile, property_name)
     _is_target_return(doc, page1, scenario_results, levered)
     _is_assumption_stamp(doc, page1, lev_base)
@@ -1482,6 +1511,24 @@ def _is_gc_notice(doc, budget):
     if cfg.INVESTOR_SUMMARY_GC_CLEARED:
         return
     _is_para(doc, budget, "gc/pending", _GC_PENDING_NOTICE,
+             style="LPMicro", bold=True)
+
+
+def _is_portfolio_notice(doc, budget, cim_data):
+    """The portfolio caveat on page 1 of the LP document (no-op otherwise).
+
+    This is the one surface that leaves the firm, so it is the one where
+    the caveat binds hardest (the decision-7 posture). One fixed sentence,
+    charged to the budget like every block; the detection EVIDENCE is
+    deliberately not enumerated — that is analyst diligence detail, and
+    the memo carries it.
+    """
+    if not getattr(cim_data, "portfolio_signal", None):
+        return
+    _is_para(doc, budget, "portfolio/notice",
+             "This document may describe more than one property; figures "
+             "may combine portfolio-level and per-property values. Refer "
+             "to the full investment memo before relying on any figure.",
              style="LPMicro", bold=True)
 
 

@@ -177,3 +177,116 @@ def test_extraction_report_is_unchanged_by_portfolio_detection():
     sig = CIMData(property_name="X", nrsf=1000.0,
                   portfolio_signal={"is_portfolio": True, "evidence": ["x"]})
     assert plain.extraction_report() == sig.extraction_report()
+
+
+# ── The one warning sentence, on every analysis surface ────────────
+
+_EVIDENCE = ["2 distinct property addresses on the cover page"]
+_SIGNAL = {"is_portfolio": True, "evidence": _EVIDENCE}
+
+
+def test_warning_text_is_ascii_with_and_without_evidence():
+    """The memo feeds it to python-docx and the summary budget measures
+    ASCII-folded text — a stray en-dash would be the drift this shared
+    definition exists to prevent."""
+    from extract.portfolio import warning_text
+    bare = warning_text()
+    with_ev = warning_text(_EVIDENCE)
+    assert bare.startswith("Possible multi-property / portfolio CIM")
+    assert _EVIDENCE[0] in with_ev
+    assert bare.isascii() and with_ev.isascii()
+
+
+def test_run_analysis_carries_the_portfolio_warning(
+        tmp_path, monkeypatch, mock_cim_data):
+    """result.errors flows to run_warnings on the results page and into
+    every stored AnalysisRun — the run's outputs must be as loud as the
+    assumptions page."""
+    monkeypatch.setattr("data.comp_db.COMP_DB_PATH", str(tmp_path / "c.db"))
+    from engine import AnalysisResult, run_analysis
+    from extract.portfolio import warning_text
+
+    mock_cim_data.portfolio_signal = dict(_SIGNAL)
+    result = AnalysisResult(pdf_path=str(tmp_path / "x.pdf"))
+    result.cim_data = mock_cim_data
+    run_analysis(result, output_dir=str(tmp_path))
+
+    assert warning_text(_EVIDENCE) in result.errors
+
+
+def test_run_analysis_appends_no_warning_for_a_single_asset(
+        tmp_path, monkeypatch, mock_cim_data):
+    # The sentinel is the warning SENTENCE, not the bare word: unrelated
+    # errors can carry "portfolio" in a file path (a worktree named
+    # portfolio-ship did exactly that) or in a property name.
+    monkeypatch.setattr("data.comp_db.COMP_DB_PATH", str(tmp_path / "c.db"))
+    from engine import AnalysisResult, run_analysis
+
+    result = AnalysisResult(pdf_path=str(tmp_path / "x.pdf"))
+    result.cim_data = mock_cim_data
+    run_analysis(result, output_dir=str(tmp_path))
+
+    assert not any("multi-property / portfolio CIM" in e
+                   for e in result.errors)
+
+
+def test_extract_path_does_not_double_carry_the_warning(monkeypatch, tmp_path):
+    """The extract path surfaces the flag through Deal.portfolio_suspect and
+    the dedicated assumptions-page banner. result.errors also feeds the
+    GENERIC warnings box on that same page, so an append here rendered the
+    caveat twice — the flag must arrive on the signal alone."""
+    import engine
+
+    raw = {"text": WICHITA_COVER, "tables": [], "pages": [WICHITA_COVER]}
+    monkeypatch.setattr("data.comp_db.COMP_DB_PATH", str(tmp_path / "c.db"))
+    monkeypatch.setattr("extract.pdf_reader.extract_pdf", lambda p: raw)
+    monkeypatch.setattr(
+        "extract.enrichment.enrich_cim_data",
+        lambda cim, comp_db=None: type("E", (), {"errors": []})())
+    monkeypatch.setattr(
+        "extract.rent_survey.run_rent_survey",
+        lambda **kw: type("S", (), {"success": False,
+                                    "market_rent_per_sf_mo": None})())
+
+    result = engine.extract_pdf_data(str(tmp_path / "wichita.pdf"))
+
+    assert result.cim_data.portfolio_signal["is_portfolio"] is True
+    assert not any("multi-property / portfolio CIM" in e
+                   for e in result.errors)
+
+
+# ── The IC memo caveat ─────────────────────────────────────────────
+
+def _memo_paragraphs(tmp_path, cim_data):
+    from docx import Document
+    from output.memo_writer import generate_memo
+    path = generate_memo(
+        property_name="X", cim_data=cim_data, gate_results=[],
+        market_analysis={}, physical_analysis={}, financial_analysis={},
+        rent_analysis={}, scenario_results={}, value_add={}, risk_analysis={},
+        max_offer={}, output_dir=str(tmp_path))
+    return [p.text for p in Document(path).paragraphs]
+
+
+def test_memo_carries_the_portfolio_caveat_before_section_1(
+        tmp_path, mock_cim_data):
+    from extract.portfolio import warning_text
+
+    mock_cim_data.portfolio_signal = dict(_SIGNAL)
+    paras = _memo_paragraphs(tmp_path, mock_cim_data)
+
+    caveat = next(i for i, t in enumerate(paras) if "PORTFOLIO CIM" in t)
+    # THE shared sentence, verbatim — not a paraphrase that can drift.
+    assert warning_text() in paras[caveat]
+    # Before the first number: the analyst-facing evidence renders, and the
+    # whole block precedes section 1's heading.
+    assert any(_EVIDENCE[0] in t for t in paras)
+    section_1 = next(i for i, t in enumerate(paras)
+                     if t.startswith("1. Investment Summary"))
+    assert caveat < section_1
+
+
+def test_memo_has_no_portfolio_caveat_for_a_single_asset(
+        tmp_path, mock_cim_data):
+    paras = _memo_paragraphs(tmp_path, mock_cim_data)
+    assert not any("PORTFOLIO CIM" in t for t in paras)

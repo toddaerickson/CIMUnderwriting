@@ -119,18 +119,13 @@ def extract_pdf_data(pdf_path: str, cim_overrides: dict = None,
     result.cim_data = cim_data
     result.extraction_report = cim_data.extraction_report()
 
-    # A portfolio CIM must be loud, not silently underwritten as one asset.
-    # result.errors flows to Deal.extract_warnings and the assumptions page,
-    # so this surfaces without new UI.
-    if getattr(cim_data, "portfolio_signal", None):
-        ev = cim_data.portfolio_signal.get("evidence", [])
-        result.errors.append(
-            "Possible multi-property / portfolio CIM"
-            + (f": {'; '.join(ev)}" if ev else "")
-            + ". Extracted figures may mix portfolio- and property-level "
-              "values — confirm every field before running analysis, or "
-              "upload each property separately."
-        )
+    # The portfolio flag surfaces on the extract path through
+    # Deal.portfolio_suspect / portfolio_evidence (webapp.services stamps
+    # them) and the assumptions page's dedicated banner. It is deliberately
+    # NOT appended to result.errors here — that also feeds the generic
+    # warnings box on the same page, which rendered the caveat twice.
+    # The RUN path appends it (see run_analysis) so the results page and
+    # every stored run carry the warning.
 
     # Step 3: Apply manual overrides from GUI
     if cim_overrides:
@@ -319,6 +314,16 @@ def run_analysis(result: AnalysisResult, progress: Callable = None,
 
     from analysis.valuation import resolve_market_cap
     from registry import classify_asset_type
+
+    # A portfolio CIM must be loud on the RUN's outputs too, not only on the
+    # assumptions page: result.errors flows to run_warnings on the results
+    # page and into every stored AnalysisRun. One shared sentence
+    # (extract.portfolio.warning_text) — the memo renders the same one, so
+    # the surfaces cannot drift apart.
+    if getattr(cim_data, "portfolio_signal", None):
+        from extract.portfolio import warning_text
+        result.errors.append(
+            warning_text(cim_data.portfolio_signal.get("evidence", [])))
 
     # A financial line the CIM stated and the parser could not assign to a
     # period is REFUSED, not filled — the same posture as the CapEx warning
