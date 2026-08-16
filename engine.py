@@ -144,7 +144,8 @@ def extract_pdf_data(pdf_path: str, cim_overrides: dict = None,
     if not cim_data.market_rent_psf and cim_data.city and cim_data.state:
         try:
             from extract.rent_survey import run_rent_survey
-            survey = run_rent_survey(city=cim_data.city, state=cim_data.state)
+            survey = run_rent_survey(city=cim_data.city, state=cim_data.state,
+                                     zip_code=getattr(cim_data, "zip_code", None))
             if survey.success and survey.market_rent_per_sf_mo:
                 cim_data.market_rent_psf = round(survey.market_rent_per_sf_mo, 2)
         except Exception as e:

@@ -111,6 +111,26 @@ STREET_SUFFIX = re.compile(
     r"terrace|ter|suite|ste|floor|fl|unit|building|bldg|north|south|east|west|"
     r"n|s|e|w|ne|nw|se|sw|us|sr|fm|county|co)$", re.IGNORECASE)
 
+# Cities whose first token `tidy_city` would otherwise refuse. Both entries below
+# are the SAME defect — a token that is a street word in one reading and part of
+# the name in another — and neither can be settled from the token alone, so each
+# is resolved by what sits beside it rather than by widening STREET_SUFFIX.
+#
+# "St." reaches the loop as "st", which STREET_SUFFIX matches as Street; "Ft."
+# and "Mt." are not street words at all and die on the period rule instead. An
+# allowlist keyed on the PAIR is what tells "St. Louis" from "Main St. Bastrop":
+# it is bounded, it fails closed on anything unlisted, and adding a city is a
+# one-line change with a test beside it.
+ABBREV_CITY_PREFIX = {"st", "ft", "mt", "pt"}
+ABBREV_CITIES = {
+    "st louis", "st paul", "st petersburg", "st cloud", "st charles",
+    "st joseph", "st augustine", "st george", "st lucie", "st helens",
+    "ft worth", "ft lauderdale", "ft myers", "ft collins", "ft wayne",
+    "ft smith", "ft pierce",
+    "mt pleasant", "mt vernon", "mt juliet", "mt prospect",
+    "pt arthur",
+}
+
 
 def norm_text(s: str) -> str:
     """NFKD-normalise, strip problem codepoints, collapse whitespace."""
@@ -138,12 +158,32 @@ def tidy_city(c: str) -> str:
 
     Walk the tokens from the right and stop at the first one that cannot be part
     of a city name: a street suffix, a noise word, or anything holding a digit or
-    a period. 'Industry Drive Bastrop' -> 'Bastrop'; 'State Belton' -> 'Belton'."""
+    a period. 'Industry Drive Bastrop' -> 'Bastrop'; 'State Belton' -> 'Belton'.
+
+    Two tokens are ambiguous rather than disqualifying, and both are decided by
+    POSITION, since the token alone cannot say which reading is meant — see the
+    comments below and on ABBREV_CITIES."""
     c = (c or "").strip(" .,-|")
     c = re.sub(r"([A-Za-z])\s+([A-Z])(?=\s|$)", r"\1\2", c)   # 'DECATU R' -> 'DECATUR'
     keep = []
     for t in reversed(c.split()):
         tl = t.strip(".,").lower()
+        # 'City' TRAILING is part of the name ('Kansas City'); LEADING it is the
+        # field label NOISE_TOKENS put it there for ('City Belton' -> 'Belton').
+        # Walking right-to-left, "nothing kept yet" IS "trailing". Without this,
+        # four of config.TOP_50_MSAS fail their own round trip and score a false
+        # FAIL on gate 6 — the capture is dropped whole, because _harvest then
+        # sees a city under three characters.
+        if tl == "city" and not keep:
+            keep.append(t)
+            continue
+        # 'St./Ft./Mt.' is Saint/Fort/Mount when the token it qualifies makes a
+        # real city name, and Street otherwise. Checked BEFORE the street-suffix
+        # and period rules, both of which would otherwise break here.
+        if (tl in ABBREV_CITY_PREFIX and keep
+                and f"{tl} {keep[-1].strip('.,').lower()}" in ABBREV_CITIES):
+            keep.append(t)
+            continue
         # A token with no letters at all is a separator the capture swallowed
         # ("For Sale - Creedmoor"), never part of the name.
         if (STREET_SUFFIX.match(tl) or tl in NOISE_TOKENS
@@ -237,20 +277,30 @@ def locate(pages, allow_zipless: bool = False) -> tuple:
 
 
 def best_city_state(pages, allow_zipless: bool = False) -> tuple:
-    """-> (city, state, source) using the most frequent city, or (None, None, src).
+    """-> (city, state, zip_code, source), or (None, None, None, src).
 
     Most-frequent rather than first because a cover often repeats the subject
     address in the header and once more in the highlights, while a stray match
     appears once. The state is resolved the same way, among the hits for the
     winning city only: taking the first-seen state instead hands a document that
     lists 'Springfield, IL' as a comp above two mentions of the subject
-    'Springfield, MO' the comp's state."""
+    'Springfield, MO' the comp's state.
+
+    The ZIP is resolved on the same principle and from the same hits, so it
+    cannot describe a different place than the city it is returned with. It is
+    the geocoding key the pipeline actually centres a demographic ring on — a
+    ZIP survives cover formatting that mangles a city name, so it is reported
+    even when it merely CONFIRMS the city. Empty strings are not candidates:
+    ADDR_RE_NOZIP and the two-group patterns yield '' rather than a ZIP, and a
+    modal '' would outvote the one real ZIP on the page."""
     from collections import Counter
 
     locs, src = locate(pages, allow_zipless=allow_zipless)
     if not locs:
-        return None, None, src
+        return None, None, None, src
     city = Counter(loc.city for loc in locs).most_common(1)[0][0]
     state = Counter(loc.state for loc in locs
                     if loc.city == city).most_common(1)[0][0]
-    return city, state, src
+    zips = Counter(loc.zip_code for loc in locs
+                   if loc.city == city and loc.zip_code)
+    return city, state, (zips.most_common(1)[0][0] if zips else None), src

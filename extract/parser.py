@@ -60,9 +60,14 @@ class FinancialLine:
 class CIMData:
     # Property basics
     property_name: Optional[str] = None
+    #: Street address. Never filled by the parser — see _parse_property_basics
+    #: for why. Analyst-entered on the assumptions page, or None.
     address: Optional[str] = None
     city: Optional[str] = None
     state: Optional[str] = None
+    #: The geocoding key. Extracted with the city/state it belongs to, so the
+    #: two cannot describe different places.
+    zip_code: Optional[str] = None
     msa: Optional[str] = None
     year_built: Optional[int] = None
     year_expanded: Optional[int] = None
@@ -348,19 +353,35 @@ def _parse_property_basics(text: str, data: CIMData, pages: list = None):
     if name:
         data.property_name = name
 
-    # Address
-    addr_pat = r"(\d{1,6}\s+[A-Za-z0-9\s\.\,]+(?:Street|St|Avenue|Ave|Road|Rd|Drive|Dr|Boulevard|Blvd|Lane|Ln|Way|Highway|Hwy|Parkway|Pkwy)[\.?\s,]*)"
-    m = re.search(addr_pat, text)
-    if m:
-        data.address = m.group(1).strip().rstrip(",")
+    # Street address — DELIBERATELY NOT EXTRACTED. `data.address` stays None.
+    #
+    # This held a whole-document `re.search` for a street pattern: the very
+    # approach the comment below records as abandoned for city/state, left in
+    # place for the one field that gates the whole demographic chain.
+    # `enrich_cim_data` requires address AND city AND state before it geocodes,
+    # so the weakest extractor in the module decided where the 3-mile ring was
+    # centred — and a broker's metro office geocodes tens of miles away and
+    # returns a LARGE population, so gate 1 failed OPEN. A false FAIL gets
+    # noticed; a false PASS does not. It also carried no re.IGNORECASE while
+    # every sibling pattern here does, so it skipped ALL-CAPS covers and was
+    # biased toward the Title-Case broker blocks by construction.
+    #
+    # Deleting it leaves address None, which short-circuits that `and` chain:
+    # no geocode on a broker's office, and gate 1 renders TBD. The ring is
+    # centred on the subject property or there is no ring. Precision comes back
+    # through the ZIP below, which this module already extracts and the parser
+    # used to discard. Do not reinstate a street extractor here without reading
+    # extract/location.py's docstring first — that module exists to throw
+    # street lines AWAY, and its STREET_SUFFIX means "this is not a city".
 
-    # City, State — see extract/location.py. The whole-document regex this
+    # City, State, ZIP — see extract/location.py. The whole-document regex this
     # replaced returned the broker's disclaimer-page address as often as the
     # property's, could not match an ALL-CAPS cover ("MAXWELL, TX"), and let the
     # street line run into the city ("East Pikes Peak Avenue Colorado Springs").
-    city, state, _src = best_city_state(pages if pages else text)
+    city, state, zip_code, _src = best_city_state(pages if pages else text)
     if city:
         data.city, data.state = city, state
+        data.zip_code = zip_code
 
     # Year built
     yb_pat = r"(?:year\s+built|built\s+in|constructed\s+in|vintage)[:\s]*(\d{4})"
