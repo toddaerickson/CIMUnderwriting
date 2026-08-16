@@ -285,6 +285,33 @@ def test_a_subtype_only_deck_still_reads():
     assert units("Number of Units: 69 climate controlled") == 69
 
 
+@pytest.mark.parametrize("distant", [
+    # Crowley: the subtype match begins at offset 30 past the value match —
+    # the window's exact edge, so this line is the measured ceiling.
+    "Constructed in 2016, the property consists of 379 units and offers "
+    "a balanced mix of climate-controlled",
+    # Kerrville: an amenity sentence with the vocabulary 70 characters out.
+    "across 379 units. The facility offers a well-balanced mix of "
+    "drive-up non-climate and climate-controlled storage",
+])
+def test_a_distant_subtype_mention_does_not_demote_the_count(distant):
+    """The qualifier demotes only when it sits ON the value. Both layouts
+    put climate-controlled vocabulary after a line's genuine count at a
+    distance — amenity prose, not a breakdown row. A window wide enough to
+    reach it would demote the real count out of rank 2, and this fixture is
+    built to catch exactly that: two bare prose counts disagreeing must
+    refuse, and a wrongly demoted candidate leaves a lone survivor that
+    wins instead."""
+    assert units("A total of 412 storage units\n" + distant) is None
+
+
+def test_the_same_layout_agreeing_still_reads():
+    """The refusal above belongs to the disagreement, not the layouts."""
+    assert units("A total of 379 storage units\n"
+                 "across 379 units. The facility offers a well-balanced mix "
+                 "of drive-up non-climate and climate-controlled storage") == 379
+
+
 def test_units_disagreement_refuses():
     assert units("Total Units 362\nUnit Count: 719") is None
 

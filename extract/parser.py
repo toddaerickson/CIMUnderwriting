@@ -487,6 +487,12 @@ _UNITS_SUBTYPE_RE = re.compile(r"(?:non[\s\-]*)?climate[\s\-]*controlled",
 #: one corpus line that needs it; the mirror form (`Climate Controlled Units
 #: N`, Little Rock and Midland) produces no candidate at all under the label
 #: rules, so no rule is written for a position nothing exercises.
+#: 30 is also the measured CEILING, not a guess: Crowley states its genuine
+#: total with `... units and offers a balanced mix of climate-controlled`,
+#: whose qualifier begins exactly 30 characters out (first excluded offset),
+#: and Kerrville's amenity sentence follows its total at 70. A wider window
+#: demotes real counts; `test_a_distant_subtype_mention_does_not_demote_the_
+#: count` pins both layouts.
 _SUBTYPE_WINDOW = 30
 
 
