@@ -18,12 +18,50 @@ import re
 import time
 from typing import Optional
 from dataclasses import dataclass, field
+from urllib.parse import quote_plus
 
 import requests
 
 from config import CENSUS_API_KEY
 
 logger = logging.getLogger(__name__)
+
+
+# ── Keeping the API key out of the logs ───────────────────────────
+#
+# The key travels as a QUERY PARAMETER, so it ends up inside URLs, and URLs end
+# up inside exception messages: `HTTPError` embeds `response.url`, and
+# `ConnectionError` embeds the request path. Both were measured carrying
+# `key=` verbatim, not assumed to.
+#
+# This helper closes only the half that runs through OUR logger. The other and
+# larger half is urllib3, which logs the whole request line at DEBUG on every
+# SUCCESSFUL request — no exception involved, so nothing here can reach it.
+# `log_config.pin_third_party_loggers` closes that one, and neither fix
+# substitutes for the other.
+_REDACTED = "<redacted>"
+
+#: Below this length a "secret" is more likely to match ordinary words in a log
+#: line than to be the key. `CENSUS_API_KEY` defaults to `""`, and an unguarded
+#: `str.replace("", …)` splices the marker between every character — a scrubber
+#: that destroys the message it was protecting.
+_MIN_SECRET_LEN = 8
+
+
+def _redacted(obj, *secrets) -> str:
+    """Render `obj` for a log line with any API key removed.
+
+    Always scrubs the module-level `CENSUS_API_KEY` in addition to whatever is
+    passed, because the key actually in use may be the per-call one handed to
+    `enrich_cim_data` while the constant is what a stale code path still holds.
+    """
+    text = str(obj)
+    for secret in (*secrets, CENSUS_API_KEY):
+        secret = "" if secret is None else str(secret)
+        if len(secret) >= _MIN_SECRET_LEN:
+            text = text.replace(secret, _REDACTED)
+            text = text.replace(quote_plus(secret), _REDACTED)
+    return text
 
 
 # ── Data Structures ───────────────────────────────────────────────
@@ -75,7 +113,8 @@ class DataResolver:
                     self.fields_enriched += 1
                     return val
             except (requests.RequestException, KeyError, ValueError, TypeError) as exc:
-                logger.debug("Tier 2 lookup failed for %s: %s", field_name, exc)
+                logger.debug("Tier 2 lookup failed for %s: %s",
+                             field_name, _redacted(exc))
 
         # Tier 3: comp DB
         if tier3_fn:
@@ -88,7 +127,8 @@ class DataResolver:
                     self.fields_enriched += 1
                     return val
             except (KeyError, ValueError, TypeError) as exc:
-                logger.debug("Tier 3 lookup failed for %s: %s", field_name, exc)
+                logger.debug("Tier 3 lookup failed for %s: %s",
+                             field_name, _redacted(exc))
 
         # Tier 4: static default
         if tier4_default is not None:
@@ -151,7 +191,7 @@ def _geocode_address(address: str, city: str, state: str) -> Optional[dict]:
             "census_tract": tract_info.get("TRACT", ""),
         }
     except (requests.RequestException, KeyError, ValueError, TypeError) as exc:
-        logger.debug("Geocoding failed for %s: %s", one_line, exc)
+        logger.debug("Geocoding failed for %s: %s", one_line, _redacted(exc))
         return None
 
 
@@ -220,7 +260,8 @@ def _geocode_zip(zip_code: str) -> Optional[dict]:
             "census_tract": tract_info.get("TRACT", ""),
         }
     except (requests.RequestException, KeyError, ValueError, TypeError) as exc:
-        logger.debug("ZCTA centroid lookup failed for %s: %s", zip_code, exc)
+        logger.debug("ZCTA centroid lookup failed for %s: %s",
+                     zip_code, _redacted(exc))
         return None
 
 
@@ -263,7 +304,7 @@ def _fetch_census_demographics(lat: float, lon: float,
         # For each block group, we need centroid coordinates
         # ACS doesn't provide centroids, so we use the Census gazetteer
         # As a practical simplification, we'll fetch block group centroids
-        centroids = _fetch_block_group_centroids(state_fips, county_fips, api_key)
+        centroids = _fetch_block_group_centroids(state_fips, county_fips)
 
         pop_1mi = 0
         pop_3mi = 0
@@ -324,12 +365,12 @@ def _fetch_census_demographics(lat: float, lon: float,
         }
 
     except (requests.RequestException, KeyError, ValueError, TypeError) as exc:
-        logger.debug("Census demographics fetch failed: %s", exc)
+        logger.debug("Census demographics fetch failed: %s",
+                     _redacted(exc, api_key))
         return None
 
 
-def _fetch_block_group_centroids(state_fips: str, county_fips: str,
-                                 api_key: str) -> dict:
+def _fetch_block_group_centroids(state_fips: str, county_fips: str) -> dict:
     """
     Fetch block group centroids from Census TIGERweb.
 
@@ -337,6 +378,11 @@ def _fetch_block_group_centroids(state_fips: str, county_fips: str,
 
     Tries multiple TIGERweb ACS vintages since available services change.
     CENTLAT/CENTLON come as strings like "+29.6968469"/"-095.4989283".
+
+    Takes no API key: TIGERweb is unauthenticated. It used to accept one and
+    never use it, which is how a URL that cannot carry the key ends up beside a
+    log line that would have redacted it — a parameter kept "just in case" is
+    the shape a future leak arrives in.
     """
     # Try multiple ACS vintages (newest first) since availability varies
     vintages = ["ACS2023", "ACS2024", "ACS2025", "ACS2022", "ACS2021"]
@@ -375,7 +421,7 @@ def _fetch_block_group_centroids(state_fips: str, county_fips: str,
             if centroids:
                 return centroids
         except (requests.RequestException, KeyError, ValueError, TypeError) as exc:
-            logger.debug("TIGERweb %s fetch failed: %s", vintage, exc)
+            logger.debug("TIGERweb %s fetch failed: %s", vintage, _redacted(exc))
             continue
 
     return {}
