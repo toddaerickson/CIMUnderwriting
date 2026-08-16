@@ -57,6 +57,19 @@ ALLOWED_EMAILS = [e.strip().lower() for e in env("ALLOWED_EMAILS")]
 # Where deal folders live — same env var the Streamlit app and CLI use.
 CIM_DEALS_DIR = os.environ.get("CIM_DEALS_DIR", str(BASE_DIR / "deals"))
 
+# Keep the Census API key out of the logs. urllib3 logs the full query string
+# at DEBUG on every successful request, and the key travels as a query
+# parameter. The CLI gets this through `log_config.setup_logging`; the web app
+# never calls it, so the pin is applied here instead — one definition in
+# log_config, two entry points, so the two interfaces cannot drift.
+#
+# Deliberately NOT a `LOGGING` dict: Django's default already suits this app,
+# and restating it to change one logger's level would be a large surface added
+# for a small reason. A level pin is the whole requirement.
+from log_config import pin_third_party_loggers  # noqa: E402
+
+pin_third_party_loggers()
+
 INSTALLED_APPS = [
     "django.contrib.admin",
     "django.contrib.auth",
