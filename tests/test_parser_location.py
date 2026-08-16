@@ -65,10 +65,31 @@ def test_directional_prefix_cities_are_a_known_residual(raw, expect):
     STREET_SUFFIX carries the directionals because they really do end street
     lines, and tidy_city cannot tell 'North Las Vegas' from the tail of
     'Highway 71 West' by the token alone. Dropping them from the break set
-    regresses real captures, and none of these three flip a gate — unlike the
-    '*City' and 'St.' cases above, which flipped four of config.TOP_50_MSAS.
-    Fixing this properly needs a gazetteer, not a bigger token list. If you
-    make it right, change the expectation; do not delete the test."""
+    regresses real captures. Fixing this properly needs a gazetteer, not a
+    bigger token list. If you make it right, change the expectation; do not
+    delete the test.
+
+    **What this costs, measured rather than asserted** — the earlier note said
+    only that these three "don't flip a gate", which is true but reads as a
+    guess. It is structural:
+
+    - **No gate can move.** Gate 7 (`analysis/filters.py`) is the only gate
+      that reads the city at all, and it substring-matches
+      `config.TOP_50_MSAS`, of which **0 of 50** primaries carry a directional
+      prefix. There is no top-50 name for this residual to damage. Contrast
+      the '*City' and 'St.' cases above, which flipped four.
+    - **One path can move a modeled number**: `engine.py` passes the city to
+      `extract.rent_survey.run_rent_survey`, whose result sets
+      `market_rent_psf`. Since the ring-centring change that added it, the ZIP
+      travels to the survey alongside the city, so the precise locator is
+      present even when the city name is trimmed.
+    - **Everything else is display**: the memo, the workbook, the XLSM's F10,
+      `Deal.city`, and the `data.comp_db` row.
+
+    So the harm is a *plausible* wrong municipality — 'Las Vegas, NV' on a
+    North Las Vegas asset — rather than a wrong number, and a plausible wrong
+    answer is the kind a reader does not catch. That is an argument for fixing
+    it eventually, not for fixing it with a token list."""
     assert tidy_city(raw) == expect
 
 
@@ -316,10 +337,15 @@ def test_parse_cim_never_fills_the_street_address():
                       "pages": pages}).address is None
 
 
-# ── gate 6 round trip ────────────────────────────────────────────────
+# ── gate 7 round trip ────────────────────────────────────────────────
+#
+# Gate SEVEN, not six. These tests shipped calling it gate 6, which is the NOI
+# step-up gate; `analysis/filters.py` numbers the Top-50 MSA check 7. Nothing
+# reads the number, so the drift cost nothing — but a test that names the wrong
+# gate is the kind of thing a later reader trusts.
 
 def test_every_top_50_msa_survives_its_own_round_trip():
-    """Gate 6 substring-matches config.TOP_50_MSAS against the parsed city, so a
+    """Gate 7 substring-matches config.TOP_50_MSAS against the parsed city, so a
     city name tidy_city mangles scores a false FAIL — a good deal screened out.
 
     Derived from config rather than enumerated: adding an MSA whose name the
@@ -343,7 +369,7 @@ def test_every_top_50_msa_survives_its_own_round_trip():
     ("2100 S State Street, Salt Lake City, UT 84115", "Salt Lake City"),
     ("7000 Manchester Ave, St. Louis, MO 63143", "St. Louis"),
 ])
-def test_top_50_cover_lines_reach_gate_6_intact(cover, expect):
+def test_top_50_cover_lines_reach_gate_7_intact(cover, expect):
     """The same four, end to end through the production entry point. Before the
     fix the '*City' covers returned NOTHING at all — _harvest drops a city under
     three characters — so city, state AND zip were lost together."""
