@@ -6,6 +6,31 @@ from typing import Optional
 from context import AnalysisContext
 
 
+@pytest.fixture(autouse=True)
+def _isolate_comp_db(tmp_path, monkeypatch):
+    """Point the comp DB at a scratch file for EVERY test, always.
+
+    `CompDatabase.__init__` calls `os.makedirs` + `CREATE TABLE IF NOT EXISTS`,
+    so it fabricates a schema at whatever path it resolves without complaint —
+    and `COMP_DB_PATH` derives from `config.__file__`, i.e. the tree the code
+    runs from. A test that reaches `save_analysis` without redirecting it
+    therefore writes real rows into the developer's live `data/cim_comps.db`,
+    where they become comps for subsequent runs. `tests/test_characterization.py`
+    documents having been bitten by exactly that: "a run feeds the next run's
+    assumptions: the thin fixture's adjusted NOI moved 368,395 -> 305,595
+    between two identical invocations, purely because the first invocation had
+    added itself as a comp."
+
+    That was previously guarded per-module and by ~15 hand-written monkeypatch
+    lines, which is a discipline every new test file has to remember. This makes
+    it structural. Patch `data.comp_db.COMP_DB_PATH`, NOT `config.COMP_DB_PATH`:
+    `data/comp_db.py` binds the name at import, so patching config never reaches
+    it. Modules that set their own path still win — they run after this.
+    """
+    monkeypatch.setattr("data.comp_db.COMP_DB_PATH",
+                        str(tmp_path / "isolated_comps.db"), raising=False)
+
+
 @pytest.fixture
 def mock_cim_data():
     """Minimal CIMData-like object for unit tests.

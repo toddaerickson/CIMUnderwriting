@@ -681,6 +681,38 @@ output/
     month nobody remembers it. `MARKET_CAP_RATES` is the sole exemption:
     the table holds twelve cells, one of which priced this exit, and the
     resolved anchor is reported instead.
+12. **A comp row carries its SOURCE's date, and a third-party seed never
+    supplies rents.** `data/cim_comps.db` has no vintage filter anywhere:
+    no query filters on `analysis_date`, on `data_sources.tier`, or on the
+    `[regal:` filename tag, and `get_comp_summary` orders by
+    `analysis_date DESC`. So the date column is the ONLY thing separating a
+    2015 County Appraisal District figure from an analysis run last month,
+    and `scripts/import_regal_database.py` stamping `datetime.now()` made a
+    decade-old row sort ABOVE a real one and read as current.
+    `SHEET_VINTAGE` now dates each sheet off the workbook's own headers —
+    never invented, never newer than the evidence, and where a sheet states
+    no year it records the workbook's newest dated column as an upper
+    BOUND, saying so in the provenance string.
+    Dating rows honestly is not enough for rents, so the importer's
+    `unit_mix` path was DELETED rather than disabled. `query_rent_comps`
+    filters on `state` only — no size bucket, no climate, no property-level
+    N — and its `min_comps` counts unit ROWS, so one imported property with
+    20 lines clears the "3 comps" gate by itself. That fed the memo's rent
+    gap and the High-severity rate-driven-bridge risk: 158 of 166 TX comps
+    became one 2015 portfolio, moving a $1.20/SF subject from +12.1% to
+    +9.0%. A stale rent is worse than no rent, because no rent falls back
+    to the CIM's own stated market rent. **Re-adding rents means current
+    data AND an age filter in the query — the filter is the gate on any
+    future seed, and it is deliberately still open.** Deleting also removed
+    three latent bugs with it: `\bup\b` in the climate regex classified
+    "Drive Up 10x10" as climate-controlled, the exact inverse; there was no
+    plausibility band on `price / sf`, so any matching non-rate column
+    landed as an in-place rent; and `10x7.5` parsed as 70 SF.
+    Same reasoning for `price_per_sf`: a CAD tax appraisal and a broker
+    asking price ÷ NRSF are different quantities, and that column holds the
+    second, so the appraised figure lives in `data_sources` under its own
+    name. No query reads it today — this is to stop a future benchmark
+    blending the two silently.
 
 ## Manual steps flagged by the program
 - Population verification (if not in CIM)

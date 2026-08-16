@@ -23,7 +23,13 @@ deals/
 overrides/*.json
 
 # Database (local instance — not committed)
+# The entry is a literal path, not a glob, so the WAL sidecars need their own
+# lines: the DB opens in WAL mode, so every read recreates them and they
+# otherwise show as untracked noise in every `git status` (and in the
+# primary-tree drift detector, which reads `git status`).
 data/cim_comps.db
+data/cim_comps.db-wal
+data/cim_comps.db-shm
 
 # Logs
 *.log
