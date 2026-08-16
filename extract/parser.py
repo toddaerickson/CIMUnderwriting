@@ -8,6 +8,7 @@ for manual review by Claude Code.
 
 import re
 from dataclasses import dataclass, field, fields
+from datetime import date as _date
 from typing import Optional
 
 from extract.location import best_city_state, norm_text
@@ -472,55 +473,297 @@ def _parse_size_occupancy(text: str, data: CIMData):
         data.economic_occupancy = float(m.group(1)) / 100.0
 
 
+#: Below this, a "price" is a price PER something — per SF, per unit, per
+#: acre — or the first number off an unrelated next line (a street number, a
+#: page number, an acreage). Measured over the local corpus, the floor is what
+#: refuses `List Price` over `$122,155 $336,068 $403,658` (a rent table),
+#: `PURCHASE PRICE` over `11017 County Line Road`, and
+#: `OFFERING PRICE: CONTACT VERSAL FOR PRICING` over `ADDRESS: 20603 CLAY RD`.
+#: The smallest genuine offering in the corpus is $1.3M, so this sits an order
+#: of magnitude below anything real while clearing every per-unit figure seen
+#: ($8,863 / $14,376 / $24,007). It lives here rather than in config.py for
+#: the same reason MAX_NAME_WORDS does: it is an extraction bound, not an
+#: investment criterion, and a key under config.GATES would owe the
+#: assumption register a row it has no business having.
+MIN_PLAUSIBLE_ASKING_PRICE = 250_000
+
+#: A price label qualified as covering the WHOLE offering. Ranked above a bare
+#: one because a portfolio CIM states both, and taking the first in document
+#: order books one building as the deal — Bastrop Guardian quotes
+#: `Purchase Price: $1,600,000` for one property and
+#: `The purchase price for all three properties $3,500,000` for the offering.
+_PRICE_SCOPE_RE = re.compile(
+    r"portfolio|combined|entire|all\s+(?:\w+\s+)?(?:properties|sites|facilities)"
+    r"|both\s+propert", re.IGNORECASE)
+
+#: Rank 2 — a specific offering label. `list(?:ing)?\s*` with the space
+#: OPTIONAL is the ListingPrice fix: pdfplumber renders the MNET offering
+#: summary with the space stripped, so `list\s+price` could never match.
+_PRICE_LABEL_SPECIFIC = re.compile(
+    r"^\W*(?:the\s+)?(?:estimated?\s+)?"
+    r"(?:portfolio|total|asking|offering|list(?:ing)?|sale|"
+    r"purchase|offered)\s*pric(?:e|ing)\b", re.IGNORECASE)
+
+#: Rank 3 — a bare `Price` / `Pricing` label, consulted only when no specific
+#: one produced a value. `(?:the\s+)?` and the `\W*` bullet allowance are
+#: deliberately the ONLY things permitted before it: `A median home price of
+#: roughly $340,000` and `reassessed at the purchase price.` are both prose
+#: carrying a plausible number, and both are refused by the anchor alone.
+_PRICE_LABEL_BARE = re.compile(r"^\W*pric(?:e|ing)\b", re.IGNORECASE)
+
+#: Immediately after the label, these make it a rate rather than a price.
+_PRICE_UNIT_SUFFIX = re.compile(
+    r"^\s*(?:[:\-]|\bis\b)?\s*(?:per|/|\bpsf\b|\bper\b)?\s*"
+    r"(?:sf|psf|sq\.?\s*ft|square\s+(?:foot|feet)|rentable|unit|acre|nrsf|"
+    r"month|door)\b|^\s*/\s*|^\s*psf\b", re.IGNORECASE)
+
+#: `$4.5 million` / `$4.5MM` / `$4.5M`. The suffix must stand ALONE directly
+#: after the number: the rule this replaces re-scanned a five-character window,
+#: so `Asking Price $675 MSA Median Household Income` multiplied by a million
+#: off the M of "MSA". The `\b` is what does that work — it is not the letter's
+#: case, which is why there is one pattern here and not two.
+_MILLIONS_RE = re.compile(r"^\s*(?:million|mm|m)\b", re.IGNORECASE)
+
+_MONEY_TOKEN_RE = re.compile(r"\$?\s*(\d[\d,]*(?:\.\d+)?)")
+
+
+def _first_price_in(fragment: str) -> Optional[float]:
+    """First money-shaped token in `fragment`, scaled if it is quoted in
+    millions. Percentages are skipped — `PRICE AVAILABLE` sits above `7%`."""
+    for m in _MONEY_TOKEN_RE.finditer(fragment):
+        rest = fragment[m.end():]
+        if rest[:1] == "%" or rest[:2] in (" %",):
+            continue
+        val = _parse_number(m.group(1))
+        if not val:
+            continue
+        if _MILLIONS_RE.match(rest):
+            val *= 1_000_000
+        return val
+    return None
+
+
 def _parse_pricing(text: str, data: CIMData):
-    """Extract asking price."""
-    price_patterns = [
-        r"(?:asking\s+price|list\s+price|offered?\s+(?:at|price)|purchase\s+price)[:\s]*\$\s*([\d,]+(?:\.\d+)?)\s*(?:million|MM|M)",
-        r"(?:asking\s+price|list\s+price|offered?\s+(?:at|price)|purchase\s+price)[:\s]*\$\s*([\d,]+(?:\.\d+)?)",
-    ]
-    for pat in price_patterns:
-        m = re.search(pat, text, re.IGNORECASE)
-        if m:
-            val = _parse_number(m.group(1))
-            # Check if in millions
-            if "million" in text[m.start():m.end()+20].lower() or \
-               "MM" in text[m.start():m.end()+10] or \
-               (val < 1000 and "M" in text[m.end():m.end()+5]):
-                val *= 1_000_000
-            data.asking_price = val
+    """Extract the asking price for the WHOLE offering.
+
+    Ranked by label specificity rather than document order, because the two
+    disagree: MNET DECATUR prints a per-SF price above the real one, and a
+    portfolio CIM prints a per-property price above the offering price. Rank
+    wins; within a rank the first occurrence wins.
+    """
+    lines = text.split("\n")
+    best_rank, best_val = 99, None
+
+    for i, line in enumerate(lines):
+        m = _PRICE_LABEL_SPECIFIC.match(line)
+        rank = 2 if m else None
+        if not m:
+            m = _PRICE_LABEL_BARE.match(line)
+            rank = 3 if m else None
+        if not m:
+            continue
+
+        tail = line[m.end():]
+        if _PRICE_UNIT_SUFFIX.match(tail):
+            continue                      # a rate, not a price
+        if rank == 2 and _PRICE_SCOPE_RE.search(line):
+            rank = 1                      # covers the whole offering
+
+        val = _first_price_in(tail)
+        if val is None or val < MIN_PLAUSIBLE_ASKING_PRICE:
+            # Header-row form: the label heads a column and the value sits in
+            # the row beneath (`ListingPrice CapRate (Year One)` over
+            # `$3,500,000 7.83% 434`). Reached whenever the label's own line
+            # yields no PLAUSIBLE price — not merely when it holds no digits —
+            # because `LIST PRICE 2025 NOI STABILIZED MARGIN` is a header row
+            # whose only same-line number is the year of the NOI column.
+            for probe in lines[i + 1:i + 3]:
+                if not re.search(r"\d", probe):
+                    continue      # a wrapped header cell, e.g. `(STABILIZED)`
+                nxt = _first_price_in(probe)
+                if nxt is not None and nxt >= MIN_PLAUSIBLE_ASKING_PRICE:
+                    val = nxt
+                # The FIRST row carrying digits decides, whether or not it
+                # yielded a price. Scanning past it for something plausible is
+                # how a label ends up owning a number from another table.
+                break
+        if val is None or val < MIN_PLAUSIBLE_ASKING_PRICE:
+            continue
+        if rank < best_rank:
+            best_rank, best_val = rank, val
+
+    if best_val is not None:
+        data.asking_price = best_val
+
+
+#: One radius column heading: `3 Miles`, `3Miles`, `1-MILE`, `0.3 mi`,
+#: `5 Mile Radius`. The trailing `radius` is absorbed so it cannot break the
+#: run-adjacency test below.
+_RADIUS_TOKEN_RE = re.compile(
+    r"(\d+(?:\.\d+)?)\s*[-–]?\s*mi(?:le)?s?\b(?:\s*radius)?", re.IGNORECASE)
+
+#: A vintage marker at the START of a line: `2024 Estimate`, `2030 Projection`,
+#: `2020 Census`. Requires whitespace after the year so the growth-rate row
+#: `2024-2029: Population: Growth Rate ...` cannot set a vintage.
+_VINTAGE_LINE_RE = re.compile(
+    r"^\s*((?:19|20)\d{2})\s+(?:estimate|projection|census|summary|acs|"
+    r"population|median|average|total)", re.IGNORECASE)
+_VINTAGE_PREFIX_RE = re.compile(
+    r"^\s*((?:19|20)\d{2})\s+(?:estimate|projection|census|summary|acs)?\s*",
+    re.IGNORECASE)
+_YEAR_ANYWHERE_RE = re.compile(r"\b((?:19|20)\d{2})\b")
+_NUM_TOKEN_RE = re.compile(r"\$?\s*(\d[\d,]*(?:\.\d+)?)")
+_REGION_END_RE = re.compile(r"^\s*(?:={5,}|-{3}\s*PAGE\b)")
+
+#: How far a header's columns are taken to reach. Measured: the widest real
+#: demographics block in the corpus puts its last population row 11 lines
+#: under the header.
+_REGION_LINES = 14
+
+
+def _radius_columns(line: str) -> list[float]:
+    """The radii a header line declares, or [] if it declares none.
+
+    The discriminator is ADJACENCY: a real header is a run of radius tokens
+    with nothing but whitespace between them, in ascending order. Prose and
+    comp tables produce radius tokens too — `3 miles East of Bastrop Proper
+    and 130 miles Northwest of Houston`, `DISTANCE ~1.75 MILES DISTANCE ~2.30
+    MILES`, `5 PUBLIC STORAGE 2901 MILES ROAD 99,833 3.3 MILES` — and every
+    one of them has words between the tokens, so none forms a run.
+
+    A multi-panel header repeats its radii (`POPULATION 1Mile 3Miles 5Miles
+    HOUSEHOLDSBYINCOME 1Mile 3Miles 5Miles`); the FIRST run is the panel whose
+    rows start at column 0, which is the only panel a line-based read can
+    attribute correctly.
+    """
+    run, prev_end = [], None
+    for m in _RADIUS_TOKEN_RE.finditer(line):
+        adjacent = prev_end is not None and not line[prev_end:m.start()].strip()
+        val = float(m.group(1))
+        if adjacent and val > run[-1]:
+            run.append(val)
+        else:
+            if len(run) >= 2:
+                return run          # first complete run wins
+            run = [val]
+        prev_end = m.end()
+    return run if len(run) >= 2 else []
+
+
+def _row_label_and_values(line: str, want: int) -> tuple[str, list[float]]:
+    """Split a data row into its label and its first `want` numeric cells.
+
+    Percentages are skipped: the MNET decks merge an income-distribution panel
+    onto the same text line (`Total Population 19,398 59,666 132,134
+    $250,000 or More 15.6% 14.2% 11.6%`), and taking cells positionally past
+    the panel boundary would read one panel's header into another's row.
+    """
+    body = _VINTAGE_PREFIX_RE.sub("", line)
+    label, values = None, []
+    for m in _NUM_TOKEN_RE.finditer(body):
+        rest = body[m.end():]
+        # A percentage belongs to a neighbouring panel, and `25+` is an age
+        # band glued to its own label (`Population 25+ by Education Level`) —
+        # neither ends the label, and treating either as a value shifts every
+        # column one to the left.
+        if rest[:1] in ("%", "+") or rest[:2] == " %":
+            continue
+        if label is None:
+            label = body[:m.start()].strip(" :.-\t")
+        values.append(_parse_number(m.group(1)))
+        if len(values) == want:
             break
+    return (label or ""), values
+
+
+def _is_population_label(label: str) -> bool:
+    """Only a bare population count. `Daytime Population`, `Population Age
+    25+`, `Population By Age` and `Population: Growth Rate` all name something
+    else, and every one of them appears in the corpus beside the real row."""
+    lab = re.sub(r"^(?:total|est\.?|estimated|current)\s+", "",
+                 label.lower().strip())
+    return lab.strip(" :.-") == "population"
+
+
+def _is_median_hhi_label(label: str) -> bool:
+    """Median household income — not the AVERAGE, which sits directly beside
+    it in most decks and is the number the old pattern was picking up."""
+    lab = label.lower()
+    return "median" in lab and bool(
+        re.search(r"h(?:ousehold|h)\s*(?:income)|hhi", lab))
+
+
+def _resolve_vintaged(candidates: list[tuple[Optional[int], float]]
+                      ) -> Optional[float]:
+    """Pick the value for the most recent NON-projected vintage, or refuse.
+
+    Refusing is the correct output, not a failure: `extract.enrichment`
+    returns a tier-1 value the moment it is not None, so a guessed population
+    permanently suppresses the Census lookup AND stamps itself `CIM/override`
+    in the source log. A wrong number here is strictly worse than no number.
+    """
+    this_year = _date.today().year
+    dated = [(v, x) for v, x in candidates if v is not None and v <= this_year]
+    if dated:
+        newest = max(v for v, _ in dated)
+        values = {x for v, x in dated if v == newest}
+    else:
+        values = {x for v, x in candidates if v is None}
+    return values.pop() if len(values) == 1 else None
 
 
 def _parse_demographics(text: str, data: CIMData):
-    """Extract population by radius and median HHI."""
+    """Extract population by radius and the median HHI, by reading the
+    demographics table as a table.
 
-    # Population within radii
-    pop_patterns = {
-        "population_1mi": [
-            r"1[\s\-]?mile[^:]*?[:\s]*([\d,]+)\s*(?:people|pop|residents)?",
-            r"([\d,]+)\s*(?:people|pop|residents)?\s*(?:within|in)\s*(?:a\s*)?1[\s\-]?mile",
-        ],
-        "population_3mi": [
-            r"3[\s\-]?mile[^:]*?[:\s]*([\d,]+)\s*(?:people|pop|residents)?",
-            r"([\d,]+)\s*(?:people|pop|residents)?\s*(?:within|in)\s*(?:a\s*)?3[\s\-]?mile",
-        ],
-        "population_5mi": [
-            r"5[\s\-]?mile[^:]*?[:\s]*([\d,]+)\s*(?:people|pop|residents)?",
-            r"([\d,]+)\s*(?:people|pop|residents)?\s*(?:within|in)\s*(?:a\s*)?5[\s\-]?mile",
-        ],
-    }
-    for field_name, pats in pop_patterns.items():
-        for pat in pats:
-            m = re.search(pat, text, re.IGNORECASE)
-            if m:
-                setattr(data, field_name, int(_parse_number(m.group(1))))
+    The pattern this replaces read digits out of the COLUMN HEADINGS: against
+    `POPULATION 3Miles 5Miles 10Miles` it captured the 5 of `5Miles` as the
+    3-mile population. Measured over 45 local CIMs it wrote a value under
+    1,000 on 21 of them — including `5` for a deal whose true 3-mile
+    population is 69,451, failing gate 1 on a deal that clears it by 39%.
+    """
+    lines = text.split("\n")
+    pop_cands: dict[str, list] = {"1": [], "3": [], "5": []}
+    hhi_cands: list = []
+
+    for h, header in enumerate(lines):
+        radii = _radius_columns(header)
+        if not radii:
+            continue
+        header_vintage = None
+        ym = _YEAR_ANYWHERE_RE.search(header)
+        if ym:
+            header_vintage = int(ym.group(1))
+        pending = header_vintage
+
+        for line in lines[h + 1:h + 1 + _REGION_LINES]:
+            if _REGION_END_RE.match(line):
                 break
+            vm = _VINTAGE_LINE_RE.match(line)
+            if vm:
+                pending = int(vm.group(1))
+            label, values = _row_label_and_values(line, len(radii))
+            if len(values) < len(radii):
+                continue
+            if _is_population_label(label):
+                for radius, value in zip(radii, values):
+                    key = str(int(radius)) if radius == int(radius) else None
+                    if key in pop_cands:
+                        pop_cands[key].append((pending, value))
+            elif _is_median_hhi_label(label):
+                for radius, value in zip(radii, values):
+                    if radius == 3:
+                        hhi_cands.append((pending, value))
 
-    # Median HHI
-    hhi_pat = r"(?:median\s+)?(?:household\s+income|HHI)[:\s]*\$\s*([\d,]+)"
-    m = re.search(hhi_pat, text, re.IGNORECASE)
-    if m:
-        data.median_hhi_3mi = _parse_number(m.group(1))
+    for key, attr in (("1", "population_1mi"), ("3", "population_3mi"),
+                      ("5", "population_5mi")):
+        resolved = _resolve_vintaged(pop_cands[key])
+        if resolved is not None:
+            setattr(data, attr, int(resolved))
+
+    resolved_hhi = _resolve_vintaged(hhi_cands)
+    if resolved_hhi is not None:
+        data.median_hhi_3mi = resolved_hhi
 
 
 # How many months of actuals the TTM figures cover. A month count in a
