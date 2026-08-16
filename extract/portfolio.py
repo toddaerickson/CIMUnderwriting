@@ -58,6 +58,13 @@ STREET_ADDR_RE = re.compile(
 # "12th" are fine — their digits are followed by a letter.
 _BARE_INT = re.compile(r"(?<!\S)\d+(?!\S)")
 
+# A bare integer PRECEDED by one of these is a route number inside the
+# street's own name ("N Interstate 35 Frontage Road"), not a second house
+# number — recovery must skip it or it eats the real house number.
+# Matched against the previous token with dots stripped ("U.S." -> "us").
+_HIGHWAY_WORDS = {"interstate", "highway", "hwy", "route", "rt", "us",
+                  "sh", "fm", "loop", "spur", "i"}
+
 
 def _recover_address(m):
     """Return (number, name, suffix), recovering a real house number when a
@@ -67,16 +74,26 @@ def _recover_address(m):
     "<addr1> <CITY>, ST <ZIP> <addr2> <CITY>, ST <ZIP>", so the regex can
     anchor the second address on the ZIP instead of its own number —
     "43023 13761 LUCILLE LYND ROAD" yields num=43023 (the ZIP) and
-    name="13761 LUCILLE LYND". Recovery keeps the LAST bare integer in the
-    name as the real number and discards everything before it:
-    -> ('13761', 'LUCILLE LYND', 'ROAD')."""
+    name="13761 LUCILLE LYND". Recovery keeps the last RECOVERABLE bare
+    integer in the name as the real number and discards everything before
+    it: -> ('13761', 'LUCILLE LYND', 'ROAD').
+
+    Recoverable excludes route numbers: in "1200 N Interstate 35 Frontage
+    Road" the 35 belongs to the highway's name, and taking it as the house
+    number returned "35 Frontage Road" — the real house number eaten.
+    Skipping highway-designated integers also composes with the ZIP case:
+    "43023 1200 N Interstate 35 Frontage Road" steps past the 35 and
+    recovers 1200."""
     num = m.group("num")
     name = m.group("name").strip()
-    bare = list(_BARE_INT.finditer(name))
-    if bare:
-        last = bare[-1]
-        num = last.group(0)
-        name = name[last.end():].strip()
+    for candidate in reversed(list(_BARE_INT.finditer(name))):
+        before = name[:candidate.start()].split()
+        prev = before[-1].replace(".", "").lower() if before else ""
+        if prev in _HIGHWAY_WORDS:
+            continue                    # a route number, not a house number
+        num = candidate.group(0)
+        name = name[candidate.end():].strip()
+        break
     return num, name, m.group("suf")
 
 

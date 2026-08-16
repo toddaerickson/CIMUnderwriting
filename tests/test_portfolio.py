@@ -106,6 +106,32 @@ def test_cover_street_addresses_splits_compound_addresses():
     assert all("acres" not in a for a in addrs)
 
 
+def test_recovery_does_not_eat_a_highway_address_house_number():
+    """`_recover_address` treats the LAST bare integer in the captured name
+    as a bleed-through house number — but in "1200 N Interstate 35 Frontage
+    Road" the 35 is the route number inside the street's own name, and
+    recovering it returned "35 Frontage Road" with the real house number
+    eaten. A route number is one preceded by a highway designator."""
+    addrs = cover_street_addresses(
+        ["1200 N Interstate 35 Frontage Road Suite 100\nRound Rock, TX"])
+    assert addrs == ["1200 N Interstate 35 Frontage Road"]
+
+
+def test_recovery_still_fires_on_zip_bleed_through():
+    # The case recovery exists for — unchanged by the highway guard.
+    addrs = cover_street_addresses(["43023 13761 LUCILLE LYND ROAD"])
+    assert addrs == ["13761 LUCILLE LYND ROAD"]
+
+
+def test_recovery_composes_zip_bleed_with_a_highway_name():
+    """A ZIP bleeding into a highway address: the sweep steps past the
+    route number (highway-designated) and recovers the real house number
+    behind it."""
+    addrs = cover_street_addresses(
+        ["43023 1200 N Interstate 35 Frontage Road"])
+    assert addrs == ["1200 N Interstate 35 Frontage Road"]
+
+
 def test_cover_street_addresses_suppresses_broker_blocks():
     # Subject address at the top, broker signature block far below (>110
     # chars, as on real covers) — the subject must survive and the broker's
