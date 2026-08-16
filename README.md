@@ -61,6 +61,23 @@ Key environment variables:
   structure now lives in `config.py` and the per-deal Debt & Waterfall inputs)
 - `COMP_DB_PATH`, `CIM_DEALS_DIR`, `CIM_OVERRIDES_DIR` — data paths (set by `render.yaml` in prod)
 
+## Comp Database Seeding
+
+The comp database (`data/cim_comps.db`) normally fills only from your own prior
+CIM analyses. To seed it with third-party market data (e.g. the Texas
+`BCRE REGAL FULL SELF STORAGE DATABASE.xlsx`), use the importer:
+
+```bash
+python scripts/import_regal_database.py                # upsert into data/cim_comps.db
+python scripts/import_regal_database.py --dry-run      # report only, no writes
+python scripts/import_regal_database.py --reset        # drop prior [regal: rows first
+```
+
+It maps the workbook's CAD sheets into `properties` and its unit-rate sheets
+into `unit_mix` (tagged with a `[regal:` filename prefix), so the existing
+rent/expense/revenue benchmark queries immediately see real facilities. Reruns
+are idempotent and never touch rows that came from actual CIM analyses.
+
 ## Investment Criteria
 
 | Gate | Threshold |
