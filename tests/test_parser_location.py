@@ -31,8 +31,44 @@ from extract.location import (
     ("LaGrange", "LaGrange"),
     ("5485 Airport Hwy", ""),                       # pure street fragment
     ("", ""),
+    # A TRAILING 'City' is part of the name; a LEADING one is the field label
+    # NOISE_TOKENS put it there for. Both readings, so neither can regress.
+    ("Oklahoma City", "Oklahoma City"),
+    ("Kansas City", "Kansas City"),
+    ("Salt Lake City", "Salt Lake City"),
+    ("City Belton", "Belton"),
+    ("Property City Belton", "Belton"),
+    # 'St./Ft./Mt.' is Saint/Fort/Mount against the ABBREV_CITIES allowlist and
+    # Street otherwise — the pair decides, never the token alone.
+    ("St. Louis", "St. Louis"),
+    ("Ft. Worth", "Ft. Worth"),
+    ("Mt. Pleasant", "Mt. Pleasant"),
+    ("Port St. Lucie", "Port St. Lucie"),
+    ("1234 Main St. Bastrop", "Bastrop"),           # 'St.' as Street still trims
+    ("100 Church St. Madisonville", "Madisonville"),
+    # Directional prefixes are a KNOWN, DELIBERATE residual — see
+    # test_directional_prefix_cities_are_a_known_residual.
+    ("Highway 71 West Bastrop", "Bastrop"),
 ])
 def test_tidy_city(raw, expect):
+    assert tidy_city(raw) == expect
+
+
+@pytest.mark.parametrize("raw,expect", [
+    ("North Las Vegas", "Las Vegas"),
+    ("West Memphis", "Memphis"),
+    ("South Bend", "Bend"),
+])
+def test_directional_prefix_cities_are_a_known_residual(raw, expect):
+    """Pinned as-is, NOT as desired behaviour.
+
+    STREET_SUFFIX carries the directionals because they really do end street
+    lines, and tidy_city cannot tell 'North Las Vegas' from the tail of
+    'Highway 71 West' by the token alone. Dropping them from the break set
+    regresses real captures, and none of these three flip a gate — unlike the
+    '*City' and 'St.' cases above, which flipped four of config.TOP_50_MSAS.
+    Fixing this properly needs a gazetteer, not a bigger token list. If you
+    make it right, change the expectation; do not delete the test."""
     assert tidy_city(raw) == expect
 
 
@@ -172,13 +208,13 @@ def test_zip_less_matching_does_not_fabricate_a_city_from_prose():
 def test_most_frequent_city_wins():
     text = ("Kerrville, TX 78028 ... Kerrville, TX 78028 ... "
             "one mention of Boerne, TX 78006")
-    city, state, _ = best_city_state(text)
+    city, state, _zip, _ = best_city_state(text)
     assert (city, state) == ("Kerrville", "TX")
 
 
 def test_state_follows_the_winning_city_when_states_disagree():
     text = "Kerrville, TX 78028 and Kerrville, TX 78028 and Ada, OK 74820"
-    city, state, _ = best_city_state(text)
+    city, state, _zip, _ = best_city_state(text)
     assert (city, state) == ("Kerrville", "TX")
 
 
@@ -188,13 +224,32 @@ def test_same_city_name_under_two_states_takes_the_most_common():
     state — a real shape, since same-named cities are common."""
     text = ("Comp: Springfield, IL 62701 | Subject: Springfield, MO 65801 "
             "| Subject: Springfield, MO 65801")
-    city, state, _ = best_city_state(text)
+    city, state, _zip, _ = best_city_state(text)
     assert (city, state) == ("Springfield", "MO")
 
 
 def test_best_city_state_returns_none_when_nothing_is_found():
-    city, state, src = best_city_state(["Offering Memorandum", "no address here"])
-    assert city is None and state is None and src
+    city, state, zip_code, src = best_city_state(
+        ["Offering Memorandum", "no address here"])
+    assert city is None and state is None and zip_code is None and src
+
+
+def test_best_city_state_returns_the_modal_zip_for_the_winning_city():
+    """The ZIP is the key the demographic ring is centred on, so it has to come
+    from the hits for the WINNING city — not the document's most common ZIP."""
+    text = ("Comp: Springfield, IL 62701 | Subject: Springfield, MO 65801 "
+            "| Subject: Springfield, MO 65801")
+    city, state, zip_code, _ = best_city_state(text)
+    assert (city, state, zip_code) == ("Springfield", "MO", "65801")
+
+
+def test_a_zipless_hit_does_not_outvote_the_one_real_zip():
+    """ADDR_RE_NOZIP and the two-group patterns yield '' rather than a ZIP. A
+    modal '' would win the count and report "no ZIP" for a page that has one."""
+    _, _, zip_code, _ = best_city_state(
+        ["Kerrville, Texas ... Kerrville, Texas ... Kerrville, TX 78028"],
+        allow_zipless=True)
+    assert zip_code in (None, "78028")
 
 
 # ── parser integration ───────────────────────────────────────────────
@@ -237,3 +292,63 @@ def test_parse_cim_leaves_city_none_when_absent():
     data = parse_cim({"text": "No address in this document.", "tables": [],
                       "pages": ["No address in this document."]})
     assert data.city is None and data.state is None
+
+
+def test_parse_cim_captures_the_zip_beside_the_city():
+    from extract.parser import parse_cim
+
+    data = parse_cim({"text": "", "tables": [],
+                      "pages": ["Storage For Sale | 900 Industry Drive, "
+                                "Bastrop, TX 78602"]})
+    assert (data.city, data.state, data.zip_code) == ("Bastrop", "TX", "78602")
+
+
+def test_parse_cim_never_fills_the_street_address():
+    """Deleting the street regex IS the fix for the gate-1 false PASS: with no
+    address, enrich_cim_data cannot geocode a broker's office. If a future
+    change repopulates this field, the ring silently re-centres on whatever
+    that extractor found — so this is pinned, not incidental."""
+    from extract.parser import parse_cim
+
+    pages = ["Marcus & Millichap | 16830 Ventura Blvd, Encino, CA 91436",
+             "Subject: 900 Industry Drive, Bastrop, TX 78602"]
+    assert parse_cim({"text": " ".join(pages), "tables": [],
+                      "pages": pages}).address is None
+
+
+# ── gate 6 round trip ────────────────────────────────────────────────
+
+def test_every_top_50_msa_survives_its_own_round_trip():
+    """Gate 6 substring-matches config.TOP_50_MSAS against the parsed city, so a
+    city name tidy_city mangles scores a false FAIL — a good deal screened out.
+
+    Derived from config rather than enumerated: adding an MSA whose name the
+    extractor cannot round-trip must fail HERE, not on a live deal. Four entries
+    failed this before ABBREV_CITIES and the trailing-'City' rule existed —
+    St. Louis, Kansas City, Oklahoma City, Salt Lake City."""
+    from config import TOP_50_MSAS
+
+    broken = {}
+    for entry in TOP_50_MSAS:
+        primary = entry.split(",")[0].split("-")[0].strip()
+        got = tidy_city(primary)
+        if got.lower() != primary.lower():
+            broken[primary] = got
+    assert not broken, f"TOP_50_MSAS entries mangled by tidy_city: {broken}"
+
+
+@pytest.mark.parametrize("cover,expect", [
+    ("1200 Grand Blvd, Kansas City, MO 64106", "Kansas City"),
+    ("8800 N May Avenue, Oklahoma City, OK 73120", "Oklahoma City"),
+    ("2100 S State Street, Salt Lake City, UT 84115", "Salt Lake City"),
+    ("7000 Manchester Ave, St. Louis, MO 63143", "St. Louis"),
+])
+def test_top_50_cover_lines_reach_gate_6_intact(cover, expect):
+    """The same four, end to end through the production entry point. Before the
+    fix the '*City' covers returned NOTHING at all — _harvest drops a city under
+    three characters — so city, state AND zip were lost together."""
+    from config import TOP_50_MSAS
+
+    city, state, zip_code, _ = best_city_state([cover])
+    assert city == expect and state and zip_code
+    assert any(m.lower() in city.lower() for m in TOP_50_MSAS)

@@ -196,7 +196,8 @@ class CompDatabase:
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 cim_data.property_name, cim_data.address,
-                cim_data.city, cim_data.state, cim_data.msa, None,
+                cim_data.city, cim_data.state, cim_data.msa,
+                getattr(cim_data, "zip_code", None),
                 cim_data.year_built, nrsf, cim_data.total_units,
                 cim_data.cc_pct, cim_data.acreage,
                 cim_data.physical_occupancy,

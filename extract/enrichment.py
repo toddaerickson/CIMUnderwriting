@@ -14,6 +14,7 @@ Data sourcing hierarchy for each field:
 
 import logging
 import math
+import re
 import time
 from typing import Optional
 from dataclasses import dataclass, field
@@ -154,6 +155,75 @@ def _geocode_address(address: str, city: str, state: str) -> Optional[dict]:
         return None
 
 
+def _geocode_zip(zip_code: str) -> Optional[dict]:
+    """Centre on a ZIP when no street address is known. Same dict as
+    `_geocode_address`, or None.
+
+    The parser does not extract street addresses (see extract/parser.py), so on
+    most deals this is the only centre available. `onelineaddress` cannot serve
+    it: it is a TIGER address-RANGE matcher and returns zero matches for a bare
+    ZIP, for "City, ST ZIP", or for anything without a house number — measured
+    against the live API, not assumed. So resolve the ZCTA5 polygon's own
+    centroid from TIGERweb, then hand those coordinates to the geocoder's
+    `coordinates` endpoint for the FIPS pair the demographics query needs.
+
+    A ZCTA centroid sits roughly 0.75-1.5 mi from any given facility, which
+    swaps some of a 3-mile ring's area for neighbouring area — an error with
+    RANDOM sign, and smaller than the county truncation already in the
+    demographics path. The street-address geocode it replaces was accurate
+    about the wrong building."""
+    if not zip_code or not re.fullmatch(r"\d{5}", str(zip_code).strip()):
+        return None
+    zip_code = str(zip_code).strip()
+    try:
+        resp = requests.get(
+            "https://tigerweb.geo.census.gov/arcgis/rest/services/"
+            "TIGERweb/tigerWMS_Current/MapServer/2/query",
+            params={
+                "where": f"ZCTA5='{zip_code}'",
+                "outFields": "ZCTA5,CENTLAT,CENTLON",
+                "returnGeometry": "false",
+                "f": "json",
+            }, timeout=15)
+        resp.raise_for_status()
+        features = resp.json().get("features", [])
+        if not features:
+            return None
+        attrs = features[0].get("attributes", {})
+        lat, lon = float(attrs["CENTLAT"]), float(attrs["CENTLON"])
+
+        resp = requests.get(
+            "https://geocoding.geo.census.gov/geocoder/geographies/coordinates",
+            params={
+                "x": lon, "y": lat,
+                "benchmark": "Public_AR_Current",
+                "vintage": "Current_Current",
+                "format": "json",
+            }, timeout=15)
+        resp.raise_for_status()
+        geographies = resp.json().get("result", {}).get("geographies", {})
+        tract_info = {}
+        for geo_key in ("Census Tracts", "2020 Census Blocks"):
+            geos = geographies.get(geo_key, [])
+            if geos:
+                tract_info = geos[0]
+                break
+        if not tract_info.get("STATE"):
+            return None
+
+        return {
+            "lat": lat,
+            "lon": lon,
+            "matched_address": f"ZCTA5 {zip_code} centroid",
+            "state_fips": tract_info.get("STATE", ""),
+            "county_fips": tract_info.get("COUNTY", ""),
+            "census_tract": tract_info.get("TRACT", ""),
+        }
+    except (requests.RequestException, KeyError, ValueError, TypeError) as exc:
+        logger.debug("ZCTA centroid lookup failed for %s: %s", zip_code, exc)
+        return None
+
+
 # ── Demographics (Census ACS 5-year — requires free API key) ─────
 
 def _fetch_census_demographics(lat: float, lon: float,
@@ -231,6 +301,20 @@ def _fetch_census_demographics(lat: float, lon: float,
             total_weight = sum(hhi_weights_3mi)
             weighted_sum = sum(h * w for h, w in zip(hhi_values_3mi, hhi_weights_3mi))
             median_hhi = round(weighted_sum / total_weight) if total_weight else None
+
+        # No block group landed inside even the 5-mile ring, so nothing was
+        # measured. Reporting that as three zeroes is the falsy-zero hazard
+        # decision 9 paid for once already, and it is WORSE here because it
+        # travels: this dict is truthy whatever it holds, so census_success went
+        # True; `resolve` accepts 0 (it tests `is not None`) and stamps it
+        # "Census API"; gate 1's `if pop else 'TBD'` then prints "not found in
+        # CIM" BESIDE that source; and engine.py only re-enriches fields that
+        # are None, so the zero survives every later correction of the address
+        # for the life of the deal. Return None — the caller already treats it
+        # as a failed fetch.
+        if not (pop_1mi or pop_3mi or pop_5mi):
+            logger.debug("No block group centroids within 5 miles of %s, %s", lat, lon)
+            return None
 
         return {
             "population_1mi": pop_1mi,
@@ -333,23 +417,32 @@ def enrich_cim_data(cim_data, census_api_key: str = None,
 
     resolver = DataResolver(result.source_log)
 
-    # Step 1: Geocode if we have address but no lat/lon
+    # Step 1: Establish a centre, if we do not already have one.
+    #
+    # A street address is preferred but the parser never supplies one, so the
+    # ZIP carries most deals. Either way the CENTRE'S ORIGIN is stamped into
+    # source_log beside the coordinates: a 3-mile ring drawn around a ZCTA
+    # centroid and one drawn around a matched building are not the same claim,
+    # and decision 11 says every number discloses which mechanism produced it.
     geocode_data = None
-    if (cim_data.address and cim_data.city and cim_data.state and
-            not getattr(cim_data, 'lat', None)):
-        geocode_data = _geocode_address(
-            cim_data.address, cim_data.city, cim_data.state
-        )
+    zip_code = getattr(cim_data, "zip_code", None)
+    if not getattr(cim_data, "lat", None):
+        centre_source = None
+        if cim_data.address and cim_data.city and cim_data.state:
+            geocode_data = _geocode_address(
+                cim_data.address, cim_data.city, cim_data.state
+            )
+            centre_source = "Census Geocoder"
+        if not geocode_data and zip_code:
+            geocode_data = _geocode_zip(zip_code)
+            centre_source = "ZCTA centroid"
         if geocode_data:
             result.geocode_success = True
-            result.source_log["lat"] = {
-                "tier": 2, "source": "Census Geocoder",
-                "value": geocode_data["lat"]
-            }
-            result.source_log["lon"] = {
-                "tier": 2, "source": "Census Geocoder",
-                "value": geocode_data["lon"]
-            }
+            for axis in ("lat", "lon"):
+                result.source_log[axis] = {
+                    "tier": 2, "source": centre_source,
+                    "value": geocode_data[axis],
+                }
 
     # Step 2: Fetch demographics if API key available
     census_data = None
