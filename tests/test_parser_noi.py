@@ -71,24 +71,84 @@ def test_a_year_three_column_is_never_taken_as_trailing():
 
 
 def test_a_statement_with_two_trailing_columns_and_no_tiebreak_refuses():
-    """`T-12 ACTUAL 2025` names two periods that have both already
-    happened. A statement that cannot say which column is THE actual has
-    not stated one, so it yields nothing rather than the first."""
-    text = ("T-12 ACTUAL 2025\n"
+    """`T-12 ACTUAL CURRENT T-6` names two periods that have both already
+    happened, both explicitly. A statement that cannot say which column is
+    THE actual has not stated one, so it yields nothing rather than the
+    first.
+
+    This fixture used to read `T-12 ACTUAL 2025`, and that is now a
+    DIFFERENT case with a different answer — see the test below. Two
+    EXPLICIT trailing columns is the shape that still refuses, and the
+    `CURRENT T-6` here is separated from `T-12 ACTUAL` by the word
+    `ACTUAL`, which is what stops the continuation rule folding the two
+    into one column.
+    """
+    text = ("T-12 ACTUAL CURRENT T-6\n"
             "Net Operating Income $132,994 $249,950\n")
     assert noi(text) is None
 
 
+def test_an_explicit_trailing_column_outranks_a_bare_year_beside_it():
+    """`2024 TRAILING 12 MO 2025` — Coors — reads the middle column.
+
+    This REFINES #96, which folded a bare calendar year into 'trailing'
+    and so refused this deck for stating three actuals. The deck states
+    one: it named the middle column, and the years either side are the
+    comparatives. Refusing here was not a safe default, because Coors then
+    priced its expenses off a stray `TRAILING 12 MO` fragment on another
+    line and took the 2024 column — $133,411 against the $160,878 its own
+    statement puts under the column it labelled.
+
+    The deck's own arithmetic is the witness that this is the right
+    column, and it ties to the dollar across all three fields:
+    $632,408 − $160,878 = $471,530, the NOI on the line below.
+    """
+    text = ("INCOME 2024 TRAILING 12 MO 2025\n"
+            "Net Operating Income $448,341 $471,530 $523,895\n")
+    assert noi(text) == 471_530
+
+
+def test_bare_years_alone_still_refuse_with_no_explicit_column_to_prefer():
+    """The other half of the same rule, and the reason the preference is
+    not a licence to guess: with nothing but calendar years, Belton's
+    `2024 2025 2026` names three historical columns and no way to choose,
+    so the read still ends."""
+    text = ("2024 2025 2026\n"
+            "Net Operating Income $132,994 $249,950 $301,400\n")
+    assert noi(text) is None
+
+
 def test_an_ambiguous_actual_does_not_fall_through_to_the_brokers_column():
-    """`T-12 2025 T-3 (ADJ)` is the shape that isolates the refusal from
-    the demotion: two unadjusted trailing columns and exactly one
+    """`T-12 CURRENT T-6 T-3 (ADJ)` is the shape that isolates the refusal
+    from the demotion: two unadjusted trailing columns and exactly one
     adjusted. Refusing only the ambiguous TIER would walk down to the
     broker's adjusted figure and report it as the actual — a deck that
     could not say which of its two actuals is current answering with
     neither of them. Ambiguity at any tier ends the read."""
-    text = ("T-12 2025 T-3 (ADJ)\n"
+    text = ("T-12 CURRENT T-6 T-3 (ADJ)\n"
             "Net Operating Income $132,994 $249,950 $301,400\n")
     assert noi(text) is None
+
+
+def test_the_brokers_column_outranks_bare_years_by_convention():
+    """`2024 2025 T-3 (ADJ)` reads the broker's column, and this one is a
+    CONVENTION rather than a measurement.
+
+    No deck in the corpus states an adjusted trailing column beside bare
+    calendar years, so nothing decides which of the two tiers should sit
+    higher — swapping them moves not one number on any of the 45 decks,
+    measured, not assumed. It is pinned here anyway: an order nothing
+    tests is an order the next reader will reverse by accident while
+    believing they preserved it, and then a deck that DOES state both
+    shape will move silently.
+
+    The order chosen is the one that keeps a column explicitly naming a
+    trailing PERIOD above a column named only by a calendar year, which is
+    the same instinct the tier above it follows.
+    """
+    text = ("2024 2025 T-3 (ADJ)\n"
+            "Net Operating Income $132,994 $249,950 $301,400\n")
+    assert noi(text) == 301_400
 
 
 def test_a_header_whose_column_count_misses_the_row_refuses():
@@ -192,8 +252,13 @@ def test_a_closing_parenthesis_counts_as_much_as_an_opening_one():
 # the boundary rules are also asserted where they are decided.
 
 @pytest.mark.parametrize("header,shape", [
-    # a run of calendar years is a run of columns — Belton
-    ("2024 2025 2026", [("trailing", False)] * 3),
+    # a run of calendar years is a run of columns — Belton. They come
+    # back as 'year', not 'trailing': a bare year is history, but a deck
+    # that names one column `TRAILING 12 MO` beside them has said which of
+    # its historical columns is THE actual, and `_fin_statement_candidate`
+    # can only honour that if the two kinds stay apart. Belton names no
+    # such column, so three of these still refuse.
+    ("2024 2025 2026", [("year", False)] * 3),
     # two trailing words in a row are one label — Starkville
     ("CURRENT T-6 PRO FORMA", [("trailing", False), ("projection", False)]),
     # unless the broker's hand separates them — Hammond, Dallas
@@ -211,7 +276,7 @@ def test_a_closing_parenthesis_counts_as_much_as_an_opening_one():
     # rather than as it ought to read, because a test written to the
     # tidier shape would fail the day someone tightened the flag.
     ("2025 MARKET ADJUSTED PRO FORMA",
-     [("trailing", False), ("projection", True), ("projection", True)]),
+     [("year", False), ("projection", True), ("projection", True)]),
 ])
 def test_a_header_declares_the_columns_the_corpus_shows_it_declaring(
         header, shape):
