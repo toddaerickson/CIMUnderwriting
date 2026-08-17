@@ -331,3 +331,232 @@ def test_occupancy_and_cc_are_untouched():
     assert d.economic_occupancy == pytest.approx(0.782)
     assert d.cc_pct == pytest.approx(0.35)
     assert d.nrsf == 45_680
+
+
+# ── occupancy: the basis is the datum ────────────────────────────────
+# Same convention as above: the LAYOUTS are the corpus's own — the
+# stat-block dates, the slash duals, the glued labels, the banner — and
+# every FIGURE is invented. An occupancy is a commercial term of a live
+# deal like any other.
+
+def test_an_economic_figure_never_lands_in_physical():
+    """The old optional `(?:physical\\s+)?` prefix meant an economic-only
+    deck filled BOTH fields with the same number."""
+    d = parse("ECONOMIC OCCUPANCY: 64%")
+    assert d.physical_occupancy is None
+    assert d.economic_occupancy == pytest.approx(0.64)
+
+
+def test_the_stat_block_reads_sf_physical_over_units_and_economic():
+    """The three-line stat block states every basis; SF-physical is the
+    demand gate's number and the golden labels' choice."""
+    d = parse("PHYSICAL OCCUPANCY (SQ. FT.): 83%\n"
+              "PHYSICAL OCCUPANCY (UNITS): 77%\n"
+              "ECONOMIC OCCUPANCY: 71%")
+    assert d.physical_occupancy == pytest.approx(0.83)
+    assert d.economic_occupancy == pytest.approx(0.71)
+
+
+@pytest.mark.parametrize("text,field,expect", [
+    ("PHYSICAL OCCUPANCY (SF) AS OF APRIL 30, 2026 87.60%",
+     "physical_occupancy", 0.876),
+    ("CURRENT PHYSICAL OCCUPANCY (SF) AS OF YEAR END 2025 68.31%",
+     "physical_occupancy", 0.6831),
+    ("CURRENT ECONOMIC OCCUPANCY THRU MAY 31, 2026 23.05%",
+     "economic_occupancy", 0.2305),
+    ("Economic Occupancy(%) 67.47%", "economic_occupancy", 0.6747),
+])
+def test_the_stat_block_dates_are_crossed(text, field, expect):
+    """This family parsed to None wholesale before — the old pattern could
+    cross neither the basis parenthetical nor the AS OF/THRU date. `YEAR
+    END 2025` must not trip the projection veto, which wants a digit
+    directly after "year"."""
+    assert getattr(parse(text), field) == pytest.approx(expect)
+
+
+def test_the_economic_stat_block_fills_economic_only():
+    assert parse("CURRENT ECONOMIC OCCUPANCY THRU MAY 31, 2026 23.05%"
+                 ).physical_occupancy is None
+
+
+def test_a_label_does_not_adopt_the_next_lines_number():
+    d = parse("Occupancy\n35.5%")
+    assert d.physical_occupancy is None
+    assert d.economic_occupancy is None
+
+
+def test_slash_dual_labels_bind_positionally():
+    """Read flat, the physical label alone binds the FIRST value and books
+    the economic figure as physical at rank 1."""
+    d = parse("Economic Occupancy / Physical Occupancy "
+              "(March 31, 2026) 51% / 78%")
+    assert d.physical_occupancy == pytest.approx(0.78)
+    assert d.economic_occupancy == pytest.approx(0.51)
+
+
+def test_the_sf_unit_dual_prefers_the_sf_figure():
+    assert parse("SF Occupancy / Unit Occupancy 93.0% / 90.2%"
+                 ).physical_occupancy == pytest.approx(0.93)
+
+
+def test_bare_section_figures_that_disagree_refuse():
+    """Per-section stat rows (an RV/boat section beside the main one) are
+    bare-tier candidates: two values, no basis, no winner."""
+    d = parse("Occupied Tenants: 281 Occupancy: 91.15%\nOccupancy: 64.29%")
+    assert d.physical_occupancy is None
+
+
+@pytest.mark.parametrize("text,expect", [
+    ("OCCUPANCY 47%", 0.47),
+    ("Occupancy: ±63% total occupancy (expansion is in lease up)", 0.63),
+    ("Occupancy at Sale: 71.4% Occupied", 0.714),
+    ("614 Units 53% Total Occupancy", 0.53),
+    ("OCCUPANCY 100.00%", 1.0),
+])
+def test_a_bare_occupancy_is_still_read_as_physical_only(text, expect):
+    """The unqualified number a broker quotes is almost always physical
+    (CLAUDE.md); it is never read as economic."""
+    d = parse(text)
+    assert d.physical_occupancy == pytest.approx(expect)
+    assert d.economic_occupancy is None
+
+
+def test_an_explicit_basis_beats_a_bare_stat():
+    d = parse("OCCUPANCY 21.08%\n"
+              "Currently 47% Physically Occupied as of July 1")
+    assert d.physical_occupancy == pytest.approx(0.47)
+
+
+@pytest.mark.parametrize("text,field,expect", [
+    ("the Property was 91.3% physically occupied by square footage",
+     "physical_occupancy", 0.913),
+    ("68% Physical Occupancy", "physical_occupancy", 0.68),
+    ("57% Economic Occupancy", "economic_occupancy", 0.57),
+    ("Currently 22% Economically Occupied on a Trailing 6 Months",
+     "economic_occupancy", 0.22),
+])
+def test_percent_before_the_words_reads(text, field, expect):
+    assert getattr(parse(text), field) == pytest.approx(expect)
+
+
+def test_the_word_physical_outranks_the_sf_basis_label():
+    """One deck attaches "physical" to its unit figure and quotes the SF
+    basis under a basis-only label; the golden labels take the word as the
+    broker's own claim of basis."""
+    d = parse("Currently Sits at 64.07% Physical Occupancy\n"
+              "Square Foot Occupancy 71.18%\n"
+              "Unit Occupancy 64.07%\n"
+              "Economic Occupancy 68.31%")
+    assert d.physical_occupancy == pytest.approx(0.6407)
+    assert d.economic_occupancy == pytest.approx(0.6831)
+
+
+def test_sf_outranks_units_and_a_unit_only_deck_still_reads():
+    assert parse("Square Foot Occupancy 51%\nUnit Occupancy 47%"
+                 ).physical_occupancy == pytest.approx(0.51)
+    assert parse("Unit Occupancy 93%"
+                 ).physical_occupancy == pytest.approx(0.93)
+
+
+def test_a_parenthetical_on_a_bare_label_is_tolerated_not_classified():
+    """`Occupancy (Units) N%` still reads at the last-resort tier — the
+    shared tail crosses the parenthetical — and any explicit basis
+    outranks it. (The bare tier does NOT classify its own parens: every
+    corpus `(UNITS)` sits on a `PHYSICAL OCCUPANCY` label.)"""
+    assert parse("Occupancy (Units) 42.9%"
+                 ).physical_occupancy == pytest.approx(0.429)
+    assert parse("Occupancy (Units) 42.9%\nSquare Foot Occupancy 51.0%"
+                 ).physical_occupancy == pytest.approx(0.51)
+
+
+@pytest.mark.parametrize("text", [
+    "Year 1 19% Economic Occupancy 71%",
+    "EXPECTED PHYSICAL OCCUPANCY (SF) AS OF YEAR 4 93.00%",
+])
+def test_a_projection_year_is_vetoed(text):
+    d = parse(text)
+    assert d.physical_occupancy is None
+    assert d.economic_occupancy is None
+
+
+@pytest.mark.parametrize("text", [
+    "Physical Occupancy (%) 23.00% 61.00% 82.00% 91.00% 91.00%",
+    "Economic Occupancy 83% 83% 83% 83% 83%",
+    "SUBJECT OCCUPANCY 88.2% 95.0% 100.0% 100.0%",
+])
+def test_a_years_row_contributes_nothing(text):
+    d = parse(text)
+    assert d.physical_occupancy is None
+    assert d.economic_occupancy is None
+
+
+def test_a_two_value_statement_row_reads_the_current_column():
+    """`Economic Occupancy N% M%` is Current beside Year 1 — a deck whose
+    ONLY economic figure is its operating statement still reads."""
+    assert parse("Economic Occupancy 71.69% 89.07%"
+                 ).economic_occupancy == pytest.approx(0.7169)
+
+
+def test_a_headline_single_beats_the_statement_row():
+    """One deck states both. Read flat they are two rank-1 values that
+    disagree and refuse a plainly-stated number; the statement row is
+    demoted, not dropped."""
+    d = parse("Economic Occupancy 84%\nEconomic Occupancy 83.62% 88.00%")
+    assert d.economic_occupancy == pytest.approx(0.84)
+
+
+def test_per_property_figures_at_the_same_rank_refuse():
+    """A portfolio deck quoting each property's occupancy under the same
+    label is three rank-1 statements of "the" occupancy; no winner."""
+    d = parse("Current Physical Occupancy 61.86%\n"
+              "Current Physical Occupancy 79.09%\n"
+              "Current Physical Occupancy 25.22%")
+    assert d.physical_occupancy is None
+
+
+def test_a_stated_zero_survives():
+    """Design decision 9: a stated 0% is an honestly-reported pre-lease-up
+    asset — the demand gate must refuse it for the right reason, so the
+    parser must not drop it as falsy."""
+    assert parse("Physical Occupancy: 0%").physical_occupancy == 0.0
+
+
+def test_economic_may_exceed_one_but_physical_may_not():
+    assert parse("Economic Occupancy 104.9%"
+                 ).economic_occupancy == pytest.approx(1.049)
+    assert parse("Physical Occupancy 104%").physical_occupancy is None
+
+
+@pytest.mark.parametrize("text,expect", [
+    ("PhysicalOccupancy 92%", 0.92),
+    ("Total PhysicalOccupancy 56%", 0.56),
+])
+def test_glued_labels_read(text, expect):
+    assert parse(text).physical_occupancy == pytest.approx(expect)
+
+
+def test_vacancy_is_not_occupancy():
+    d = parse("Physical Vacancy 14.2%")
+    assert d.physical_occupancy is None
+    assert d.economic_occupancy is None
+
+
+@pytest.mark.parametrize("text", [
+    "Owner Occupied 473 52.98% 4,169 67.19% 7,286 70.23%",
+    "Occupancy: 24,150 SF: 57%, 40,200 SF: 0% (just completed)",
+    "at 92% stabilized occupancy",
+    "consistently averaged between 94-100% occupied for the last 10 years",
+])
+def test_lookalikes_contribute_nothing(text):
+    d = parse(text)
+    assert d.physical_occupancy is None
+    assert d.economic_occupancy is None
+
+
+def test_a_per_property_banner_is_not_the_offering():
+    """`<Town> - N% Physical Occupancy / M% Economic Occupancy / …` quotes
+    one property of a portfolio; the offering states no blended figure."""
+    d = parse("Biloxi - 91% Physical Occupancy / 82% Economic Occupancy "
+              "/ Room to Trailer rentals")
+    assert d.physical_occupancy is None
+    assert d.economic_occupancy is None
