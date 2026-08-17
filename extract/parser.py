@@ -1301,15 +1301,22 @@ def _extract_ttm_months(text: str) -> Optional[int]:
 
 #: Below this a "figure" on a financial row is a rate, a ratio or a
 #: footnote marker, not a dollar column: every per-SF figure in the corpus
-#: is under $14 and every stated NOI is over $20,000. It is a bound on the
-#: EXTRACTION, not an investment criterion, so it lives here beside
-#: MIN_PLAUSIBLE_ASKING_PRICE rather than in config.py.
-MIN_PLAUSIBLE_NOI_FIGURE = 1_000
+#: is under $16 and every stated statement total is over $20,000. It is a
+#: bound on the EXTRACTION, not an investment criterion, so it lives here
+#: beside MIN_PLAUSIBLE_ASKING_PRICE rather than in config.py.
+#:
+#: The footnote marker is not hypothetical and it is why this floor now
+#: guards four fields rather than one: MNET's revenue row reads
+#: `Effective Gross Income1 $ 435,701`, and the old first-match EGR pattern
+#: read that superscript `1` as the number — a $1.00 effective gross income
+#: on Wichita, Columbus and All Purpose, which then made vacancy read as
+#: ~100% and satisfied the blocking `egr_le_gpr` check vacuously.
+MIN_PLAUSIBLE_STATEMENT_FIGURE = 1_000
 
-_NOI_RANK_TRAILING_COLUMN = 1
-_NOI_RANK_ADJUSTED_COLUMN = 2
-_NOI_RANK_TRAILING_LABEL = 3
-_NOI_RANK_YEAR_LABEL = 4
+_FIN_RANK_TRAILING_COLUMN = 1
+_FIN_RANK_ADJUSTED_COLUMN = 2
+_FIN_RANK_TRAILING_LABEL = 3
+_FIN_RANK_YEAR_LABEL = 4
 
 #: The NOI label itself. `\bNOI\b` and the spelled form; `Total NOI` and
 #: `NET OPERATING INCOME` are the same row.
@@ -1329,17 +1336,17 @@ _NOI_ROW_RE = re.compile(
 #: — Decatur's trailing NOI is a LOSS, and a pattern that cannot read a
 #: parenthesized negative does not merely miss it, it walks on to the pro
 #: forma standing beside it.
-_NOI_FIGURE_RE = re.compile(
+_FIN_FIGURE_RE = re.compile(
     r"(?P<open>\(\s*)?-?\s*\$?\s*(?P<num>\d[\d,]*(?:\.\d+)?)")
 
 #: A per-SF column, which prints beside its dollar column in half the
 #: corpus (`$ 109,556 $1.02SF`). The magnitude floor already refuses these;
 #: the suffix is checked as well because it is the deck's own statement of
 #: what the column is, and a floor is a measurement that could drift.
-_NOI_PER_SF_RE = re.compile(r"^\s*(?:SF|PSF|/\s*SF)", re.IGNORECASE)
+_FIN_PER_SF_RE = re.compile(r"^\s*(?:SF|PSF|/\s*SF)", re.IGNORECASE)
 
 #: The same column named in a HEADER rather than suffixed to a value.
-_NOI_PER_SF_HEADER_RE = re.compile(
+_FIN_PER_SF_HEADER_RE = re.compile(
     r"\$\s*/\s*sf\b|\bper\s*sf\b|\bpsf\b|\$\s*/\s*sq", re.IGNORECASE)
 
 #: Period vocabulary, read off the corpus headers. TRAILING is a period
@@ -1348,10 +1355,10 @@ _NOI_PER_SF_HEADER_RE = re.compile(
 #: INSIDE words, and it did — `paired with an adjacent 10-acre` ends a word
 #: in `t` before a number, which made a sentence of marketing prose read as
 #: a period header on a deck that states no financials at all.
-_NOI_TRAILING_TOK = (
+_FIN_TRAILING_TOK = (
     r"\bt\s*-?\s*\d{1,2}\b|\bttm\b|\btrailing(?:\s+twelve)?\b|\bcurrent\b"
     r"|\bin[\s-]?place\b|\bactual\b")
-_NOI_PROJECTION_TOK = (
+_FIN_PROJECTION_TOK = (
     r"\bpro\s*-?\s*forma\b|\bproforma\b|\bprojected\b|\bstabilized\b"
     r"|\bmarket\s+adjust(?:ed|ments?)\b"
     r"|\b(?:end[\s-]*)?(?:year|yr\.?)\s*-?\s*"
@@ -1361,19 +1368,19 @@ _NOI_PROJECTION_TOK = (
 #: read as trailing, which is also what refuses Belton: a header of
 #: `2024 2025 2026` names three of them, and three trailing columns is an
 #: ambiguity, not an answer.
-_NOI_YEAR_TOK = r"\b20\d\d\b"
+_FIN_YEAR_TOK = r"\b20\d\d\b"
 
-_NOI_TRAILING_RE = re.compile(_NOI_TRAILING_TOK, re.IGNORECASE)
-_NOI_PROJECTION_RE = re.compile(_NOI_PROJECTION_TOK, re.IGNORECASE)
-_NOI_YEAR_RE = re.compile(_NOI_YEAR_TOK, re.IGNORECASE)
-_NOI_PERIOD_RE = re.compile(
-    f"(?P<proj>{_NOI_PROJECTION_TOK})|(?P<trail>{_NOI_TRAILING_TOK})"
-    f"|(?P<year>{_NOI_YEAR_TOK})", re.IGNORECASE)
+_FIN_TRAILING_RE = re.compile(_FIN_TRAILING_TOK, re.IGNORECASE)
+_FIN_PROJECTION_RE = re.compile(_FIN_PROJECTION_TOK, re.IGNORECASE)
+_FIN_YEAR_RE = re.compile(_FIN_YEAR_TOK, re.IGNORECASE)
+_FIN_PERIOD_RE = re.compile(
+    f"(?P<proj>{_FIN_PROJECTION_TOK})|(?P<trail>{_FIN_TRAILING_TOK})"
+    f"|(?P<year>{_FIN_YEAR_TOK})", re.IGNORECASE)
 
 #: The broker's own adjustment marker. Never a column of its own — it
 #: qualifies the trailing column it sits on (`T-12 Broker Adjusted`,
 #: `T-3 (ADJ)`, `ADJ. T - 12`).
-_NOI_ADJUSTED_RE = re.compile(r"\badj\b|\badj\.|\badjusted\b|\bbroker\b",
+_FIN_ADJUSTED_RE = re.compile(r"\badj\b|\badj\.|\badjusted\b|\bbroker\b",
                               re.IGNORECASE)
 
 #: A percent VALUE, which is how an assumptions row is told from a header
@@ -1383,14 +1390,14 @@ _NOI_ADJUSTED_RE = re.compile(r"\badj\b|\badj\.|\badjusted\b|\bbroker\b",
 #: `% EGI` and `$ / SQ FT` in the MNET headers carry no digit and so are
 #: not percent values — which is the distinction that keeps those headers
 #: readable.
-_NOI_PERCENT_VALUE_RE = re.compile(r"\d\s*%")
+_FIN_PERCENT_VALUE_RE = re.compile(r"\d\s*%")
 
 #: How far before the NOI word a qualifier may sit, in characters. Sized
 #: to `SELLER ANNUALIZED T1 THRU MAY 31, 2026 NOI` — the widest genuine
 #: one in the corpus — and no wider: these pages glue two columns of text
 #: into one line, so a window that reaches further starts reading the
 #: neighbouring block's words as this label's basis.
-_NOI_LABEL_WINDOW = 44
+_FIN_LABEL_WINDOW = 44
 
 #: What may sit between the label and its figure: a basis parenthetical, a
 #: colon, `of`/`is`, currency. It may not cross a newline — that crossing
@@ -1398,15 +1405,15 @@ _NOI_LABEL_WINDOW = 44
 #: it is NOT this pattern, and a mutation sweep is what said so: `\s`
 #: matches a newline, so widening the character classes here changes
 #: nothing. What holds the line is that `_noi_candidates` splits the page
-#: into lines and hands ONE of them to `_noi_label_candidate` — there is
+#: into lines and hands ONE of them to `_fin_label_candidate` — there is
 #: no newline left to cross. Only the `[^)\n]` inside the parenthetical
 #: does work of its own, bounding an UNCLOSED `(` to its own line.
-_NOI_LABEL_GAP_RE = re.compile(
+_FIN_LABEL_GAP_RE = re.compile(
     r"^(?:\s*\((?P<paren>[^)\n]*)\))?[\s:]*(?:of|is|was|at)?[\s:~]*",
     re.IGNORECASE)
 
 
-def _noi_figures(text: str) -> list:
+def _fin_figures(text: str) -> list:
     """Dollar figures in one financial row, in column order.
 
     Per-SF columns and percentages are dropped, so what comes back is one
@@ -1414,12 +1421,12 @@ def _noi_figures(text: str) -> list:
     matched against by count.
     """
     figures = []
-    for m in _NOI_FIGURE_RE.finditer(text):
+    for m in _FIN_FIGURE_RE.finditer(text):
         rest = text[m.end():]
-        if rest[:1] == "%" or _NOI_PER_SF_RE.match(rest):
+        if rest[:1] == "%" or _FIN_PER_SF_RE.match(rest):
             continue
         value = _parse_number(m.group("num"))
-        if abs(value) < MIN_PLAUSIBLE_NOI_FIGURE:
+        if abs(value) < MIN_PLAUSIBLE_STATEMENT_FIGURE:
             continue
         # Both accounting negatives appear in the corpus and they bracket
         # the dollar sign differently: `$(44,960)` puts the sign inside and
@@ -1437,7 +1444,7 @@ def _noi_figures(text: str) -> list:
     return figures
 
 
-def _noi_header_columns(header: str) -> list:
+def _fin_header_columns(header: str) -> list:
     """The period columns a header declares, in order, as
     `(kind, adjusted)` pairs — `kind` being 'trailing' or 'projection'.
 
@@ -1460,7 +1467,7 @@ def _noi_header_columns(header: str) -> list:
     """
     columns = []
     last_year = False
-    tokens = list(_NOI_PERIOD_RE.finditer(header))
+    tokens = list(_FIN_PERIOD_RE.finditer(header))
     for i, m in enumerate(tokens):
         kind = ("projection" if m.group("proj")
                 else "trailing" if m.group("trail") else "year")
@@ -1471,9 +1478,9 @@ def _noi_header_columns(header: str) -> list:
             kind = "trailing"
         gap_next = after[:tokens[i + 1].start() - m.end()] if (
             i + 1 < len(tokens)) else after
-        adjusted = bool(_NOI_ADJUSTED_RE.search(m.group(0))
-                        or _NOI_ADJUSTED_RE.search(gap_next)
-                        or _NOI_ADJUSTED_RE.search(before[-12:]))
+        adjusted = bool(_FIN_ADJUSTED_RE.search(m.group(0))
+                        or _FIN_ADJUSTED_RE.search(gap_next)
+                        or _FIN_ADJUSTED_RE.search(before[-12:]))
         # `CURRENT T-6` is one column's label, so a trailing token straight
         # after another does not open a column — unless an adjustment
         # marker makes it the broker's separate copy (`T-3 T-3 (ADJ)`), or
@@ -1482,7 +1489,7 @@ def _noi_header_columns(header: str) -> list:
         if (kind == "trailing" and columns and columns[-1] == ("trailing",
                                                                False)
                 and not m.group("year") and not last_year
-                and not _NOI_TRAILING_RE.search(
+                and not _FIN_TRAILING_RE.search(
                     header[tokens[i - 1].end():m.start()])
                 and not adjusted):
             continue
@@ -1491,7 +1498,7 @@ def _noi_header_columns(header: str) -> list:
     return columns
 
 
-def _noi_header_above(lines: list, row: int, figures: int) -> Optional[str]:
+def _fin_header_above(lines: list, row: int, figures: int) -> Optional[str]:
     """The period header governing the statement row at `lines[row]`.
 
     A header NAMES periods and does not price them — the rule
@@ -1506,16 +1513,16 @@ def _noi_header_above(lines: list, row: int, figures: int) -> Optional[str]:
     columns twice), and the widening is what assembles Katy's header out
     of the three separate text lines pdfplumber emits it as.
     """
-    above = [i for i in range(row) if _noi_header_line(lines[i])]
+    above = [i for i in range(row) if _fin_header_line(lines[i])]
     for start in range(len(above) - 1, -1, -1):
         header = " ".join(lines[i] for i in above[start:])
-        columns = _noi_header_columns(header)
+        columns = _fin_header_columns(header)
         if len(columns) == figures:
             return header
     return None
 
 
-def _noi_header_line(line: str) -> bool:
+def _fin_header_line(line: str) -> bool:
     """Does this line NAME periods rather than price them?
 
     The year a column is named for is not a figure that column carries:
@@ -1524,12 +1531,12 @@ def _noi_header_line(line: str) -> bool:
     both headers — which is to say it rejects the two decks whose header
     states the basis most plainly.
     """
-    return (bool(_NOI_PERIOD_RE.search(line))
-            and not _noi_figures(_NOI_YEAR_RE.sub(" ", line))
-            and not _NOI_PERCENT_VALUE_RE.search(line))
+    return (bool(_FIN_PERIOD_RE.search(line))
+            and not _fin_figures(_FIN_YEAR_RE.sub(" ", line))
+            and not _FIN_PERCENT_VALUE_RE.search(line))
 
 
-def _noi_statement_candidate(lines: list, row: int):
+def _fin_statement_candidate(lines: list, row: int):
     """`(rank, value)` for one statement row, or None.
 
     Refusal has three separate causes here and all three are the same
@@ -1540,10 +1547,10 @@ def _noi_statement_candidate(lines: list, row: int):
     A statement that cannot say which column is the actual has not stated
     an actual.
     """
-    figures = _noi_figures(lines[row])
+    figures = _fin_figures(lines[row])
     if not figures:
         return None
-    header = _noi_header_above(lines, row, len(figures))
+    header = _fin_header_above(lines, row, len(figures))
     if header is None:
         return None
     # A ONE-column row carries no ordinal information of its own, so the
@@ -1555,11 +1562,11 @@ def _noi_statement_candidate(lines: list, row: int):
     # — the same signal `extract.tables` reads as `KIND_PER_SF`. Without
     # it, `With all entitlements in place,` was a header and a development
     # site with no operations reported a trailing NOI of $1,684,438.
-    if len(figures) == 1 and not _NOI_PER_SF_HEADER_RE.search(header):
+    if len(figures) == 1 and not _FIN_PER_SF_HEADER_RE.search(header):
         return None
-    columns = _noi_header_columns(header)
-    for rank, adjusted in ((_NOI_RANK_TRAILING_COLUMN, False),
-                           (_NOI_RANK_ADJUSTED_COLUMN, True)):
+    columns = _fin_header_columns(header)
+    for rank, adjusted in ((_FIN_RANK_TRAILING_COLUMN, False),
+                           (_FIN_RANK_ADJUSTED_COLUMN, True)):
         at = [i for i, (kind, adj) in enumerate(columns)
               if kind == "trailing" and adj == adjusted]
         if len(at) == 1:
@@ -1569,7 +1576,7 @@ def _noi_statement_candidate(lines: list, row: int):
     return None
 
 
-def _noi_label_candidate(line: str, m):
+def _fin_label_candidate(line: str, m):
     """`(rank, value)` for a single figure whose label carries its basis.
 
     The qualifier may precede the label (`Current NOI`, `IN-PLACE NOI`,
@@ -1579,19 +1586,19 @@ def _noi_label_candidate(line: str, m):
     and it is checked first: `PRO FORMA END OF YEAR 3 NOI` and `NOI (Year
     One)` both carry a period word this would otherwise read as a basis.
     """
-    gap = _NOI_LABEL_GAP_RE.match(line[m.end():])
+    gap = _FIN_LABEL_GAP_RE.match(line[m.end():])
     tail = line[m.end() + gap.end():]
-    figure = _noi_figures(tail[:40])
+    figure = _fin_figures(tail[:40])
     if not figure:
         return None
-    span = line[max(0, m.start() - _NOI_LABEL_WINDOW):m.start()]
+    span = line[max(0, m.start() - _FIN_LABEL_WINDOW):m.start()]
     span += " " + (gap.group("paren") or "")
-    if _NOI_PROJECTION_RE.search(span):
+    if _FIN_PROJECTION_RE.search(span):
         return None
-    if _NOI_TRAILING_RE.search(span):
-        return _NOI_RANK_TRAILING_LABEL, figure[0]
-    if _NOI_YEAR_RE.search(span):
-        return _NOI_RANK_YEAR_LABEL, figure[0]
+    if _FIN_TRAILING_RE.search(span):
+        return _FIN_RANK_TRAILING_LABEL, figure[0]
+    if _FIN_YEAR_RE.search(span):
+        return _FIN_RANK_YEAR_LABEL, figure[0]
     return None
 
 
@@ -1606,11 +1613,11 @@ def _noi_candidates(text: str) -> list:
         lines = page.split("\n")
         for i, line in enumerate(lines):
             if _NOI_ROW_RE.match(line):
-                found = _noi_statement_candidate(lines, i)
+                found = _fin_statement_candidate(lines, i)
                 if found:
                     candidates.append(found)
             for m in _NOI_LABEL_RE.finditer(line):
-                found = _noi_label_candidate(line, m)
+                found = _fin_label_candidate(line, m)
                 if found:
                     candidates.append(found)
     return candidates

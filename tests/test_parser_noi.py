@@ -23,10 +23,10 @@ test that cannot fail is worse than the gap it was meant to close:
 - Dropping the `^` from `_NOI_ROW_RE`. `_noi_candidates` reaches it
   through `re.match`, which anchors at position 0 already. Butler's
   mid-line NOI is refused by the `.match`, not by the `^`.
-- Widening `_NOI_LABEL_GAP_RE`'s character classes to admit newlines.
+- Widening `_FIN_LABEL_GAP_RE`'s character classes to admit newlines.
   `\s` matches a newline and always did; what stops the label reaching
   across one is that `_noi_candidates` hands it a single LINE.
-- Dropping the `SF`/`PSF` suffix test in `_noi_figures`. Every per-SF
+- Dropping the `SF`/`PSF` suffix test in `_fin_figures`. Every per-SF
   figure in the corpus is under $14 and the plausibility floor is
   $1,000, so no input distinguishes them. It is a redundant guard held
   on purpose: the floor is a measurement that could drift, the suffix is
@@ -35,11 +35,11 @@ test that cannot fail is worse than the gap it was meant to close:
 import pytest
 
 from extract.parser import (
-    MIN_PLAUSIBLE_NOI_FIGURE,
+    MIN_PLAUSIBLE_STATEMENT_FIGURE,
     CIMData,
     _noi_candidates,
-    _noi_header_columns,
-    _noi_header_line,
+    _fin_header_columns,
+    _fin_header_line,
     _parse_financials,
     _pick_ranked,
 )
@@ -215,7 +215,7 @@ def test_a_closing_parenthesis_counts_as_much_as_an_opening_one():
 ])
 def test_a_header_declares_the_columns_the_corpus_shows_it_declaring(
         header, shape):
-    assert _noi_header_columns(header) == shape
+    assert _fin_header_columns(header) == shape
 
 
 @pytest.mark.parametrize("line", [
@@ -230,7 +230,7 @@ def test_a_header_declares_the_columns_the_corpus_shows_it_declaring(
     "T-12 $412,000 PRO FORMA $530,000",
 ])
 def test_these_lines_are_not_period_headers(line):
-    assert not _noi_header_line(line)
+    assert not _fin_header_line(line)
 
 
 def test_prose_that_survives_the_header_test_is_refused_downstream():
@@ -241,7 +241,7 @@ def test_prose_that_survives_the_header_test_is_refused_downstream():
     Recorded because the two guards read like belt and braces and they are
     not: on this line the braces are load-bearing alone."""
     prose = "With all entitlements in place, delivery is expected in 2027."
-    assert _noi_header_line(prose)
+    assert _fin_header_line(prose)
     assert noi(prose + "\nNOI: $1,684,438\n") is None
 
 
@@ -421,7 +421,7 @@ def test_a_figure_under_the_plausibility_floor_is_not_an_noi():
     """Little Rock booked 362 — the UNIT COUNT — off a
     `Current NOI Year 2 NOI` header row. Every per-SF figure in the corpus
     is under $14 and every stated NOI is over $20,000."""
-    assert MIN_PLAUSIBLE_NOI_FIGURE == 1_000
+    assert MIN_PLAUSIBLE_STATEMENT_FIGURE == 1_000
     assert noi("Current NOI 362") is None
     assert noi("TTM NOI $362") is None
 
