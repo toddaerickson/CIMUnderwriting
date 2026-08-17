@@ -598,6 +598,244 @@ def _ranked_candidates(text, label_first_re, value_first_re, lo, hi,
     return cands
 
 
+#: ---- Occupancy ----
+#:
+#: Occupancy has a BASIS — physical vs economic, square-foot vs unit — and a
+#: wrong basis reads exactly like a right answer: one OM states physical 80%
+#: (SQ. FT.) and economic 70%, and the block this machinery replaced stored
+#: 0.70 as physical. Physical occupancy is a `require_underwritable` input
+#: driving the 75% demand gate and the phys/econ mismanagement spread, so a
+#: wrong-basis capture silently defeats the refusal design decision 9 built.
+#: Same regime as NRSF/units above: per-line ranked candidates, the best
+#: rank must agree on one value, refuse over guess.
+#:
+#: The physical ladder, each tier witnessed in the corpus:
+#:   1  "physical occupancy", unqualified or SF-flavored — the stat-block
+#:      family, `PHYSICAL OCCUPANCY (SQ. FT.): N%`
+#:   2  percent-first prose, `N% physically occupied` — outranks the SF
+#:      label because one deck attaches the word "physical" to its unit
+#:      figure and quotes the SF basis under a basis-only label, and the
+#:      golden labels take the word as the broker's own claim of basis
+#:   3  "physical occupancy (UNITS)" — the unit flavor of tier 1
+#:   4  SF-basis label without "physical": `Square Foot Occupancy N%` — the
+#:      SF basis IS physical occupancy under the broker convention
+#:   5  "unit occupancy" — demoted, not dropped: a unit-only deck still
+#:      reads
+#:   6  bare `Occupancy: N%` / `N% occupied` — the unqualified number a
+#:      broker quotes is almost always physical (CLAUDE.md)
+#: Economic gets tiers 1 (label) and 2 (prose) and deliberately NO bare
+#: tier: an unqualified number is never read as economic — which is also
+#: why a bare label sitting right after "Economic" is excluded below.
+_OCC_RANK_PHYS_LABEL = 1
+_OCC_RANK_PHYS_PROSE = 2
+_OCC_RANK_PHYS_UNITS = 3
+_OCC_RANK_SF_LABEL = 4
+_OCC_RANK_UNIT_LABEL = 5
+_OCC_RANK_BARE = 6
+_OCC_RANK_ECON_LABEL = 1
+_OCC_RANK_ECON_PROSE = 2
+
+#: A label row carrying exactly TWO percent values is an operating-statement
+#: row — `Economic Occupancy 70.69% 88.07%` is Current beside Year 1 — and
+#: the FIRST value is the in-place figure the golden labels take. Read flat
+#: it can tie a deck's own headline: one deck states `Economic Occupancy
+#: 86%` on its summary page and `… 85.62% 89.00%` on its statement, two
+#: rank-1 values that disagree and refuse a plainly-stated number. Demoted,
+#: not dropped — the bargain the spec card and the subtype row already get:
+#: a deck whose ONLY economic figure is a statement row still reads its
+#: Current column.
+_OCC_RANK_STATEMENT_ROW = 10
+
+#: Three or more percent tokens in one segment is never the subject's
+#: in-place figure: measured across all 58 corpus PDFs, every such segment
+#: containing "occup" is a pro-forma years row (`Physical Occupancy (%)
+#: 23.00% 61.00% 82.00% …`), a demographics row (`Owner Occupied 475
+#: 53.98% …`), or a comp-trend table — and none sources a golden-correct
+#: value. Two is a statement row (demoted above); three is noise.
+_OCC_PCT_RE = re.compile(r"\d(?:\.\d+)?\s*%")
+
+#: `year N` beside an occupancy is a projection: `Year 1 17% Economic
+#: Occupancy 73%`, `EXPECTED PHYSICAL OCCUPANCY (SF) AS OF YEAR 4 92.00%`.
+#: Occupancy-only vocabulary, deliberately NOT added to `_PROJECTION_RE` —
+#: that list was measured for sizes, where every entry fires alone on a
+#: size line; "year" would not. `AS OF YEAR END 2025` does not fire (no
+#: digit after "year"), which one stat-block deck depends on.
+_OCC_PROJECTION_RE = re.compile(r"year\s+\d", re.IGNORECASE)
+
+#: What may sit between an occupancy label and its value, on ONE line: an
+#: optional parenthetical (the basis — `(SQ. FT.)`, `(UNITS)`, `(%)`), an
+#: optional `AS OF`/`THRU` date run, then connective junk. The `%` anchor
+#: is what lets a date pass safely — in `AS OF APRIL 30, 2026 91.40%` only
+#: 91.40 is followed by a percent sign. The pattern this replaced could
+#: cross neither, which parsed the entire stat-block family — 7 of the 13
+#: repo decks — to None.
+_OCC_TAIL = (r"(?:\s*\((?P<paren>[^)\n]*)\))?"
+             r"(?:\s*(?:as\s+of|thru)\b[^%\n]*?)?"
+             r"[\s:]*[~≈±]*\s*(?P<v>\d+(?:\.\d+)?)\s*%")
+
+#: `[\s\-]*` between label words: one text layer glues its words
+#: (`PhysicalOccupancy 24%`), another hyphenates them.
+_OCC_PHYS_LABEL_RE = re.compile(
+    r"physical[\s\-]*occupancy" + _OCC_TAIL, re.IGNORECASE)
+_OCC_ECON_LABEL_RE = re.compile(
+    r"economic[\s\-]*occupancy" + _OCC_TAIL, re.IGNORECASE)
+#: Only the spelled-out form: `SF Occupancy` appears in the corpus solely
+#: inside the slash dual (read there) and in valueless rent-roll header
+#: rows (`SIZE TYPE OCCUPIED VACANT SQ. FT. OCCUPANCY`), so the
+#: abbreviated branches could never fire alone and came out under the
+#: mutation bar.
+_OCC_SF_LABEL_RE = re.compile(
+    r"square[\s\-]*foot[\s\-]*occupancy" + _OCC_TAIL, re.IGNORECASE)
+_OCC_UNIT_LABEL_RE = re.compile(
+    r"unit[\s\-]*occupancy" + _OCC_TAIL, re.IGNORECASE)
+_OCC_BARE_LABEL_RE = re.compile(r"occupancy" + _OCC_TAIL, re.IGNORECASE)
+
+#: The bare tier is excluded when its label sits right after "Economic" —
+#: that is the economic label's own tail, and reading it as bare is how an
+#: economic-only deck fills BOTH fields with the same number. The other
+#: basis prefixes need no exclusion: their tiers share `_OCC_TAIL`, so the
+#: bare copy succeeds exactly when the specific tier does, lands at a worse
+#: rank with the same value, and changes nothing.
+_OCC_BARE_EXCLUDE_RE = re.compile(r"economic[\s\-]*$", re.IGNORECASE)
+
+#: Percent-first prose: `92.3% physically occupied by square footage`,
+#: `Currently 20% Economically Occupied`. The lookbehind refuses a range's
+#: second half (`95-100% occupied`). The bare form's `total` branch is a
+#: witnessed layout of its own — `627 Units 57% Total Occupancy` is the
+#: only line its deck states the figure on.
+_OCC_PHYS_VF_RE = re.compile(
+    r"(?<![\d.,\-–—])(?P<v>\d+(?:\.\d+)?)\s*%\s*"
+    r"physical(?:ly)?[\s\-]*occup(?:ied|ancy)", re.IGNORECASE)
+_OCC_ECON_VF_RE = re.compile(
+    r"(?<![\d.,\-–—])(?P<v>\d+(?:\.\d+)?)\s*%\s*"
+    r"economic(?:ally)?[\s\-]*occup(?:ied|ancy)", re.IGNORECASE)
+_OCC_BARE_VF_RE = re.compile(
+    r"(?<![\d.,\-–—])(?P<v>\d+(?:\.\d+)?)\s*%\s*"
+    r"(?:total[\s\-]*)?occup(?:ied|ancy)\b", re.IGNORECASE)
+
+#: Slash dual labels zip to their values positionally: `Economic Occupancy
+#: / Physical Occupancy (March 31, 2026) 53% / 72%` is econ 53, phys 72.
+#: The plain patterns must SKIP such a line — the physical label alone
+#: would bind the FIRST value and book the wrong basis at rank 1.
+_OCC_DUAL_RE = re.compile(
+    r"(?P<l1>economic|physical|sf|unit)[\s\-]*occupancy\s*/\s*"
+    r"(?P<l2>economic|physical|sf|unit)[\s\-]*occupancy"
+    r"(?:\s*\([^)\n]*\))?"
+    r"[\s:]*(?P<v1>\d+(?:\.\d+)?)\s*%\s*/\s*(?P<v2>\d+(?:\.\d+)?)\s*%",
+    re.IGNORECASE)
+
+#: A per-property banner: `Biloxi - 92% Physical Occupancy / 80% Economic
+#: Occupancy / …` quotes ONE property of a portfolio, not the offering.
+#: Measured across all 58 corpus PDFs this shape opens exactly one
+#: occupancy-bearing line, so the veto is contingent on that measurement
+#: and scoped to percent-first candidates — the only kind such a line
+#: yields.
+_OCC_BANNER_RE = re.compile(r"^\s*[A-Z][A-Za-z]+\s+-\s")
+
+#: Basis parenthetical flavor, consulted by the PHYSICAL tier only: every
+#: corpus `(UNITS)` parenthetical sits on a `PHYSICAL OCCUPANCY` label, so
+#: the bare tier classifying its own parens would be a rule nothing
+#: exercises. An SF parenthetical reads the same as no parenthetical.
+_OCC_UNIT_PAREN_RE = re.compile(r"unit", re.IGNORECASE)
+
+#: Physical occupancy is a share of the building: 0..1, both ends inclusive
+#: — a stated 0% is an honestly-reported pre-lease-up asset (design
+#: decision 9) and 100.00% is stated twice in the corpus. Economic may
+#: honestly exceed 1.0 — one deck states 105.9% against gross potential —
+#: so its ceiling is a sanity bound, not a censor: downstream checks flag
+#: the excess, the parser reports what the deck states.
+_OCC_MAX_PHYS = 1.0
+_OCC_MAX_ECON = 1.5
+
+
+def _occ_phys_label_rank(line, m):
+    paren = m.group("paren")
+    if paren and _OCC_UNIT_PAREN_RE.search(paren):
+        return _OCC_RANK_PHYS_UNITS
+    return _OCC_RANK_PHYS_LABEL
+
+
+def _occ_bare_label_rank(line, m):
+    if _OCC_BARE_EXCLUDE_RE.search(line[:m.start()]):
+        return None
+    return _OCC_RANK_BARE
+
+
+#: (field, pattern, percent-first?, rank). No spec-card demotion here on
+#: purpose: no comp card in either corpus states an occupancy, so there is
+#: nothing for it to guard — measured, not forgotten.
+_OCC_SPECS = (
+    ("phys", _OCC_PHYS_LABEL_RE, False, _occ_phys_label_rank),
+    ("phys", _OCC_PHYS_VF_RE, True, lambda line, m: _OCC_RANK_PHYS_PROSE),
+    ("phys", _OCC_SF_LABEL_RE, False, lambda line, m: _OCC_RANK_SF_LABEL),
+    ("phys", _OCC_UNIT_LABEL_RE, False,
+     lambda line, m: _OCC_RANK_UNIT_LABEL),
+    ("phys", _OCC_BARE_LABEL_RE, False, _occ_bare_label_rank),
+    ("phys", _OCC_BARE_VF_RE, True, lambda line, m: _OCC_RANK_BARE),
+    ("econ", _OCC_ECON_LABEL_RE, False,
+     lambda line, m: _OCC_RANK_ECON_LABEL),
+    ("econ", _OCC_ECON_VF_RE, True, lambda line, m: _OCC_RANK_ECON_PROSE),
+)
+
+
+def _occ_add(field, rank, val, phys_cands, econ_cands):
+    if field == "econ":
+        if 0.0 <= val <= _OCC_MAX_ECON:
+            econ_cands.append((rank, val))
+    elif 0.0 <= val <= _OCC_MAX_PHYS:
+        phys_cands.append((rank, val))
+
+
+def _occupancy_candidates(text):
+    """All plausible (rank, value) occupancy candidates, physical and
+    economic, for `_pick_ranked`. A PARALLEL walk to `_ranked_candidates`,
+    not a generalization of it: that function's falsy value-drop is right
+    for sizes and lethal here, where a stated 0 must survive to the demand
+    gate — and leaving it untouched keeps the size tests as machine proof
+    that NRSF/units did not move."""
+    phys_cands, econ_cands = [], []
+    for line in text.split("\n"):
+        dm = _OCC_DUAL_RE.search(line)
+        if dm:
+            for label, raw in ((dm.group("l1"), dm.group("v1")),
+                               (dm.group("l2"), dm.group("v2"))):
+                label = label.lower()
+                val = float(raw) / 100.0
+                if label.startswith("economic"):
+                    _occ_add("econ", _OCC_RANK_ECON_LABEL, val,
+                             phys_cands, econ_cands)
+                elif label.startswith("unit"):
+                    _occ_add("phys", _OCC_RANK_UNIT_LABEL, val,
+                             phys_cands, econ_cands)
+                elif label.startswith("physical"):
+                    _occ_add("phys", _OCC_RANK_PHYS_LABEL, val,
+                             phys_cands, econ_cands)
+                else:
+                    _occ_add("phys", _OCC_RANK_SF_LABEL, val,
+                             phys_cands, econ_cands)
+            continue
+        banner = bool(_OCC_BANNER_RE.match(line))
+        for field, pat, value_first, rank_of in _OCC_SPECS:
+            for m in pat.finditer(line):
+                if value_first and banner:
+                    continue
+                seg = _segment(line, m.start())
+                if (_PROJECTION_RE.search(seg)
+                        or _OCC_PROJECTION_RE.search(seg)):
+                    continue
+                pcts = len(_OCC_PCT_RE.findall(seg))
+                if pcts >= 3:
+                    continue
+                rank = rank_of(line, m)
+                if rank is None:
+                    continue
+                if not value_first and pcts == 2:
+                    rank += _OCC_RANK_STATEMENT_ROW
+                _occ_add(field, rank, float(m.group("v")) / 100.0,
+                         phys_cands, econ_cands)
+    return phys_cands, econ_cands
+
+
 def _parse_size_occupancy(text: str, data: CIMData):
     """Extract NRSF, unit counts, CC split, occupancy."""
 
@@ -626,22 +864,19 @@ def _parse_size_occupancy(text: str, data: CIMData):
     if m:
         data.cc_pct = float(m.group(1)) / 100.0
 
-    # Occupancy
-    occ_patterns = [
-        r"(?:physical\s+)?occupancy[:\s]*([\d\.]+)\s*%",
-        r"([\d\.]+)\s*%\s*(?:occupied|occupancy)",
-    ]
-    for pat in occ_patterns:
-        m = re.search(pat, text, re.IGNORECASE)
-        if m:
-            data.physical_occupancy = float(m.group(1)) / 100.0
-            break
-
-    # Economic occupancy
-    econ_pat = r"economic\s+occupancy[:\s]*([\d\.]+)\s*%"
-    m = re.search(econ_pat, text, re.IGNORECASE)
-    if m:
-        data.economic_occupancy = float(m.group(1)) / 100.0
+    # Occupancy — the ranked-candidate regime above. The block this
+    # replaced took the first regex hit document-wide: its optional
+    # `(?:physical\s+)?` prefix let an economic-only deck fill BOTH fields,
+    # a basis parenthetical it could not cross parsed the whole stat-block
+    # family to None, and `[:\s]*` crossing newlines let a stat-card label
+    # adopt the next line's number.
+    phys_cands, econ_cands = _occupancy_candidates(text)
+    phys = _pick_ranked(phys_cands)
+    if phys is not None:
+        data.physical_occupancy = phys
+    econ = _pick_ranked(econ_cands)
+    if econ is not None:
+        data.economic_occupancy = econ
 
 
 #: Below this, a "price" is a price PER something — per SF, per unit, per
