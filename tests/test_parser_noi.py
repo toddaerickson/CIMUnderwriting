@@ -14,6 +14,23 @@ What this replaced took the first regex hit document-wide and scored, over
 six were digit errors. Every test below names the deck it is holding shut.
 The whole-corpus score is 28 correct / 14 refused / 0 wrong / 0
 hallucinated; the three misses are named in the PR body.
+
+A 16-mutant sweep over the new rules leaves THREE alive, and all three
+are alive because the thing they mutate does no work — worth writing
+down, because the natural response to a survivor is to add a test, and a
+test that cannot fail is worse than the gap it was meant to close:
+
+- Dropping the `^` from `_NOI_ROW_RE`. `_noi_candidates` reaches it
+  through `re.match`, which anchors at position 0 already. Butler's
+  mid-line NOI is refused by the `.match`, not by the `^`.
+- Widening `_NOI_LABEL_GAP_RE`'s character classes to admit newlines.
+  `\s` matches a newline and always did; what stops the label reaching
+  across one is that `_noi_candidates` hands it a single LINE.
+- Dropping the `SF`/`PSF` suffix test in `_noi_figures`. Every per-SF
+  figure in the corpus is under $14 and the plausibility floor is
+  $1,000, so no input distinguishes them. It is a redundant guard held
+  on purpose: the floor is a measurement that could drift, the suffix is
+  the deck's own statement of what the column is.
 """
 import pytest
 
@@ -21,6 +38,8 @@ from extract.parser import (
     MIN_PLAUSIBLE_NOI_FIGURE,
     CIMData,
     _noi_candidates,
+    _noi_header_columns,
+    _noi_header_line,
     _parse_financials,
     _pick_ranked,
 )
@@ -52,9 +71,33 @@ def test_a_year_three_column_is_never_taken_as_trailing():
 
 
 def test_a_statement_with_two_trailing_columns_and_no_tiebreak_refuses():
-    """Decatur's other page heads `SELLER ANNUALIZED T7 SELLER ANNUALIZED
-    T1`. A statement that cannot say which column is the actual has not
-    stated one."""
+    """`T-12 ACTUAL 2025` names two periods that have both already
+    happened. A statement that cannot say which column is THE actual has
+    not stated one, so it yields nothing rather than the first."""
+    text = ("T-12 ACTUAL 2025\n"
+            "Net Operating Income $132,994 $249,950\n")
+    assert noi(text) is None
+
+
+def test_an_ambiguous_actual_does_not_fall_through_to_the_brokers_column():
+    """`T-12 2025 T-3 (ADJ)` is the shape that isolates the refusal from
+    the demotion: two unadjusted trailing columns and exactly one
+    adjusted. Refusing only the ambiguous TIER would walk down to the
+    broker's adjusted figure and report it as the actual — a deck that
+    could not say which of its two actuals is current answering with
+    neither of them. Ambiguity at any tier ends the read."""
+    text = ("T-12 2025 T-3 (ADJ)\n"
+            "Net Operating Income $132,994 $249,950 $301,400\n")
+    assert noi(text) is None
+
+
+def test_a_header_whose_column_count_misses_the_row_refuses():
+    """Decatur's `SELLER ANNUALIZED T7 SELLER ANNUALIZED T1` refuses by a
+    different route, and which route it is matters when reading a
+    refusal: the continuation rule folds `T1` into the column before it,
+    so the header declares ONE column against the row's two figures and
+    no header matches at all. The ambiguity branch above is never
+    reached on this deck — measured, not assumed."""
     text = ("SELLER ANNUALIZED T7 SELLER ANNUALIZED T1\n"
             "Net Operating Income $132,994 $249,950\n")
     assert noi(text) is None
@@ -140,6 +183,68 @@ def test_a_closing_parenthesis_counts_as_much_as_an_opening_one():
     assert noi(text) == 204_880
 
 
+# ── the header's shape, asserted directly ────────────────────────────
+#
+# A mutation sweep over these rules found four that a whole-text fixture
+# cannot observe, because a SECOND guard refuses the same text for its own
+# reason and the value never differs. Defence in depth is worth keeping,
+# but a rule no test can see is a rule that can be deleted in silence, so
+# the boundary rules are also asserted where they are decided.
+
+@pytest.mark.parametrize("header,shape", [
+    # a run of calendar years is a run of columns — Belton
+    ("2024 2025 2026", [("trailing", False)] * 3),
+    # two trailing words in a row are one label — Starkville
+    ("CURRENT T-6 PRO FORMA", [("trailing", False), ("projection", False)]),
+    # unless the broker's hand separates them — Hammond, Dallas
+    ("T-3 T-3 (ADJ)", [("trailing", False), ("trailing", True)]),
+    ("T-12 Actual T-12 Broker Adjusted",
+     [("trailing", False), ("trailing", True)]),
+    # a parenthesised period stamps the column beside it — Dallas, Rowlett
+    ("Pro Forma (Year 3)", [("projection", False)]),
+    ("T5 (JAN-MAY 2026) PRO FORMA",
+     [("trailing", False), ("projection", False)]),
+    # a lone year heads a trailing column — LaGrange. The two projections
+    # come back flagged `adjusted`, which is imprecise and deliberately
+    # left: the flag is read ONLY on trailing columns, so on a projection
+    # it names nothing and can move no number. Asserted as it really is
+    # rather than as it ought to read, because a test written to the
+    # tidier shape would fail the day someone tightened the flag.
+    ("2025 MARKET ADJUSTED PRO FORMA",
+     [("trailing", False), ("projection", True), ("projection", True)]),
+])
+def test_a_header_declares_the_columns_the_corpus_shows_it_declaring(
+        header, shape):
+    assert _noi_header_columns(header) == shape
+
+
+@pytest.mark.parametrize("line", [
+    # marketing prose — Mesa: `adjacent 10-acre` ends a word in `t`
+    # before a number, so a T-N token without a left word boundary fires
+    # INSIDE the word
+    "The site is paired with an adjacent 10-acre parcel.",
+    # an assumptions row — Kerrville's `Year 1 17%` up the same page as
+    # its one real column
+    "Year 1 17% Year 2 4% Year 3 4%",
+    # a row that PRICES its periods rather than naming them
+    "T-12 $412,000 PRO FORMA $530,000",
+])
+def test_these_lines_are_not_period_headers(line):
+    assert not _noi_header_line(line)
+
+
+def test_prose_that_survives_the_header_test_is_refused_downstream():
+    """Spicewood's `With all entitlements in place,` IS accepted here —
+    `in place` is a genuine trailing word and this predicate has no way to
+    know it is a sentence. Nothing rescues that line; what refuses the
+    deck is the per-SF requirement on a one-figure row, one layer down.
+    Recorded because the two guards read like belt and braces and they are
+    not: on this line the braces are load-bearing alone."""
+    prose = "With all entitlements in place, delivery is expected in 2027."
+    assert _noi_header_line(prose)
+    assert noi(prose + "\nNOI: $1,684,438\n") is None
+
+
 # ── which line may be a header at all ────────────────────────────────
 
 def test_a_line_that_prices_a_period_is_not_a_header():
@@ -218,6 +323,19 @@ def test_a_projection_qualified_label_yields_nothing(line):
     assert noi(line) is None
 
 
+@pytest.mark.parametrize("line", [
+    "2026 PRO FORMA NOI $341,022",
+    "PRO FORMA CURRENT NOI $341,022",
+])
+def test_a_projection_word_vetoes_a_span_that_also_reads_as_trailing(line):
+    """The veto only bites where BOTH kinds of word sit in the span —
+    everywhere else the label simply matches no basis and yields nothing
+    on its own. So these two are the fixtures that hold it: strip the
+    veto and `2026 PRO FORMA NOI` books a year-three figure at the
+    calendar-year tier, which is Norman's defect exactly."""
+    assert noi(line) is None
+
+
 def test_an_unqualified_noi_yields_no_candidate_at_any_tier():
     """The rule that refuses the pro-forma-only decks — Triple T, Belton,
     Spicewood, the Mesa land, Butler. They state no trailing actual, so
@@ -253,6 +371,18 @@ def test_a_header_governs_only_the_page_it_is_printed_on():
     text = ("T-12 PRO FORMA\n"
             "Net Operating Income $117,779 $301,400\n" + PAGE +
             "YEAR 1 YEAR 2\n"
+            "Net Operating Income $301,400 $340,000\n")
+    assert noi(text) == 117_779
+
+
+def test_a_header_does_not_reach_forward_onto_the_next_page():
+    """The sharper half of page-scoping: a later page whose own statement
+    carries NO header must not borrow the previous page's. Reaching
+    forward mints a SECOND rank-1 candidate that disagrees, and two
+    disagreeing bests is a refusal — so the deck that stated its trailing
+    NOI plainly on page one stops reporting one at all."""
+    text = ("T-12 PRO FORMA\n"
+            "Net Operating Income $117,779 $301,400\n" + PAGE +
             "Net Operating Income $301,400 $340,000\n")
     assert noi(text) == 117_779
 

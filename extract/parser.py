@@ -1394,7 +1394,13 @@ _NOI_LABEL_WINDOW = 44
 
 #: What may sit between the label and its figure: a basis parenthetical, a
 #: colon, `of`/`is`, currency. It may not cross a newline — that crossing
-#: is what booked a list price and a unit count as NOI.
+#: is what booked a list price and a unit count as NOI. The guard against
+#: it is NOT this pattern, and a mutation sweep is what said so: `\s`
+#: matches a newline, so widening the character classes here changes
+#: nothing. What holds the line is that `_noi_candidates` splits the page
+#: into lines and hands ONE of them to `_noi_label_candidate` — there is
+#: no newline left to cross. Only the `[^)\n]` inside the parenthetical
+#: does work of its own, bounding an UNCLOSED `(` to its own line.
 _NOI_LABEL_GAP_RE = re.compile(
     r"^(?:\s*\((?P<paren>[^)\n]*)\))?[\s:]*(?:of|is|was|at)?[\s:~]*",
     re.IGNORECASE)
