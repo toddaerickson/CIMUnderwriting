@@ -10,6 +10,8 @@ because the corpus is gitignored and CI never runs the corpus tests. A page
 with no text at all is exactly what a scanned CIM page is, and it takes four
 lines to make one.
 """
+import math
+
 import pdfplumber
 import pytest
 
@@ -314,6 +316,85 @@ def test_render_page_produces_png_bytes(scanned):
     with pdfplumber.open(text_page) as pdf:
         png = ocr.render_page(pdf.pages[0])
     assert png[:8] == b"\x89PNG\r\n\x1a\n"
+
+
+class _Page:
+    """Just the two attributes `render_scale` reads, in POINTS."""
+
+    def __init__(self, width, height):
+        self.width, self.height = width, height
+
+
+def test_an_ordinary_page_renders_at_the_full_dpi():
+    """The cap is a ceiling, not a target. A letter page at 200 DPI is
+    1700x2200 and must be left there — upscaling to the long-edge limit adds
+    pixels and no information."""
+    assert ocr.render_scale(_Page(612, 792)) == pytest.approx(200 / 72)
+
+
+def test_an_oversized_page_is_capped_to_both_tier_ceilings():
+    """The measured Tucson case, and the reason a fixed DPI is the wrong knob.
+
+    Its pages are 1650x1275 POINTS. At 200 DPI that renders 4584x3542 =
+    16.24 MP — 4.3x over the 3.75 MP tier ceiling, 9 MB of PNG, and
+    downsampled server-side anyway.
+    """
+    scale = ocr.render_scale(_Page(1650, 1275))
+    # ceil, not round: that is what pdfium's `render()` does to each side.
+    w, h = math.ceil(1650 * scale), math.ceil(1275 * scale)
+    assert max(w, h) <= ocr.MAX_IMAGE_EDGE
+    assert w * h <= ocr.MAX_IMAGE_PIXELS
+    assert scale < 200 / 72          # genuinely reduced, not a no-op
+
+
+@pytest.mark.parametrize("width,height", [
+    (1650, 1275), (1275, 1650), (1224, 1584), (2000, 2000), (3400, 1912),
+])
+def test_the_ceiling_holds_on_the_rounded_bitmap_not_the_ideal_one(width, height):
+    """An exact-fit scale is not good enough, because `render()` rounds each
+    side UP: the naive `sqrt(max_pixels / area)` puts Tucson at 2203x1703,
+    1,709 pixels past a constant named `MAX_IMAGE_PIXELS`. A ceiling the code
+    quietly exceeds is worse than no ceiling — it reads as checked."""
+    scale = ocr.render_scale(_Page(width, height))
+    w, h = math.ceil(width * scale), math.ceil(height * scale)
+    assert w * h <= ocr.MAX_IMAGE_PIXELS
+    assert max(w, h) <= ocr.MAX_IMAGE_EDGE
+
+
+def test_the_area_ceiling_binds_where_the_edge_ceiling_does_not():
+    """The half a long-edge cap alone gets wrong, and the reason this is two
+    constants rather than one.
+
+    At a 2576 long edge Tucson's 4:3 sheet is 2576x1991 = 5.13 MP: inside the
+    edge limit and 37% over the area limit. Only a page near 16:9 has both
+    bind at once.
+    """
+    page = _Page(1650, 1275)
+    edge_only = ocr.MAX_IMAGE_EDGE / 1650
+    assert round(1650 * edge_only) * round(1275 * edge_only) > ocr.MAX_IMAGE_PIXELS
+    assert ocr.render_scale(page) < edge_only
+
+
+def test_the_cap_reads_the_long_edge_whichever_side_it_is():
+    """Portrait and landscape of the same sheet must render identically —
+    reading `width` alone would cap one and not the other."""
+    assert ocr.render_scale(_Page(1650, 1275)) == ocr.render_scale(
+        _Page(1275, 1650))
+
+
+def test_a_degenerate_page_size_does_not_divide_by_zero():
+    assert ocr.render_scale(_Page(0, 0)) == pytest.approx(200 / 72)
+
+
+def test_an_oversized_scan_falls_back_to_jpeg(scanned, monkeypatch):
+    """PNG is tried first — a synthetic page stays small and crisp losslessly
+    — and only a page that blows the byte budget re-encodes. Forced here by
+    dropping the budget rather than by building a 9 MB fixture."""
+    monkeypatch.setattr(ocr, "MAX_IMAGE_BYTES", 1)
+    text_page, _ = scanned
+    with pdfplumber.open(text_page) as pdf:
+        image = ocr.render_page(pdf.pages[0])
+    assert image[:3] == b"\xff\xd8\xff"
 
 
 def test_an_ocr_page_is_falsy_when_it_found_nothing():

@@ -7,6 +7,11 @@ pdfplumber==0.11.9
 # breaks silently the day pdfplumber drops it.
 pypdfium2==5.12.1
 Pillow==12.3.0
+# extract/vision.py -- the OCR transcriber. Imported LAZILY (inside
+# ClaudeTranscriber.client), so a deployment with CIM_OCR_ENABLED unset never
+# constructs a client or reads a key; the pin is here because CI installs this
+# file and tests/test_vision_transcriber.py must import the module.
+anthropic==0.122.0
 python-docx==1.2.0
 openpyxl==3.1.5
 numpy-financial==1.0.0

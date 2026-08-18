@@ -395,6 +395,17 @@ def _add_assumption_register(doc, assumption_register):
         f"assumption absent below is an assumption this run did not use."
     )
 
+    # A transcribed page is not a "chosen" assumption, so it lands in B.2
+    # among a hundred and forty others — and it is exactly the kind of fact
+    # about a run that a reader must not have to find. It gets its own
+    # sentence, rendered only when it happened.
+    ocr = next((r for r in rows if r.key == "cim.ocr_pages"), None)
+    if ocr is not None:
+        doc.add_paragraph(
+            f"Note on the source document: {ocr.detail}. Figures taken from "
+            f"those pages were transcribed, not read from the PDF's own text "
+            f"layer.")
+
     chosen = [r for r in rows if r.provenance in CHOSEN]
     doc.add_heading("B.1 Assumptions not taken from the model defaults",
                     level=2)

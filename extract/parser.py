@@ -172,15 +172,28 @@ class CIMData:
     #: more missing field.
     unmapped_financial_lines: list = field(default_factory=list)
 
+    #: 1-based pages whose text came from `extract.ocr` rather than from the
+    #: PDF's own text layer, straight off `pdf_reader.extract_pdf`. Empty on
+    #: every deck that has a text layer, and empty on every deck when OCR is
+    #: off — which is the default.
+    #:
+    #: Carried on `CIMData` rather than left in the raw dict because it has to
+    #: reach the assumption register (design decision 11), and `CIMData` is
+    #: what the engine hands to `assumptions.collect`. It is diagnostics ABOUT
+    #: extraction, so `extraction_report` skips it for the same reason it
+    #: skips the two above.
+    ocr_pages: list = field(default_factory=list)
+
     def extraction_report(self) -> dict:
         """Return a report of populated vs missing fields."""
         total = 0
         populated = 0
         missing_fields = []
         for f in fields(self):
-            # Both are metadata ABOUT extraction, not extracted values —
-            # counting either would move confidence or pad "Missing fields".
-            if f.name in ("unmapped_financial_lines", "portfolio_signal"):
+            # All three are metadata ABOUT extraction, not extracted values —
+            # counting any would move confidence or pad "Missing fields".
+            if f.name in ("unmapped_financial_lines", "portfolio_signal",
+                          "ocr_pages"):
                 continue
             if f.name in ("unit_mix", "income_lines", "expense_lines", "comp_data"):
                 total += 1
@@ -209,7 +222,7 @@ def parse_cim(raw: dict, filename: str = "") -> CIMData:
 
     Args:
         raw: dict from pdf_reader.extract_pdf() with keys
-             "text", "tables", "page_count", "pages"
+             "text", "tables", "page_count", "pages", "ocr_pages"
         filename: PDF stem (optional) — an extra wording source for the
              portfolio detector (filing prefixes like "SS 2Property ...").
 
@@ -220,6 +233,9 @@ def parse_cim(raw: dict, filename: str = "") -> CIMData:
     tables = raw.get("tables", [])
     pages = raw.get("pages") or []
     data = CIMData()
+    # Carried through unchanged — the parser reads a transcribed page exactly
+    # as it reads an embedded one, and this only records which was which.
+    data.ocr_pages = list(raw.get("ocr_pages") or [])
 
     _parse_property_basics(text, data, pages)
     _parse_size_occupancy(text, data)

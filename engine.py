@@ -109,7 +109,12 @@ def extract_pdf_data(pdf_path: str, cim_overrides: dict = None,
     # Step 1: Extract PDF
     _progress(1, 4, "Extracting PDF text and tables...")
     from extract.pdf_reader import extract_pdf
-    raw = extract_pdf(pdf_path)
+    from extract.vision import transcriber_from_env
+    # Returns None unless BOTH `CIM_OCR_ENABLED` and `ANTHROPIC_API_KEY` are
+    # set, and None is `extract_pdf`'s own "do not transcribe" — see
+    # `vision.transcriber_from_env` on why the resolution is here and not
+    # inside `extract_pdf`.
+    raw = extract_pdf(pdf_path, transcriber=transcriber_from_env())
 
     # Step 2: Parse CIM
     _progress(2, 4, "Parsing CIM data...")
