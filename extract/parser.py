@@ -1717,6 +1717,7 @@ def _fin_candidates(text: str, row_specs, label_res, absolute=False) -> list:
     being read as a profit.
     """
     candidates = []
+    preferred_row_seen = False
     for page in text.split("\n" + "=" * 60):
         lines = [_fin_repair(line) for line in page.split("\n")]
         for i, line in enumerate(lines):
@@ -1724,6 +1725,8 @@ def _fin_candidates(text: str, row_specs, label_res, absolute=False) -> list:
                 m = row_re.match(line)
                 if not m or _FIN_GROWTH_VETO_RE.match(line[m.end():]):
                     continue
+                if not demotion:
+                    preferred_row_seen = True
                 found = _fin_statement_candidate(lines, i)
                 if found:
                     candidates.append((found[0] + demotion, found[1]))
@@ -1734,6 +1737,18 @@ def _fin_candidates(text: str, row_specs, label_res, absolute=False) -> list:
                     found = _fin_label_candidate(line, m)
                     if found:
                         candidates.append(found)
+    # A demoted wording answers only where the preferred one is ABSENT,
+    # never where it is present and was REFUSED. Snapbox FL is why: it
+    # heads two columns `ENDING JUNE 30, 2026 ENDING JUNE 30, 2026`, so
+    # its `Effective Gross Income` row is ambiguous and yields nothing —
+    # and the `Effective Gross Rental Income` row on a different statement
+    # then answered $418,529, which is rental income before other income.
+    # The deck says the number is $468,666: $468,666 − $406,315 = the
+    # $62,351 NOI on the line below. Ambiguity at the preferred wording
+    # has to end the read the same way ambiguity within a tier does,
+    # or the demotion becomes a route around a refusal.
+    if preferred_row_seen:
+        candidates = [c for c in candidates if c[0] < _FIN_DEMOTION]
     if absolute:
         candidates = [(rank, abs(value)) for rank, value in candidates]
     return candidates
@@ -1806,11 +1821,14 @@ _FIN_EXP_ROWS = [
                 + _FIN_FOOTNOTE + r"\b", re.IGNORECASE), 0),
 ]
 
-#: The acronyms, WORD-BOUNDED. Their absence is the whole reason the old
-#: EGR pattern read prose: `EGI` is a substring of `r-egi-on`, so
-#: `EGR|EGI` matched `REGIONAL MAP`, `the region.` and `a $2.5 billion
-#: regional economic development investment` — on Dallas and Starkville
-#: that is where the extracted "effective gross income" came from.
+#: The acronyms, WORD-BOUNDED and — unlike every other pattern here —
+#: case-SENSITIVE. Both properties are load-bearing and they cover
+#: different halves of the same hazard: `EGI` is a substring of
+#: `r-egi-on`, so `EGR|EGI` matched `REGIONAL MAP`, `the region.` and
+#: `a $2.5 billion regional economic development investment`, which on
+#: Dallas and Starkville is where the extracted "effective gross income"
+#: came from. Case handles the lowercase prose, the boundaries handle the
+#: UPPERCASE headings these decks set their map and section titles in.
 _FIN_GPR_LABELS = [re.compile(r"\bGPR\b")]
 _FIN_EGR_LABELS = [re.compile(r"\b(?:EGR|EGI)\b")]
 
