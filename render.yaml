@@ -31,6 +31,20 @@ services:
         sync: false          # https://<same host>
       - key: CENSUS_API_KEY
         sync: false
+      - key: ANTHROPIC_API_KEY
+        sync: false          # extract/vision.py — the OCR transcriber
+      # OCR is a PAID per-page call, so it stays off until someone turns it
+      # on deliberately. Nobody should discover this feature by reading a bill.
+      - key: CIM_OCR_ENABLED
+        value: "false"
+      # On the persistent disk, NOT the default ~/.cim_ocr_cache: Render's
+      # filesystem outside /data is ephemeral, so the default would lose the
+      # cache on every deploy and re-bill every deck already transcribed.
+      # extract_pdf runs twice per deal on its own (engine.py, run_analysis),
+      # which is what makes the cache a billing requirement rather than a
+      # speed-up.
+      - key: CIM_OCR_CACHE_DIR
+        value: /data/ocr-cache
       - key: CIM_DEALS_DIR
         value: /data/deals
       - key: COMP_DB_PATH

@@ -621,6 +621,7 @@ def _add_cim_rows(reg, cim_data, cim_snapshot):
     """
     if cim_data is None:
         return
+    _add_ocr_row(reg, cim_data)
     snapshot = cim_snapshot or {}
     for field, label, unit in CIM_FIELDS:
         value = getattr(cim_data, field, None)
@@ -633,6 +634,51 @@ def _add_cim_rows(reg, cim_data, cim_snapshot):
             provenance=DEAL if edited else CIM, unit=unit,
             was=prior if edited else None,
             detail=("corrected on the assumptions page" if edited else "")))
+
+
+def _add_ocr_row(reg, cim_data):
+    """Whether any of this deal's numbers were read off a machine
+    transcription rather than the PDF's own text layer.
+
+    **This row is a qualifier, not a value that moved an output**, which
+    stretches this module's own definition — so the reason it is here anyway:
+    a `cim` provenance means "stated in the CIM", and a figure recovered by
+    `extract.ocr` from a scanned page is a weaker claim than the same figure
+    lifted from an embedded text layer. Leaving the two indistinguishable
+    would make the register's central promise — that a number's source is on
+    the page beside it — quietly false on exactly the decks where it matters
+    most.
+
+    It is ONE document-level row rather than a flag on each affected row, and
+    that is a limit of the pipeline rather than a choice: the parser attributes
+    no page to a scalar field. `FinancialLine.page` exists, but its own comment
+    says a page "is not an identity" — two statements share one and one
+    statement spans two — and no page at all reaches `nrsf`,
+    `physical_occupancy` or `asking_price`, which come from document-wide
+    regexes over the joined text. A per-row flag would therefore have to be
+    guessed, and a guessed provenance is worse than an honest coarse one.
+    The `detail` below says exactly that, so no reader infers precision the
+    row does not have.
+
+    Contributes nothing when no page was transcribed — which is every deck
+    with a text layer, and every deck at all while `CIM_OCR_ENABLED` is off.
+    """
+    pages = getattr(cim_data, "ocr_pages", None) or []
+    if not pages:
+        return
+    listed = ", ".join(str(p) for p in pages)
+    # The label is a property OF THE DOCUMENT, deliberately, because B.2 prints
+    # the provenance without the `detail` beside it: "Machine-Transcribed
+    # Pages | 2 | stated in the CIM" reads as a claim the CIM makes, which it
+    # does not. "Pages Without a Text Layer | 2 | stated in the CIM" reads
+    # correctly — the source document is where the fact comes from. The full
+    # statement is the memo's own Appendix B sentence.
+    reg.add_row(Assumption(
+        key="cim.ocr_pages", label="Pages Without a Text Layer", group=G_DEAL,
+        value=len(pages), provenance=CIM, unit=UNIT_COUNT,
+        detail=(f"page(s) {listed} carried no text layer and were read by "
+                f"machine transcription; which values came from them cannot "
+                f"be stated, as the parser attributes no page to a field")))
 
 
 def _add_fill_rows(reg, fill_log):

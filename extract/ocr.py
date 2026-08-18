@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import math
 import os
 from dataclasses import dataclass, field
 from typing import Callable, Optional
@@ -49,11 +50,64 @@ MIN_CHARS_FOR_TEXT_LAYER = 50
 #: recognition; a CIM financial statement sets its figures small.
 RENDER_DPI = 200
 
-#: Bumped when anything that changes a transcription changes — the render DPI,
-#: the prompt, the model. It is part of the cache key, so a bump invalidates
+#: The long edge never exceeds this, whatever `RENDER_DPI` would give.
+#:
+#: **DPI alone is the wrong control knob**, and the Tucson deck — the one deck
+#: that motivates this whole module — is the proof. Its pages are 1650 x 1275
+#: POINTS (a 22.9" plan sheet, not a letter page), so 200 DPI renders them at
+#: 4584 x 3542 = 16.24 MP: 4.3x over the vision tier's 3.75 MP ceiling and
+#: 9 MB of PNG per page. A fixed DPI makes the pixel count a function of the
+#: page's physical size, which is exactly the variable an API with a PIXEL cap
+#: does not care about.
+#:
+#: 2576 px is the documented long-edge maximum of the high-resolution tier
+#: (up to ~4784 visual tokens per image). Rendering ABOVE it buys nothing —
+#: the image is downsampled server-side regardless — while paying the whole
+#: cost in bytes on the wire.
+#:
+#: The cap is a ceiling, never a floor: a letter page at 200 DPI is 1700 x
+#: 2200 and is left exactly there. Upscaling it to the cap would add pixels
+#: and no information.
+MAX_IMAGE_EDGE = 2576
+
+#: The tier's OTHER documented ceiling — 3.75 MP — and it binds independently.
+#:
+#: Capping the long edge alone is not enough, which measurement caught and
+#: arithmetic would not have: Tucson's 4:3 landscape sheet at a 2576 long edge
+#: is 2576 x 1991 = 5.13 MP, inside the edge limit and 37% over the area one.
+#: Only a page near 16:9 has both bind at once (2576 x 1456 = 3.75 MP); every
+#: squarer page hits the area limit first.
+#:
+#: **The honest limit this exposes**: an oversized sheet held to 3.75 MP is
+#: ~96 effective DPI, and small statement type at 96 DPI is genuinely
+#: marginal. That is the tier's ceiling rather than a choice made here; the
+#: fix, if the Tucson pages read poorly, is to tile a large page into regions
+#: rendered at full resolution — deliberately not built until a measurement
+#: says it is needed.
+MAX_IMAGE_PIXELS = 3_750_000
+
+#: Encoded-size budget. Above it the page re-encodes as JPEG.
+#:
+#: SELF-IMPOSED, not a documented API limit — so it is set conservatively
+#: rather than tuned to a number nobody here has verified. At the edge cap a
+#: scanned page is still ~4 MB of PNG (12 MB of base64 before the cap), and a
+#: photograph is what PNG is worst at; the same page is ~0.85 MB at JPEG q90.
+#: PNG is TRIED FIRST because a synthetic page — the vector site plan in this
+#: same corpus — stays small and crisp losslessly, and JPEG ringing around
+#: small type is the one artifact this pipeline cannot afford.
+MAX_IMAGE_BYTES = 3_500_000
+JPEG_QUALITY = 90
+
+#: Bumped when anything that changes a transcription changes — the render, the
+#: prompt, the model. It is part of the cache key, so a bump invalidates
 #: cached pages instead of silently serving output the current code would not
 #: produce.
-TRANSCRIBER_VERSION = 1
+#:
+#: 2: the edge cap and the JPEG fallback above. No transcription existed to
+#: invalidate when they landed (there was no transcriber), but the rule is
+#: followed on the rule's own terms — deciding case by case whether a cache
+#: "probably" holds anything is how a stale entry gets served.
+TRANSCRIBER_VERSION = 2
 
 
 @dataclass
@@ -110,13 +164,50 @@ def needs_ocr(page) -> bool:
     return len(page.chars) < MIN_CHARS_FOR_TEXT_LAYER
 
 
-def render_page(page, dpi: int = RENDER_DPI) -> bytes:
-    """Render one pdfplumber page to PNG bytes.
+def render_scale(page, dpi: int = RENDER_DPI,
+                 max_edge: int = MAX_IMAGE_EDGE,
+                 max_pixels: int = MAX_IMAGE_PIXELS) -> float:
+    """The pdfium render scale for this page: `dpi`, or whatever less it takes
+    to satisfy BOTH tier ceilings.
+
+    Split out from `render_page` so the decision can be asserted directly on a
+    page's dimensions, without rendering a 16 MP bitmap in a test.
+
+    A page's dimensions are in points; `scale` multiplies both, so the area
+    grows as its square — hence a square root rather than a ratio.
+
+    The area term solves for the ROUNDED bitmap, not the ideal one, and that
+    is not a nicety: `render()` rounds each side UP, so the exact-fit scale
+    lands Tucson at 2203 x 1703 — 1,709 pixels past a ceiling named
+    `MAX_IMAGE_PIXELS`. Since `ceil(x) <= x + 1`, requiring
+    `(w*s + 1)(h*s + 1) <= max_pixels` is sufficient, and that is a quadratic
+    in `s` whose positive root is below.
+    """
+    natural = dpi / 72
+    width, height = float(page.width), float(page.height)
+    longest, area = max(width, height), width * height
+    if longest <= 0 or area <= 0:
+        return natural
+    b = width + height
+    area_cap = (-b + math.sqrt(b * b + 4 * area * (max_pixels - 1))) / (2 * area)
+    return min(natural, max_edge / longest, area_cap)
+
+
+def render_page(page, dpi: int = RENDER_DPI,
+                max_edge: int = MAX_IMAGE_EDGE,
+                max_pixels: int = MAX_IMAGE_PIXELS) -> bytes:
+    """Render one pdfplumber page to PNG (or JPEG) bytes.
 
     Uses `pypdfium2`, which arrives as a pdfplumber dependency and is a
     self-contained wheel. `page.to_image()` is NOT an option: it shells out to
     ImageMagick or Ghostscript, and the Render deploy is `runtime: python` with
     a pip-only build command, so no system binary can be installed there.
+
+    The scale is capped at the vision tier's long edge AND its pixel count,
+    and the result falls back to JPEG above `MAX_IMAGE_BYTES` — see the three
+    constants for the measured reasons. Callers must not assume PNG; the
+    format is discoverable from the bytes, which is how `extract.vision` picks
+    its `media_type`.
     """
     import io
 
@@ -124,12 +215,20 @@ def render_page(page, dpi: int = RENDER_DPI) -> bytes:
 
     pdf = pypdfium2.PdfDocument(page.pdf.stream.name)
     try:
-        bitmap = pdf[page.page_number - 1].render(scale=dpi / 72)
-        buf = io.BytesIO()
-        bitmap.to_pil().save(buf, format="PNG")
-        return buf.getvalue()
+        bitmap = pdf[page.page_number - 1].render(
+            scale=render_scale(page, dpi, max_edge, max_pixels))
+        image = bitmap.to_pil()
     finally:
         pdf.close()
+
+    buf = io.BytesIO()
+    image.save(buf, format="PNG")
+    if buf.tell() <= MAX_IMAGE_BYTES:
+        return buf.getvalue()
+
+    buf = io.BytesIO()
+    image.convert("RGB").save(buf, format="JPEG", quality=JPEG_QUALITY)
+    return buf.getvalue()
 
 
 class PageCache:

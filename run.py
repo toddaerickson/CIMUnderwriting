@@ -27,10 +27,17 @@ def stage_extract(ctx: AnalysisContext):
     """[1/7] Extract raw text and tables from the PDF."""
     logger.info("\n[1/7] Extracting PDF text and tables...")
     from extract.pdf_reader import extract_pdf
-    ctx.raw_pdf = extract_pdf(ctx.pdf_path)
+    from extract.vision import transcriber_from_env
+    # None unless both `CIM_OCR_ENABLED` and `ANTHROPIC_API_KEY` are set.
+    ctx.raw_pdf = extract_pdf(ctx.pdf_path, transcriber=transcriber_from_env())
     logger.info("  Pages: %d", ctx.raw_pdf['page_count'])
     logger.info("  Tables found: %d", len(ctx.raw_pdf['tables']))
     logger.info("  Text length: %s chars", f"{len(ctx.raw_pdf['text']):,}")
+    if ctx.raw_pdf.get("ocr_pages"):
+        logger.warning(
+            "  %d page(s) had no text layer and were machine-transcribed: %s",
+            len(ctx.raw_pdf["ocr_pages"]),
+            ", ".join(str(p) for p in ctx.raw_pdf["ocr_pages"]))
 
 
 def stage_parse(ctx: AnalysisContext):

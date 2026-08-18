@@ -285,6 +285,11 @@ extract/
                            #   A transcriber MUST return row-shaped tables — extract/tables.py
                            #   assigns periods to columns by LIST INDEX and no x0/x1 geometry
                            #   reaches the parser, so a text-only one yields zero FinancialLines
+  vision.py                # THE transcriber ocr.py leaves injected — Claude vision, row-shaped
+                           #   tables by JSON schema. Transcribes; never interprets, corrects or
+                           #   computes, so a value it recovers keeps provenance `cim`. A refusal
+                           #   OR a max_tokens truncation returns NOTHING: a half-transcribed
+                           #   statement reads downstream as a complete one missing lines
   parser.py                # Structured data extraction → CIMData dataclass
   location.py              # City/state/ZIP extraction — cover-page-first, broker-address
                            #   suppression, street-line trimming. Shared by parser.py and

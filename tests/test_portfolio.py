@@ -265,7 +265,11 @@ def test_extract_path_does_not_double_carry_the_warning(monkeypatch, tmp_path):
 
     raw = {"text": WICHITA_COVER, "tables": [], "pages": [WICHITA_COVER]}
     monkeypatch.setattr("data.comp_db.COMP_DB_PATH", str(tmp_path / "c.db"))
-    monkeypatch.setattr("extract.pdf_reader.extract_pdf", lambda p: raw)
+    # `transcriber` is accepted and ignored: the engine now resolves one from
+    # the environment and passes it, and this test is about the portfolio
+    # warning rather than the reader's signature.
+    monkeypatch.setattr("extract.pdf_reader.extract_pdf",
+                        lambda p, transcriber=None: raw)
     monkeypatch.setattr(
         "extract.enrichment.enrich_cim_data",
         lambda cim, comp_db=None: type("E", (), {"errors": []})())
