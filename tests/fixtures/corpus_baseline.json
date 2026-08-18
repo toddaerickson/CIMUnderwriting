@@ -26,10 +26,10 @@
     "tables": 22
   },
   "Extra-Space-Storage-Offering-Memorandum-V4-LINKED": {
-    "all_none_lines": 5,
+    "all_none_lines": 7,
     "chars_per_page": 953,
     "degenerate_tables": 10,
-    "expense_lines": 10,
+    "expense_lines": 12,
     "fields_populated": 19,
     "fields_total": 52,
     "image_only_pages": 9,
