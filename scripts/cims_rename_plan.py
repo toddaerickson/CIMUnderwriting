@@ -57,6 +57,7 @@ from extract.location import (  # noqa: E402
 
 # One definition of "is this a portfolio", shared with extract/parser.py —
 # the analysis pipeline surfaces the same signal the filing tags.
+from extract.pdf_reader import page_text  # noqa: E402
 from extract.portfolio import is_portfolio  # noqa: E402
 
 # ---------------------------------------------------------------- constants
@@ -139,15 +140,19 @@ def is_placeholder(path: Path) -> bool:
 def pdf_text(path: Path, pages=8):
     """Return (cover_lines, body_text).
 
-    pdfplumber, matching extract/pdf_reader.py -- one PDF library in the repo. The
-    cover is returned as discrete lines so a title can be told apart from an address."""
+    Reads each page through `pdf_reader.page_text` -- one PDF library AND one
+    page reader in the repo. Reading pages here with a bare `extract_text()`
+    left this script blind to double-drawn cover headings while the pipeline
+    saw them clean, and the cover heading is most of what this script
+    classifies on. The cover is returned as discrete lines so a title can be
+    told apart from an address."""
     import pdfplumber
     cover_lines, per = [], []
     with pdfplumber.open(path) as pdf:
         for i, page in enumerate(pdf.pages):
             if i >= pages:
                 break
-            txt = page.extract_text() or ""
+            txt = page_text(page)
             if i == 0:
                 cover_lines = [ln for ln in (norm_text(x) for x in txt.splitlines()) if ln]
             per.append(norm_text(txt))
