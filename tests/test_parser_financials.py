@@ -120,9 +120,21 @@ def test_more_than_twelve_months_is_not_stored():
 # ── The rest of the financial parse still works ─────────────────────
 
 def test_other_financials_still_parse_alongside():
+    """The NOI and the TTM month count still read off prose. The REVENUE
+    deliberately does not, and this assertion was flipped on purpose.
+
+    `Total revenue: $1,000,000` states no period. It is the same shape as
+    the unqualified `NOI: $X` that yields no candidate at any tier — the
+    rule that refuses the pro-forma-only decks — and the revenue total now
+    answers to the same discipline: it is read from a statement ROW whose
+    header names the column, or not at all. On the corpus this costs
+    nothing, because no deck states a bare `Total revenue:` in prose; what
+    it buys is that a stabilised run-rate quoted in an exec summary can no
+    longer land in the slot the BLOCKING income-identity check reads.
+    """
     data = CIMData()
     _parse_financials("TTM NOI: $650,000 (T-9 annualized). "
                       "Total revenue: $1,000,000.", [], data)
     assert data.ttm_noi == 650_000
     assert data.ttm_months == 9
-    assert data.ttm_total_revenue == 1_000_000
+    assert data.ttm_total_revenue is None
