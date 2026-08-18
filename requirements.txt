@@ -1,4 +1,12 @@
 pdfplumber==0.11.9
+# Both arrive transitively via pdfplumber, but extract/ocr.py imports them
+# DIRECTLY to render a page for OCR -- pypdfium2 because it is a
+# self-contained wheel (the Render build is pip-only and cannot install the
+# ImageMagick/Ghostscript that page.to_image() shells out to), and Pillow to
+# encode the bitmap as PNG. A direct import on an undeclared transitive dep
+# breaks silently the day pdfplumber drops it.
+pypdfium2==5.12.1
+Pillow==12.3.0
 python-docx==1.2.0
 openpyxl==3.1.5
 numpy-financial==1.0.0

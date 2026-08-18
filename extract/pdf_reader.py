@@ -17,7 +17,10 @@ tables, because `dedupe_chars()` costs roughly the extraction it precedes
 """
 
 import os
+
 import pdfplumber
+
+from extract import ocr
 
 # `dedupe_chars` drops a character when another with the SAME text sits within
 # this many points of it. The default of 1.0 is too coarse for tight kerning: it
@@ -45,9 +48,14 @@ def page_text(page) -> str:
     return deduped_page(page).extract_text() or ""
 
 
-def extract_pdf(filepath: str) -> dict:
+def extract_pdf(filepath: str, transcriber=None) -> dict:
     """
     Extract all text and tables from a PDF file.
+
+    Pages with no usable text layer are handed to `transcriber` when OCR is
+    enabled (`CIM_OCR_ENABLED`). The default transcribes nothing, so the
+    returned dict is byte-for-byte what it was before OCR existed — see
+    `extract/ocr.py` on why the inert default is the point rather than a stub.
 
     Returns:
         {
@@ -55,6 +63,7 @@ def extract_pdf(filepath: str) -> dict:
             "tables": list        — list of tables (each table is list of rows),
             "page_count": int,
             "pages": list[str]    — text per page,
+            "ocr_pages": list[int] — 1-based pages whose text came from OCR,
         }
     """
     if not os.path.isfile(filepath):
@@ -62,6 +71,13 @@ def extract_pdf(filepath: str) -> dict:
 
     pages_text = []
     all_tables = []
+    ocr_pages = []
+
+    use_ocr = ocr.ocr_enabled() and transcriber is not None
+    # Hashing the file is wasted work on the overwhelming majority of decks,
+    # which have no page needing OCR at all, so it is deferred until one does.
+    doc_digest = None
+    cache = ocr.PageCache() if use_ocr else None
 
     with pdfplumber.open(filepath) as pdf:
         page_count = len(pdf.pages)
@@ -72,10 +88,24 @@ def extract_pdf(filepath: str) -> dict:
 
             # Extract text
             text = deduped.extract_text() or ""
+            tables = deduped.extract_tables()
+
+            if use_ocr and ocr.needs_ocr(page):
+                if doc_digest is None:
+                    doc_digest = ocr.document_digest(filepath)
+                transcribed = ocr.transcribe_page(page, doc_digest, transcriber, cache)
+                if transcribed:
+                    # OCR only ever ADDS to a page the text layer left empty --
+                    # `needs_ocr` fired, so there is nothing here to overwrite.
+                    # Never letting a transcription displace real embedded text
+                    # keeps the extracted document at least as trustworthy as
+                    # the PDF it came from.
+                    text = transcribed.text
+                    tables = transcribed.tables
+                    ocr_pages.append(i + 1)
+
             pages_text.append(text)
 
-            # Extract tables
-            tables = deduped.extract_tables()
             for table in tables:
                 cleaned = _clean_table(table)
                 if cleaned:
@@ -94,6 +124,7 @@ def extract_pdf(filepath: str) -> dict:
         "tables": all_tables,
         "page_count": page_count,
         "pages": pages_text,
+        "ocr_pages": ocr_pages,
     }
 
 

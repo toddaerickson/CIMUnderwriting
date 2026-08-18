@@ -36,11 +36,11 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-#: A page with fewer than this many characters has no usable text layer. It is
-#: a floor, not a threshold to tune: a genuine text page in this corpus carries
-#: 200-1300 characters, and a scanned page carries the handful that a stamp or
-#: a page number contributes.
-MIN_CHARS_FOR_TEXT_LAYER = 50
+#: Re-exported, not redefined. The trigger that ACTS on a thin text layer
+#: (`extract.ocr.needs_ocr`) and this metric REPORTING one must never drift to
+#: two different definitions of the same word, so there is one constant and
+#: this is an import of it.
+from extract.ocr import MIN_CHARS_FOR_TEXT_LAYER  # noqa: E402,F401
 
 
 def _metrics_for(path: str) -> dict:

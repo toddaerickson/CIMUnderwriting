@@ -275,7 +275,16 @@ cimweb/                    # Django project (settings, urls, wsgi)
 webapp/                    # Django app — views, models (Deal/AnalysisRun/ConfigOverride),
                            #   forms, services (deal folders), results, templates
 extract/
-  pdf_reader.py            # PDF text + table extraction (pdfplumber)
+  pdf_reader.py            # PDF text + table extraction (pdfplumber). `deduped_page` is
+                           #   THE way a page is read here — some CIMs fake bold by drawing
+                           #   a glyph run twice, which extract_text() interleaves
+  ocr.py                   # Fallback for pages with NO text layer. Everything but the
+                           #   transcription: trigger, render, cache, merge. The transcriber
+                           #   is INJECTED and the default returns nothing, so the repo and
+                           #   CI run inert by default (`CIM_OCR_ENABLED` gates it).
+                           #   A transcriber MUST return row-shaped tables — extract/tables.py
+                           #   assigns periods to columns by LIST INDEX and no x0/x1 geometry
+                           #   reaches the parser, so a text-only one yields zero FinancialLines
   parser.py                # Structured data extraction → CIMData dataclass
   location.py              # City/state/ZIP extraction — cover-page-first, broker-address
                            #   suppression, street-line trimming. Shared by parser.py and
