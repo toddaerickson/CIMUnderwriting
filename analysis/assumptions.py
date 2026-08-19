@@ -388,7 +388,13 @@ class Assumption:
 
     @property
     def chosen(self) -> bool:
-        """True when something other than the shipped model produced it."""
+        """True when a human or a fallback produced it — see `CHOSEN`.
+
+        NOT "anything but a shipped default": a measured figure is neither
+        a default nor chosen by anyone, and reading this as the former is
+        what put "all model defaults" over a run whose population came off
+        the Census API.
+        """
         return self.provenance in CHOSEN
 
 
@@ -657,6 +663,37 @@ def _add_cim_rows(reg, cim_data, cim_snapshot, enrichment_log=None):
     listed here: a field list would be a second answer to a question
     `extract.enrichment` already answers, and it goes stale the first time
     that module learns to measure one more thing.
+
+    **`edited` cannot see a field the CIM never filled.** It needs a `prior`
+    to differ FROM, so an analyst who types a `market_rent_psf` into an
+    empty box produced a number this filed as "stated in the CIM" — the
+    same false claim as the measured population, arriving from the third
+    side: not a figure read too generously, not a figure the document
+    lacks, but a figure a HUMAN supplied. `cim_overrides` is the witness,
+    and `_Register.deal_section` already treats presence there as "the
+    analyst set this" because `forms.build_overrides` emits deltas only.
+    That branch is checked BEFORE the measurement one so a human's entry
+    can never be attributed to a machine; the two cannot actually overlap
+    (enrichment writes into `cim_data` before `cim_json` is saved, so a
+    measured field HAS a prior and an analyst retyping the same number is
+    filtered out of the deltas), and the order is what makes that a
+    property rather than a coincidence.
+
+    **Tiers 3 and 4 are `fallback`, not `cim`.** Neither has a call site
+    today — `enrich_cim_data` passes `tier2_fn` and nothing else, pinned by
+    `test_no_call_site_supplies_tier_3_or_tier_4` — but the catch-all below
+    would have filed a comp-DB borrow or a static default as a CIM
+    statement, which is the WORSE half of the defect this function exists
+    to fix: a measurement is at least evidence about this property, and a
+    tier-4 default is invention. `fallback` is right for both without
+    widening decision 11's vocabulary — it is what `fills.py` already calls
+    a value the CIM never supplied — and being in `CHOSEN` it surfaces in
+    the memo's B.1 rather than hiding among a hundred and forty rows. A
+    tier this code does not know is treated the same way, deliberately:
+    `enrichment_log` is PERSISTED, so a row written by a future version
+    must degrade to an honest coarse answer rather than raise on a memo
+    regenerated for an old deal. `tier is None` is the resolver's "not
+    available" entry, whose value is None and never reaches here.
     """
     if cim_data is None:
         return
@@ -665,6 +702,7 @@ def _add_cim_rows(reg, cim_data, cim_snapshot, enrichment_log=None):
     _add_ocr_row(reg, cim_data)
     snapshot = cim_snapshot or {}
     log = enrichment_log or {}
+    entered = reg.deal_section("cim_overrides") or {}
     for field, label, unit in CIM_FIELDS:
         value = getattr(cim_data, field, None)
         if value is None or value == "":
@@ -672,20 +710,37 @@ def _add_cim_rows(reg, cim_data, cim_snapshot, enrichment_log=None):
         prior = snapshot.get(field)
         edited = bool(snapshot) and prior is not None and prior != value
         entry = origin_for(log, field, value)
+        tier = entry.get("tier") if entry is not None else None
         if edited:
             # An analyst correction wins over a measurement for the same
             # reason it wins over the CIM: they typed the number knowing
             # what it replaced. `origin_for` has already refused the stale
             # entry, so this branch cannot credit the Census with it.
             provenance, detail = DEAL, "corrected on the assumptions page"
-        elif entry is not None and entry.get("tier") == MEASURED_TIER:
+        elif field in entered and prior is None:
+            provenance, detail = DEAL, "entered on the assumptions page"
+        elif tier == MEASURED_TIER:
             provenance, detail = EXTERNAL, _measurement_detail(log, entry)
+        elif tier is not None and tier != 1:
+            provenance, detail = FALLBACK, _borrowed_detail(entry)
         else:
             provenance, detail = CIM, ""
         reg.add_row(Assumption(
             key=f"cim.{field}", label=label, group=G_DEAL, value=value,
             provenance=provenance, unit=unit,
             was=prior if edited else None, detail=detail))
+
+
+def _borrowed_detail(entry):
+    """Where a tier-3/4 value came from, in one clause.
+
+    Deliberately NOT `_measurement_detail`: that one names the ring's
+    centre, and a ring is a claim only a measurement of this property's
+    own location makes. A comp-DB average has no centre, and printing an
+    empty one would read as a measurement that forgot to say where.
+    """
+    source = str(entry.get("source") or "an unstated source").strip()
+    return f"not stated in the CIM; supplied from {source}"
 
 
 def _measurement_detail(log, entry):

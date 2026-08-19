@@ -103,7 +103,16 @@
       Assumption Register —
       <span class="text-slate-700">{{ register_counts.total }} assumption{{ register_counts.total|pluralize }}</span>
       <span class="font-normal text-slate-500">
-        ({% if register_counts.chosen %}{{ register_counts.chosen }} not from the model defaults{% else %}all model defaults{% endif %})
+        {% comment %}
+        Three states, not two. "all model defaults" was printed whenever
+        `chosen` was 0 — which is also true of a run whose population the
+        Census measured, since `external` is deliberately outside `CHOSEN`.
+        That put "all model defaults" over the one number Gate 1 turns on.
+        The measured count is named separately rather than folded into
+        `chosen`, because widening `chosen` would change what the table
+        below it promises.
+        {% endcomment %}
+        ({% if register_counts.chosen %}{{ register_counts.chosen }} entered or filled in{% if register_counts.external %}, {% endif %}{% endif %}{% if register_counts.external %}{{ register_counts.external }} measured externally{% endif %}{% if not register_counts.chosen and not register_counts.external %}model defaults and the CIM as stated{% endif %})
       </span>
     </summary>
 

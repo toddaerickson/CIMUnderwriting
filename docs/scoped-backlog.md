@@ -848,7 +848,7 @@ oracle" discipline applied to the whole pipeline.
    are implemented as a closed vocabulary with the model's own
    precedence, one row per assumption carrying the winner and `was`
    carrying what it displaced.
-   Three things the clause did not anticipate:
+   Four things the clause did not anticipate:
    - **It is Appendix B, not a rewrite of Appendix A.** B contains the
      fill log's rows (as provenance `fallback`), so "auditable in one
      place" holds — an auditor who reads only B has seen everything. A
@@ -865,6 +865,23 @@ oracle" discipline applied to the whole pipeline.
      `NOT_IN_REGISTER`, and the exemption is only honest because the cell
      that DID move is reported with the class and age band it was looked
      up by.
+   - **A SIXTH provenance, and the clause could not have named it.** The
+     five above all describe a value someone chose or a document stated;
+     `external` (2026-08-18, PR #101) describes one this system MEASURED —
+     the Census demographics `extract.enrichment` fetches, which land on
+     `cim_data` before the pristine snapshot is saved and were therefore
+     indistinguishable from an extracted figure. See CLAUDE.md decision 11
+     for why fixing it took three changes rather than one.
+     The follow-up (2026-08-19) is the part worth reading twice: a closed
+     vocabulary is only half a disclosure, because the SURFACES had
+     hard-coded the old partition. `chosen == 0` was rendered as "all
+     model defaults" in three places, on runs whose gate-critical
+     population had just been measured — so widening the vocabulary
+     without re-reading every sentence that counts it ships the same lie
+     one layer up. The same commit closed the `cim` catch-all's three
+     remaining exits (an analyst's entry into a field extraction left
+     empty, and resolver tiers 3 and 4), each of which had the register
+     attributing to the seller's document a number it never contained.
    Membership is CI-enforced rather than curated — see the acceptance
    note below.
 

@@ -351,3 +351,285 @@ def test_the_assumptions_page_labels_a_measured_demographic(tmp_path):
     by_label = {r["label"]: r["source"] for r in rows}
     assert by_label["3-Mile Population"] == "Census"
     assert by_label["Rentable SF"] == "CIM"
+
+
+# ── 6. The residuals #101 left open ─────────────────────────────────
+#
+# Four defects that survived the merge. The first two are the ones the
+# #101 session verified against merged `main` rather than trusting a PR
+# body; the last two are the catch-all's other exits, which no test had
+# ever walked. All four reproduce on 828005c.
+
+
+def test_an_analyst_value_in_a_field_the_cim_never_filled_is_not_cim():
+    """The third side of the same lie. `edited` needs a `prior` to differ
+    FROM, so a number typed into an empty box was filed as "stated in the
+    CIM" — a claim about a document that does not contain the figure at
+    all, on a value a human chose.
+
+    MUTATION: drop the `elif field in entered and prior is None` arm — the
+    row reverts to `cim` and leaves memo table B.1 entirely, which is the
+    table an IC reader checks to see what the analyst touched.
+    """
+    cim, snapshot = _measured_deal()
+    cim.market_rent_psf = 1.35          # extraction never found one
+    assert "market_rent_psf" not in snapshot
+
+    rows = A.collect(cim_data=cim, cim_snapshot=snapshot,
+                     enrichment_log=MEASURED_LOG,
+                     deal_overrides={"cim_overrides": {
+                         "market_rent_psf": 1.35}})
+
+    row = _row(rows, "cim.market_rent_psf")
+    assert row.provenance == A.DEAL
+    assert row.chosen                       # so it reaches B.1
+    assert row.was is None                  # it replaced nothing
+    assert "entered" in row.detail
+
+
+def test_a_field_the_analyst_never_touched_is_still_cim():
+    """The other direction, because the branch above keys on membership of
+    a delta dict and an over-broad witness would credit the analyst with
+    the whole document.
+
+    MUTATION: drop the `field in entered` half and test only `prior is
+    None` — every field extraction missed becomes an analyst entry.
+    """
+    cim, snapshot = _measured_deal()
+    cim.market_rent_psf = 1.35
+    rows = A.collect(cim_data=cim, cim_snapshot=snapshot,
+                     deal_overrides={"cim_overrides": {"nrsf": cim.nrsf}})
+    assert _row(rows, "cim.market_rent_psf").provenance == A.CIM
+
+
+def test_an_analyst_correction_still_reports_what_it_replaced():
+    """The pre-existing `edited` arm is checked FIRST and must keep its
+    `was`. A correction and a first entry are different facts and the new
+    arm must not swallow the one that carries the displaced value.
+
+    MUTATION: reorder the two `DEAL` arms — corrections lose `was`, and
+    the memo's "Replaced" column silently empties.
+    """
+    cim, snapshot = _measured_deal()
+    cim.nrsf = 62_000
+    rows = A.collect(cim_data=cim, cim_snapshot={**snapshot, "nrsf": 50_000},
+                     deal_overrides={"cim_overrides": {"nrsf": 62_000}})
+    row = _row(rows, "cim.nrsf")
+    assert row.provenance == A.DEAL
+    assert row.was == 50_000
+    assert "corrected" in row.detail
+
+
+@pytest.mark.parametrize("entry,expected_source", [
+    ({"tier": 3, "source": "comp_db", "value": 61_000}, "comp_db"),
+    ({"tier": 4, "source": "default", "value": 61_000}, "default"),
+])
+def test_a_borrowed_or_invented_value_is_not_reported_as_stated(
+        entry, expected_source):
+    """The catch-all's unwalked exits. A comp-DB average is about OTHER
+    properties and a tier-4 default is invention; both rendered "stated in
+    the CIM", which is a worse claim than the tier-2 mislabel #101 fixed —
+    a measurement is at least evidence about this property.
+
+    MUTATION: drop the `tier is not None and tier != 1` arm — both fall
+    through to `cim`, exactly as they did before this commit.
+    """
+    cim, snapshot = _measured_deal()
+    # Value and snapshot agree — a tier-3/4 fill lands on `cim_data`
+    # before `cim_json` is saved, exactly as a measurement does, which is
+    # why neither is distinguishable without the log.
+    cim.median_hhi_3mi = 61_000
+    snapshot = {**snapshot, "median_hhi_3mi": 61_000}
+    rows = A.collect(cim_data=cim, cim_snapshot=snapshot,
+                     enrichment_log={"median_hhi_3mi": entry})
+
+    row = _row(rows, "cim.median_hhi_3mi")
+    assert row.provenance == A.FALLBACK
+    assert row.chosen                       # surfaces in B.1, not buried
+    assert expected_source in row.detail
+
+
+def test_an_unknown_tier_degrades_rather_than_raising():
+    """`enrichment_log` is a PERSISTED column. A tier a future version
+    writes must not 500 the results page of a deal already in the
+    database — the same contract `from_dicts` keeps for unknown keys.
+    """
+    cim, snapshot = _measured_deal()
+    rows = A.collect(cim_data=cim, cim_snapshot=snapshot,
+                     enrichment_log={"median_hhi_3mi": {
+                         "tier": 9, "source": "some future tier",
+                         "value": 64_300.0}})
+    assert _row(rows, "cim.median_hhi_3mi").provenance == A.FALLBACK
+
+
+def test_a_tier_none_entry_is_not_mistaken_for_a_borrowed_value():
+    """The resolver stamps `{"tier": None}` for "not available". Its value
+    is None so it never reaches a row — but the arm above tests `tier is
+    not None` precisely so a hand-built or future log carrying a value
+    beside a null tier is not read as tier 3.
+    """
+    cim, snapshot = _measured_deal()
+    rows = A.collect(cim_data=cim, cim_snapshot=snapshot,
+                     enrichment_log={"nrsf": {
+                         "tier": None, "source": "not available",
+                         "value": cim.nrsf}})
+    assert _row(rows, "cim.nrsf").provenance == A.CIM
+
+
+def test_no_call_site_supplies_tier_3_or_tier_4(monkeypatch):
+    """Why the arm above is unreachable in production TODAY, pinned so
+    that stops being true loudly. `enrich_cim_data` passes `tier2_fn` and
+    nothing else; the day someone wires the comp DB, this test fails and
+    whoever wired it has to decide what the register should say — which is
+    the decision that was silently made wrong before.
+    """
+    from extract import enrichment
+
+    seen = []
+    real = enrichment.DataResolver.resolve
+
+    def spy(self, field_name, tier1_value, **kw):
+        seen.append(set(k for k, v in kw.items() if v is not None))
+        return real(self, field_name, tier1_value, **kw)
+
+    monkeypatch.setattr(enrichment.DataResolver, "resolve", spy)
+    cim, _ = _measured_deal()
+    enrichment.enrich_cim_data(cim, census_api_key=None)
+
+    assert seen, "enrich_cim_data resolved no fields — the spy missed"
+    supplied = set().union(*seen)
+    assert supplied <= {"tier2_fn"}, (
+        f"a call site now supplies {supplied - {'tier2_fn'}}; decide what "
+        f"provenance it should carry in analysis.assumptions._add_cim_rows")
+
+
+def test_resolve_returns_a_populated_tier_1_value_untouched():
+    """The precondition `merge_source_logs` rests on. Its no-demotion rule
+    is sound only because a second pass NEVER re-measures a field that is
+    already filled — if `resolve` ever consulted tier 2 over a populated
+    tier 1, the stored measurement and the value in use could diverge with
+    nothing to detect it. `engine`'s own docstring describes re-enrichment
+    as "a second chance at geocoding", an intent one step from breaking
+    this.
+
+    MUTATION: move the tier-1 early return below the tier-2 block.
+    """
+    from extract.enrichment import DataResolver
+
+    calls = []
+    log = {}
+    out = DataResolver(log).resolve(
+        "population_3mi", tier1_value=87_450,
+        tier2_fn=lambda: calls.append(1) or 99_999)
+
+    assert out == 87_450
+    assert calls == [], "tier 2 was consulted over a populated tier 1"
+    assert log["population_3mi"]["tier"] == 1
+
+
+# ── 7. The surfaces that called a measured run all-defaults ─────────
+
+
+def _register_text(rows):
+    """Appendix B alone, rendered from hand-built rows.
+
+    Direct rather than through `_run`, because the defect needs
+    `chosen == 0` WITH a measurement present and every pipeline fixture
+    fills at least one value from a default. Reaching that state through a
+    real run would mean building a CIM that states everything, which tests
+    the fixture rather than the renderer.
+    """
+    from docx import Document
+
+    from output.memo_writer import _add_assumption_register
+
+    doc = Document()
+    _add_assumption_register(doc, A.to_dicts(rows))
+    parts = [p.text for p in doc.paragraphs]
+    for table in doc.tables:
+        for r in table.rows:
+            parts += [c.text for c in r.cells]
+    return "\n".join(parts)
+
+
+def _measured_only_rows():
+    """One measured figure, one shipped default, nothing chosen."""
+    return [
+        A.Assumption(key="cim.population_3mi", label="3-Mile Population",
+                     group=A.G_DEAL, value=87_450, provenance=A.EXTERNAL,
+                     detail="Census API — ring centred on the ZCTA centroid"),
+        A.Assumption(key="GATES.min_irr_5yr", label="Minimum IRR",
+                     group=A.G_RETURNS, value=0.10, provenance=A.CONFIG),
+    ]
+
+
+def test_a_measured_run_is_not_described_as_all_shipped_defaults():
+    """The memo half of the residual. With `external` outside `CHOSEN` —
+    correct — `chosen` is 0 on a run whose population came off the Census
+    API, and B.1's empty branch then told an IC reader that every input
+    came from the CIM as stated. It did not.
+
+    MUTATION: restore the single unconditional empty-B.1 sentence.
+    """
+    text = _register_text(_measured_only_rows())
+
+    assert "every input came from the CIM as stated" not in text
+    assert "apart from the measured figures noted above" in text
+
+
+def test_the_appendix_headline_does_not_claim_a_measurement_is_a_default():
+    """The lead sentence counted `chosen` and called it "came from
+    something other than the model's shipped defaults", which reads as a
+    complete partition of the register. It is not one: a measurement is
+    neither a default nor chosen, so at `chosen == 0` the sentence stated
+    something false about the number Gate 1 turns on.
+
+    MUTATION: revert the headline wording — "0 came from something other
+    than the model's shipped defaults" reappears above a measured row.
+    """
+    text = _register_text(_measured_only_rows())
+
+    assert "came from something other than the model's shipped defaults" \
+        not in text
+    assert "came from a human or a fallback" in text
+
+
+def test_the_measurement_gets_its_own_sentence_like_a_transcribed_page():
+    """#100's shape, reused: a fact that is not a chosen assumption but
+    must not be reachable only by reading B.2 in full. It names the
+    figures, so a reader knows WHICH number was measured.
+
+    MUTATION: drop the note paragraph — the disclosure survives only in
+    B.2's hundred-and-forty-row table.
+    """
+    text = _register_text(_measured_only_rows())
+
+    assert "Note on external data" in text
+    assert "3-Mile Population" in text
+    assert "measured by this system from public data" in text
+
+
+def test_the_note_is_absent_when_nothing_was_measured():
+    """It is rendered only when it happened — the same contract the
+    transcription note keeps. A standing "nothing was measured" sentence
+    in every memo is noise that trains a reader to skip the paragraph.
+    """
+    rows = [r for r in _measured_only_rows() if r.provenance != A.EXTERNAL]
+    text = _register_text(rows)
+
+    assert "Note on external data" not in text
+    assert "every input came from the CIM as stated" in text
+
+
+def test_the_results_page_counts_a_measurement_separately(tmp_path):
+    """The web surface. `_tab_summary.html` printed "all model defaults"
+    off `chosen == 0`; it needs `external` in the same counts dict to say
+    anything else, and `summarize` is where both come from.
+
+    MUTATION: drop `external` from `PROVENANCE_LABELS` — `summarize` stops
+    emitting the key and the template silently falls back to the
+    all-defaults branch, since a missing key is falsy in a Django template.
+    """
+    counts = A.summarize(_measured_only_rows())
+    assert counts["chosen"] == 0
+    assert counts["external"] == 1

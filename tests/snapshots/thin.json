@@ -4924,8 +4924,8 @@
         "Appendix A. Assumptions Filled From Defaults",
         "The CIM did not state the inputs below. The model used the value in the second column, from the source in the third \u2014 not a figure from this deal. Each one moves the returns in section 6, so an assumption an IC reader disagrees with is an assumption to change on the assumptions page and re-run, not a number to discount by eye.",
         "Appendix B. Assumption Register",
-        "Every number this analysis used, with its source. Of 144 assumptions, 10 came from something other than the model's shipped defaults: 0 entered for this deal, 0 from a dated settings override, and 10 filled in because the CIM did not state a value. Those are listed first. The full register follows \u2014 nothing is omitted from it, so an assumption absent below is an assumption this run did not use.",
-        "B.1 Assumptions not taken from the model defaults",
+        "Every number this analysis used, with its source. Of 144 assumptions, 10 came from a human or a fallback rather than from the CIM or the model's shipped defaults: 0 entered for this deal, 0 from a dated settings override, and 10 filled in because the CIM did not state a value. Those are listed first. The full register follows \u2014 nothing is omitted from it, so an assumption absent below is an assumption this run did not use.",
+        "B.1 Assumptions a human entered or a fallback supplied",
         "B.2 Full register"
       ],
       "tables": [
