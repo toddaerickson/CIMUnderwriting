@@ -23,6 +23,8 @@ the hard way: a register that records perfectly and renders nowhere
 delivers nothing). Each names the deliberate break that turns it red.
 """
 
+import pathlib
+
 import pytest
 
 from analysis import assumptions as A
@@ -633,3 +635,41 @@ def test_the_results_page_counts_a_measurement_separately(tmp_path):
     counts = A.summarize(_measured_only_rows())
     assert counts["chosen"] == 0
     assert counts["external"] == 1
+
+
+@pytest.mark.parametrize("counts,expected", [
+    ({"chosen": 4, "external": 0}, "4 entered or filled in"),
+    ({"chosen": 0, "external": 2}, "2 measured externally"),
+    ({"chosen": 4, "external": 2},
+     "4 entered or filled in, 2 measured externally"),
+    ({"chosen": 0, "external": 0}, "model defaults and the CIM as stated"),
+    # A run stored before `external` existed. Its counts dict has no such
+    # key and a missing key is falsy in a Django template, so this must
+    # land on the neutral phrase rather than reintroducing the claim.
+    ({"chosen": 0}, "model defaults and the CIM as stated"),
+])
+def test_the_summary_panel_never_calls_a_measured_run_all_defaults(
+        counts, expected):
+    """The results-page half, which `summarize` alone cannot pin: the
+    template is where "all model defaults" was actually written, and a
+    revert there would fail no test without this one.
+
+    The fragment is extracted rather than the whole tab rendered, because
+    the tab needs a full run context and the branch under test needs only
+    two integers.
+
+    MUTATION: restore the two-way `{% else %}all model defaults{% endif %}`
+    — the second and third cases print it over a measured population.
+    """
+    from django.template import Context, Template
+
+    tab = (pathlib.Path("webapp/templates/webapp") /
+           "_tab_summary.html").read_text()
+    start = tab.index("({% if register_counts.chosen %}")
+    fragment = tab[start:tab.index("\n", start)]
+
+    out = Template(fragment).render(
+        Context({"register_counts": counts})).strip()
+
+    assert out == f"({expected})"
+    assert "all model defaults" not in out
