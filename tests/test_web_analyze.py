@@ -996,3 +996,97 @@ def test_assumptions_preview_degrades_on_unexpected_error(client, django_user_mo
     # a previous successful compute.
     assert re.search(r'id="exp-used-property_tax"[^>]*>([^<]*)<',
                      html).group(1) == "&mdash;"
+
+
+# ── Re-extraction must not leave a superseded value behind ──────────
+# The six denormalized columns are a copy of `cim_json`, which the worker
+# replaces wholesale. `if cim.<field>:` kept the OLD value whenever the
+# fresh parse declined to answer — and the parsers now decline routinely,
+# which is the whole point of MIN_PLAUSIBLE_ASKING_PRICE (#83). Deal 13
+# carries a $115 asking price parsed before that floor existed.
+
+def _refusing_extract(monkeypatch, **fields):
+    """An extraction that succeeds but yields None for `fields`."""
+    from engine import AnalysisResult
+    from extract.parser import CIMData
+
+    def _fake(path, overrides=None, progress=None):
+        cim = CIMData()
+        cim.property_name = "Expo Storage"
+        cim.city, cim.state, cim.nrsf = "Belton", "TX", 45000.0
+        cim.asking_price, cim.acreage = 3_500_000.0, 5.2
+        for k, v in fields.items():
+            setattr(cim, k, v)
+        r = AnalysisResult(pdf_path=path, cim_data=cim)
+        r.extraction_report = cim.extraction_report()
+        return r
+
+    monkeypatch.setattr("webapp.services.extract_pdf_data", _fake)
+
+
+@pytest.mark.django_db
+def test_a_refused_asking_price_clears_the_stale_one(deals_dir, monkeypatch):
+    """The deal-13 shape. The pipeline list reads this column, so keeping
+    $115 while the snapshot went blank made two surfaces disagree about
+    one deal — and re-extracting was the act that produced it."""
+    from webapp import services
+    deal = _make_upload_deal(deals_dir)
+    deal.asking_price = 115.0          # parsed before the floor existed
+    deal.save()
+
+    _refusing_extract(monkeypatch, asking_price=None)
+    services.start_extract(deal)
+    deal.refresh_from_db()
+
+    assert deal.asking_price is None
+    assert deal.cim_json["asking_price"] is None   # column tracks snapshot
+
+
+@pytest.mark.django_db
+def test_a_refused_size_clears_the_stale_one(deals_dir, monkeypatch):
+    from webapp import services
+    deal = _make_upload_deal(deals_dir)
+    deal.nrsf, deal.acreage = 9_592.0, 3.0
+    deal.save()
+
+    _refusing_extract(monkeypatch, nrsf=None, acreage=None, city="", state="")
+    services.start_extract(deal)
+    deal.refresh_from_db()
+
+    assert deal.nrsf is None and deal.acreage is None
+    assert deal.city == "" and deal.state == ""
+
+
+@pytest.mark.django_db
+def test_a_refused_property_name_keeps_the_filename_fallback(deals_dir,
+                                                            monkeypatch):
+    """The one documented exception. Every other column here is
+    parser-only, so None means "nobody knows"; this one is seeded at
+    upload from the PDF's filename stem, and blanking it would leave the
+    deal nameless — `Deal.__str__` returns it."""
+    from webapp import services
+    deal = _make_upload_deal(deals_dir)
+    assert deal.property_name == "expo"
+
+    _refusing_extract(monkeypatch, property_name=None)
+    services.start_extract(deal)
+    deal.refresh_from_db()
+
+    assert deal.property_name == "expo"
+
+
+@pytest.mark.django_db
+def test_the_deal_page_offers_re_extraction_after_a_successful_parse(
+        client, operator, deals_dir, fake_extract):
+    """`extract-retry` existed but was only rendered inside
+    _extract_status.html behind `{% if failed %}` — so every parser fix
+    was unreachable for the deals that most needed re-reading."""
+    from webapp import services
+    deal = _make_upload_deal(deals_dir)
+    services.start_extract(deal)
+    deal.refresh_from_db()
+    assert deal.extract_status == "done"
+
+    content = client.get(f"/deals/{deal.pk}/").content.decode()
+    assert f"/deals/{deal.pk}/extract-retry/" in content
+    assert "Re-extract" in content

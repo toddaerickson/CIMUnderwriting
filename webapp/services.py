@@ -490,18 +490,44 @@ def _extract_worker(deal_pk, pdf_path, stamp):
             "extract_error": "",
             "asset_type": detect_asset_type(cim),
         }
+        # These six columns are a DENORMALIZED copy of `cim_json`, which the
+        # line above has just replaced wholesale. They must track it, including
+        # when the fresh parse yields nothing.
+        #
+        # `if cim.<field>:` looked like it was protecting good data from a
+        # thin re-parse. On a RE-extraction it does the opposite. The parsers
+        # have since learned to REFUSE an implausible reading rather than
+        # invent one — `MIN_PLAUSIBLE_ASKING_PRICE` (#83) is why
+        # `_parse_pricing` can no longer emit the $115 asking price sitting on
+        # deal 13 — and a refusal arrives here as None. The guard then kept
+        # the superseded value on the column while the snapshot beside it went
+        # blank, so the pipeline list showed $115 and the assumptions page
+        # showed nothing. Two surfaces disagreeing about one deal is worse
+        # than the single wrong number it replaced, and it is unfixable from
+        # the UI, since re-extracting is the very act that produces it.
+        #
+        # A FAILED extraction never reaches here at all — it is the `except`
+        # branch below, which writes only extract_status/extract_error. So
+        # None in this branch means the parser looked and declined to answer,
+        # and recording that is the honest write.
+        #
+        # Analyst corrections are untouched: they live in
+        # `Deal.assumption_overrides["cim_overrides"]`, a separate field this
+        # worker never writes, and they merge on top of the snapshot.
+        # `property_name` is the ONE exception, and it is not an oversight.
+        # Every other field here is parser-only, so None means "nobody
+        # knows" and writing it is honest. This column is seeded at upload
+        # from the PDF's filename stem (see `create_deal_from_upload`), so
+        # a blank would replace a real, deliberately-chosen fallback with
+        # nothing and leave the deal nameless in the pipeline — `__str__`
+        # returns this field.
         if cim.property_name:
             updates["property_name"] = cim.property_name[:200]
-        if cim.city:
-            updates["city"] = cim.city[:100]
-        if cim.state:
-            updates["state"] = cim.state[:2].upper()
-        if cim.nrsf:
-            updates["nrsf"] = cim.nrsf
-        if cim.acreage:
-            updates["acreage"] = cim.acreage
-        if cim.asking_price:
-            updates["asking_price"] = cim.asking_price
+        updates["city"] = (cim.city or "")[:100]
+        updates["state"] = (cim.state or "")[:2].upper()
+        updates["nrsf"] = cim.nrsf
+        updates["acreage"] = cim.acreage
+        updates["asking_price"] = cim.asking_price
         sig = getattr(cim, "portfolio_signal", None) or {}
         updates["portfolio_suspect"] = bool(sig.get("is_portfolio"))
         updates["portfolio_evidence"] = sig.get("evidence", [])
