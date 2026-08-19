@@ -1555,3 +1555,37 @@ def test_the_global_row_is_still_reported_when_nothing_supersedes_it(
     run = _start_run(deal)
 
     assert run.applied_overrides["config_skipped"] == ["SOLVER_TARGET_IRR"]
+
+
+@pytest.mark.django_db
+def test_comps_count_follows_the_filters(client, operator, comp_db):
+    """The header used to read the UNFILTERED total beside a filtered
+    table — telling an analyst who had narrowed the set to one row that
+    there were three, on the one number they cannot check against the
+    rows in front of them."""
+    assert "3 comps" in client.get("/comps/").content.decode()
+
+    content = client.get("/comps/?state=CO").content.decode()
+    assert "1 comp of 3" in content
+    assert "3 comps" not in content
+
+    content = client.get("/comps/?state=TX").content.decode()
+    assert "2 comps of 3" in content
+
+
+@pytest.mark.django_db
+def test_comps_table_formats_money_and_dates(client, operator, comp_db):
+    """Watch-list items: thousands separators, accounting parentheses for
+    a negative, and no raw ISO timestamp with microseconds."""
+    import sqlite3
+    with sqlite3.connect(comp_db.db_path) as conn:
+        conn.execute(
+            "INSERT INTO properties (property_name, state, nrsf,"
+            " adjusted_noi, analysis_date, pdf_filename)"
+            " VALUES ('Underwater','TX',30000,-46382,"
+            "'2026-04-05T21:19:52.642287','u.pdf')")
+    content = client.get("/comps/").content.decode()
+    assert "$250,000" in content          # was $250000
+    assert "($46,382)" in content         # was $-46382
+    assert "2026-04-05" in content
+    assert "21:19:52.642287" not in content

@@ -89,7 +89,7 @@
          class="fixed inset-0 bg-black/40 z-30 hidden md:hidden"
          onclick="document.getElementById('sidebar').classList.add('-translate-x-full'); this.classList.add('hidden')"></div>
 
-    <main class="flex-1 px-2 py-3 md:px-4 pt-14 md:pt-3">
+    <main class="flex-1 min-w-0 px-2 py-3 md:px-4 pt-14 md:pt-3">
       {% if messages %}
         <div class="max-w-3xl mb-4 space-y-2">
           {% for m in messages %}

@@ -1,10 +1,11 @@
 {% extends "base.html" %}
+{% load humanize %}
 {% block title %}Comps{% endblock %}
 {% block content %}
 <div class="max-w-7xl">
   <div class="flex items-baseline gap-x-3 mb-3">
     <h1 class="font-display text-xl font-semibold">Comp Database</h1>
-    <span class="text-sm text-slate-500">{{ total }} comp{{ total|pluralize }}</span>
+    <span class="text-sm text-slate-500">{{ total }} comp{{ total|pluralize }}{% if total != unfiltered_total %} of {{ unfiltered_total }}{% endif %}</span>
   </div>
 
   <div class="bg-white border border-slate-200 rounded-lg">
@@ -48,13 +49,13 @@
             <td class="py-1.5 pl-3 pr-3 font-medium">{{ r.property_name }}</td>
             <td class="py-1.5 pr-3">{{ r.city|default:"" }}</td>
             <td class="py-1.5 pr-3">{{ r.state|default:"" }}</td>
-            <td class="py-1.5 pr-3 text-right">{{ r.nrsf|floatformat:0 }}</td>
+            <td class="py-1.5 pr-3 text-right">{{ r.nrsf|floatformat:0|intcomma }}</td>
             <td class="py-1.5 pr-3 text-right">{{ r.total_units|default_if_none:"" }}</td>
             <td class="py-1.5 pr-3 text-right">{% if r.occupancy is not None %}{% widthratio r.occupancy 1 100 %}%{% endif %}</td>
-            <td class="py-1.5 pr-3 text-right">{% if r.adjusted_noi is not None %}${{ r.adjusted_noi|floatformat:0 }}{% endif %}</td>
+            <td class="py-1.5 pr-3 text-right tabular-nums">{{ r.display_noi }}</td>
             <td class="py-1.5 pr-3 text-right">{{ r.revenue_per_sf|floatformat:2 }}</td>
             <td class="py-1.5 pr-3 text-right">{{ r.noi_per_sf|floatformat:2 }}</td>
-            <td class="py-1.5 pr-3 whitespace-nowrap">{{ r.analysis_date|default:"" }}</td>
+            <td class="py-1.5 pr-3 whitespace-nowrap">{{ r.display_date }}</td>
             <td class="py-1.5 pr-3 text-slate-500 truncate max-w-[16rem]" title="{{ r.pdf_filename }}">{{ r.pdf_filename }}</td>
           </tr>
           {% empty %}

@@ -47,9 +47,30 @@ def sf_per_capita_inputs(cim_data):
 
 def sf_per_capita(cim_data):
     """(value, problem): value None when inputs missing/invalid; problem
-    is the human reason ("" when simply not yet entered)."""
-    _, _, _, _, sf_pc, input_problem = sf_per_capita_inputs(cim_data)
-    return sf_pc, input_problem
+    is the human reason, and is never blank when the value is None.
+
+    Gate 5 reads sf_per_capita_inputs() directly and writes its own TBD
+    note naming the unlocking fields; this wrapper feeds the assumptions
+    strip, whose only affordance is the dash's tooltip. That tooltip used
+    to be the empty string, so an analyst looking at a `—` beside a
+    populated NRSF and population had nothing telling them the formula
+    also needs competitive supply — and would reasonably read the dash as
+    a failure to compute rather than as an input not yet entered.
+    """
+    comp_sf, _, _, pop, sf_pc, input_problem = sf_per_capita_inputs(cim_data)
+    if sf_pc is not None or input_problem:
+        return sf_pc, input_problem
+    missing = []
+    if comp_sf is None:
+        missing.append("competitive supply SF within 3 miles")
+    if pop is None:
+        missing.append("3-mile population")
+    if not missing:
+        return None, ""
+    return None, ("Not computable yet — SF/capita is (competitive + "
+                  "pipeline + subject NRSF) / 3-mile population, and this "
+                  "deal has not been given " + " or ".join(missing) +
+                  ". Enter it under Size & Demographics.")
 
 
 def evaluate_gates(cim_data, scenario_results=None, va_results=None,

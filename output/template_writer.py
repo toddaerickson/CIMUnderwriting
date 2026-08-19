@@ -468,7 +468,20 @@ def generate_template(
 # ── Template shape ───────────────────────────────────────────────────
 
 class TemplateShapeError(RuntimeError):
-    """The workbook is not the version this writer's cell map describes."""
+    """The workbook is not the version this writer's cell map describes.
+
+    Two audiences, so two strings. `str(e)` is what `engine` appends to
+    `result.errors`, which renders verbatim in the results-page warning
+    banner — so it says what happened and who fixes it, in a sentence an
+    analyst can act on. `detail` carries the cell-by-cell expected/found
+    diagnostic and the recalibration pointer; that belongs in the log and
+    in front of whoever edits the cell map, not on a page whose reader
+    cannot do anything with a Python dict literal or a source path.
+    """
+
+    def __init__(self, message, detail=""):
+        super().__init__(message)
+        self.detail = detail
 
 
 def _assert_template_shape(ws):
@@ -491,12 +504,17 @@ def _assert_template_shape(ws):
              if ws[address].value != expected}
     if wrong:
         raise TemplateShapeError(
-            "Template does not match the v1.3 cell map — refusing to "
-            f"write. Expected {_SHAPE_MARKERS}, found {wrong}. If the "
-            "template was upgraded, output/template_writer.py must be "
-            "recalibrated against it (see the module docstring); if it "
-            "was downgraded to v1.2, restore v1.3."
-        )
+            "the underwriting template on the server is not the v1.3 "
+            "workbook this model writes into, so no workbook was produced "
+            "rather than one with values in the wrong cells. Every other "
+            "output on this run is unaffected. Ask the operator to restore "
+            "the v1.3 template.",
+            detail=("Template does not match the v1.3 cell map — refusing "
+                    f"to write. Expected {_SHAPE_MARKERS}, found {wrong}. "
+                    "If the template was upgraded, output/template_writer.py "
+                    "must be recalibrated against it (see the module "
+                    "docstring); if it was downgraded to v1.2, restore "
+                    "v1.3."))
 
 
 # ── Resolved-assumption helpers ──────────────────────────────────────
