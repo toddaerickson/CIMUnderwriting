@@ -5,8 +5,8 @@
     "blocking_failed": 0,
     "failed": 5,
     "passed": 8,
-    "skipped": 3,
-    "total": 16
+    "skipped": 4,
+    "total": 17
   },
   "checks": [
     [
@@ -68,6 +68,11 @@
       "price_vs_replacement",
       "advisory",
       "fail"
+    ],
+    [
+      "revenue_vs_egr_plausible",
+      "blocking",
+      "skipped"
     ],
     [
       "sources_uses_ties",
@@ -924,6 +929,9 @@
           "v": "TTM annualization basis"
         },
         "A18": {
+          "v": "Total revenue vs EGR is the right order of magnitude"
+        },
+        "A19": {
           "v": "Unit mix rents vs GPR"
         },
         "A2": {
@@ -988,6 +996,9 @@
           "v": "Advisory"
         },
         "B18": {
+          "v": "Blocking"
+        },
+        "B19": {
           "v": "Advisory"
         },
         "B2": {
@@ -1054,6 +1065,9 @@
         "C18": {
           "v": "SKIPPED"
         },
+        "C19": {
+          "v": "SKIPPED"
+        },
         "C2": {
           "v": "Status"
         },
@@ -1116,6 +1130,9 @@
           "v": "The CIM does not state how many months of actuals its TTM figures cover."
         },
         "D18": {
+          "v": "Total revenue or EGR not present."
+        },
+        "D19": {
           "v": "No unit mix or no stated GPR \u2014 reconciliation not testable."
         },
         "D2": {
@@ -1180,6 +1197,9 @@
           "v": "ttm_months"
         },
         "E18": {
+          "v": "ttm_total_revenue, ttm_egr"
+        },
+        "E19": {
           "v": "unit_mix, ttm_gpr"
         },
         "E2": {
@@ -4794,7 +4814,7 @@
         "1. Investment Summary",
         "Occupancy check: the CIM quotes physical occupancy only. Request economic occupancy (collected rent vs gross potential at street rates) before proceeding \u2014 a broker quoting a single occupancy figure is almost always quoting physical, and the spread between the two is where CIMs hide weakness.",
         "Model Checks",
-        "5 of 16 integrity checks flagged. Blocking findings were accepted by the analyst with the discrepancy recorded; advisory findings do not stop the model but change how its outputs should be read.",
+        "5 of 17 integrity checks flagged. Blocking findings were accepted by the analyst with the discrepancy recorded; advisory findings do not stop the model but change how its outputs should be read.",
         "10 model inputs were not stated in the CIM and were filled from a default or a benchmark. Every one is listed with its source in Appendix A; the returns below are computed on them.",
         "Screening Gates",
         "Returns Snapshot (Unlevered)",

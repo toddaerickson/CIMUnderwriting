@@ -1364,7 +1364,10 @@ def test_rerun_proceeds_once_the_finding_is_accepted(
     deal.assumption_overrides = {"accepted_checks": [
         {"id": "income_identity", "message": "waived"},
         {"id": "noi_per_nrsf_plausible", "message": "waived"},
-        {"id": "entry_cap_plausible", "message": "waived"}]}
+        {"id": "entry_cap_plausible", "message": "waived"},
+        # The 10x revenue line trips the revenue/EGR tripwire too — the
+        # one finding here that names the field rather than a symptom.
+        {"id": "revenue_vs_egr_plausible", "message": "waived"}]}
     deal.save()
     resp = client.post(f"/deals/{deal.pk}/run/")
     assert resp.status_code == 302

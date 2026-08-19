@@ -108,6 +108,28 @@ EXIT_CAP_DERIVATION_EPSILON = 1e-9
 PLAUSIBLE_NOI_PER_NRSF = (1.00, 30.00)
 PLAUSIBLE_ENTRY_CAP = (0.02, 0.20)
 
+# Total Revenue vs EGR. The accounting chain is
+# `GPR - vacancy - concessions = EGR` and `EGR + other income = Total
+# Revenue`, so the two are the same rent one small additive term apart;
+# real deals sit at 1.00-1.20. This is a units tripwire, not a band on
+# other income.
+#
+# The high side is 3.00 and not tighter because a broker who labels a
+# GROSS line "Total Revenue" beside a netted "EGR" produces a ratio of
+# 1/economic occupancy honestly: at 2.00 this would refuse every deal
+# under 50% economic occupancy, and depressed-occupancy assets are the
+# fund's target profile. It is not wider because every mis-scale seen
+# misses by at least 4x (12x for a monthly line read as annual, 10x for
+# a thousands column or a decimal shift), so 3.00 still catches all of
+# them while 4.00 would not.
+#
+# The low side is 0.33 rather than the accounting bound of 1.00 because
+# a revenue line slightly UNDER EGR is a classification question - bad
+# debt netted out of one line and not the other - and refusing that
+# would be refusing a deal for the wrong reason. Any lower and the
+# mirror defect (EGR itself mis-scaled 10x upward) stops being caught.
+PLAUSIBLE_REVENUE_TO_EGR = (0.33, 3.00)
+
 
 def noi_recon_tolerance(revenue: float) -> float:
     """Income-identity tolerance. Canonical definition — webapp.forms
@@ -399,6 +421,45 @@ def _egr_le_gpr(inp):
                   f"GPR net of vacancy and concessions, so it cannot be "
                   f"larger — other income is a separate line and is not "
                   f"part of EGR.", values)
+
+
+def _revenue_vs_egr_plausible(inp):
+    rev, egr = inp.ttm_total_revenue, inp.ttm_egr
+    values = {"ttm_total_revenue": rev, "ttm_egr": egr}
+    # `not egr` and not `is None`: a zero divisor yields no ratio to
+    # judge. The numerator keeps the `is None` test decision 9 asks for,
+    # so a stated $0 revenue beside real EGR still FAILs.
+    if rev is None or not egr:
+        return (SKIPPED, "Total revenue or EGR not present.", values)
+    ratio = rev / egr
+    values["revenue_to_egr"] = ratio
+    low, high = PLAUSIBLE_REVENUE_TO_EGR
+    if low <= ratio <= high:
+        return (PASS, f"Total revenue ${rev:,.0f} is {ratio:.2f}x EGR "
+                      f"${egr:,.0f}, the expected order of magnitude.",
+                values)
+    if ratio > high:
+        return (FAIL, f"RE-READ TOTAL REVENUE FIRST. Total revenue "
+                      f"${rev:,.0f} is {ratio:.2f}x Effective Gross "
+                      f"Revenue ${egr:,.0f}. Total revenue is EGR plus "
+                      f"other income, so a multiple this large is a units "
+                      f"error, not a big ancillary line. Total revenue is "
+                      f"the figure to re-read: EGR is corroborated by GPR "
+                      f"and the unit mix, total revenue by nothing, and it "
+                      f"is what the model prices on - NOI, the entry cap, "
+                      f"every IRR and the max offer are all inflated by "
+                      f"roughly this factor. Usual causes: a column stated "
+                      f"in thousands, a decimal shift, a monthly line read "
+                      f"as annual, or a portfolio total beside one "
+                      f"property's EGR.", values)
+    return (FAIL, f"RE-READ EFFECTIVE GROSS REVENUE FIRST. Total revenue "
+                  f"${rev:,.0f} is only {ratio:.2f}x EGR ${egr:,.0f}. Total "
+                  f"revenue is EGR plus other income, so it cannot sit this "
+                  f"far below EGR. EGR is the figure to re-read: total "
+                  f"revenue is the larger of the two by construction, so a "
+                  f"ratio under {low:.2f} points at EGR being overstated - "
+                  f"typically a gross potential rent line entered as EGR, or "
+                  f"a units error in the EGR line itself.", values)
 
 
 def _opex_ratio_band(inp):
@@ -917,6 +978,9 @@ CHECKS = (
               "physical_occupancy, economic_occupancy", _occupancy_sanity),
     CheckSpec("egr_le_gpr", "EGR ≤ GPR", BLOCKING,
               "ttm_gpr, ttm_egr", _egr_le_gpr),
+    CheckSpec("revenue_vs_egr_plausible", "Total revenue vs EGR is the "
+              "right order of magnitude", BLOCKING,
+              "ttm_total_revenue, ttm_egr", _revenue_vs_egr_plausible),
     CheckSpec("noi_per_nrsf_plausible", "NOI per NRSF is the right order "
               "of magnitude", BLOCKING, "ttm_noi, nrsf",
               _noi_per_nrsf_plausible),

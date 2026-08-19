@@ -131,9 +131,15 @@ def test_egr_le_gpr_skips_when_absent():
 # asking price, producing a 125.7% base IRR that passed the 10% IRR gate
 # with every other check individually satisfied.
 #
-# Two checks rather than one because they fail INDEPENDENTLY — the NOI
-# could be wrong, or the SF, or the price — and knowing which pair
-# disagrees is most of the diagnosis. Abilene happens to trip both.
+# Three checks rather than one because they fail INDEPENDENTLY — the NOI
+# could be wrong, or the SF, or the price, or the revenue line — and
+# knowing which pair disagrees is most of the diagnosis. Abilene happens
+# to trip all three.
+#
+# The third, `revenue_vs_egr_plausible`, differs from the other two in
+# what it names. They test DERIVED quantities (NOI/SF, NOI/price), so
+# they say some input is wrong without saying which; it compares two
+# stated inputs to each other, so its message can name a field.
 
 ABILENE = {"ttm_noi": 4_320_000.0, "nrsf": 48_762.0,
            "asking_price": 3_500_000.0}
@@ -734,7 +740,8 @@ def test_memo_and_excel_are_unchanged_when_no_checks_are_supplied(tmp_path):
 # line that drives every return in the model.
 ABILENE_10X_REVENUE = {
     "ttm_total_revenue": 4_410_000.0, "ttm_total_expenses": 200_050.0,
-    "ttm_noi": 241_491.0, "nrsf": 48_762.0, "asking_price": 3_500_000.0}
+    "ttm_noi": 241_491.0, "nrsf": 48_762.0, "asking_price": 3_500_000.0,
+    "ttm_egr": 441_536.0}
 
 
 def test_noi_per_nrsf_fails_on_the_noi_the_model_prices_on():
@@ -783,3 +790,82 @@ def test_an_implausible_entered_noi_still_fails_when_the_triple_agrees():
              nrsf=48_762.0)
     assert r.blocks
     assert "above the $30.00/SF ceiling" in r.message
+
+
+# The revenue/EGR tripwire. Its point is the gap the other two cannot
+# close: a 10x revenue line with expenses and NOI mis-scaled to match
+# satisfies `income_identity` to the cent, and on an input carrying no
+# NRSF and no asking price BOTH derived tripwires skip.
+
+
+def test_revenue_ten_times_egr_blocks_and_names_the_revenue_line():
+    r = _run("revenue_vs_egr_plausible", **ABILENE_10X_REVENUE)
+    assert r.blocks
+    assert r.message.startswith("RE-READ TOTAL REVENUE FIRST")
+    assert "9.99x" in r.message
+    assert abs(r.values["revenue_to_egr"] - 9.988) < 0.001
+
+
+def test_the_10x_revenue_is_caught_with_no_nrsf_and_no_price():
+    """The isolated gap, and the worst case: an NOI mis-scaled to MATCH
+    the bad revenue line, so `income_identity` holds to the cent, with
+    the two fields the derived tripwires need absent. Without this check
+    that deal is clean on every blocking check."""
+    thin = {k: v for k, v in ABILENE_10X_REVENUE.items()
+            if k not in ("nrsf", "asking_price")}
+    thin["ttm_noi"] = 4_209_950.0  # = revenue − expenses, exactly
+    results = C.run_checks(C.CheckInput(**thin))
+    failed = [r.id for r in C.blocking_failures(results)]
+    assert failed == ["revenue_vs_egr_plausible"]
+
+
+def test_a_normal_deal_passes_with_other_income_above_egr():
+    r = _run("revenue_vs_egr_plausible", ttm_total_revenue=462_000.0,
+             ttm_egr=441_536.0)
+    assert not r.blocks
+    assert r.status == C.PASS
+    assert "1.05x EGR" in r.message
+
+
+def test_a_gross_line_beside_a_netted_egr_still_passes():
+    """The honest case the high bound is set wide for: a broker quoting a
+    gross revenue line against a netted EGR at 40% economic occupancy
+    produces 2.5x, and refusing it would refuse the fund's own target
+    profile."""
+    r = _run("revenue_vs_egr_plausible", ttm_total_revenue=1_000_000.0,
+             ttm_egr=400_000.0)
+    assert r.status == C.PASS
+
+
+def test_revenue_far_below_egr_blocks_and_names_the_egr_line():
+    """The mirror defect — EGR itself mis-scaled upward. The message must
+    implicate a DIFFERENT field, or it reproduces the bug it fixes."""
+    r = _run("revenue_vs_egr_plausible", ttm_total_revenue=441_536.0,
+             ttm_egr=4_410_000.0)
+    assert r.blocks
+    assert r.message.startswith("RE-READ EFFECTIVE GROSS REVENUE FIRST")
+    assert "RE-READ TOTAL REVENUE" not in r.message
+
+
+def test_a_stated_zero_revenue_beside_real_egr_fails():
+    """Decision 9's `is None` rule, applied to the numerator: a stated $0
+    is a claim about the property, not a missing field."""
+    r = _run("revenue_vs_egr_plausible", ttm_total_revenue=0.0,
+             ttm_egr=441_536.0)
+    assert r.blocks
+
+
+def test_a_zero_egr_skips_rather_than_dividing():
+    r = _run("revenue_vs_egr_plausible", ttm_total_revenue=441_536.0,
+             ttm_egr=0.0)
+    assert r.status == C.SKIPPED
+    assert not r.blocks
+
+
+def test_a_missing_egr_skips_and_does_not_fall_back_to_gpr():
+    """EGR only, deliberately. A real CIM that omits EGR omits GPR too
+    (measured on the Huntsville CIM), and revenue/GPR is a different
+    relationship needing its own band."""
+    r = _run("revenue_vs_egr_plausible", ttm_total_revenue=441_536.0,
+             ttm_gpr=520_000.0)
+    assert r.status == C.SKIPPED
