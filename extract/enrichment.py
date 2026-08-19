@@ -143,6 +143,62 @@ class DataResolver:
         return None
 
 
+#: The tier that means "this module went and measured it" — a number no
+#: document stated. Named rather than spelled `2` at the call sites: the
+#: surfaces that disclose provenance ask this exact question, and a bare
+#: literal is how one of them ends up asking a slightly different one.
+MEASURED_TIER = 2
+
+
+def merge_source_logs(prior: dict, later: dict) -> dict:
+    """One field's origin across two enrichment passes.
+
+    Enrichment runs twice on the web path — once at extraction, once at
+    analysis, because an analyst may have corrected the address the first
+    pass geocoded. The second pass finds the FIRST pass's output already
+    sitting on `cim_data` and resolves it at tier 1, "CIM/override": true
+    about what it was handed, false about where the number came from. Left
+    alone it overwrites a measurement with a claim the CIM stated it.
+
+    So a later TIER-1 entry never displaces a stored measurement. Anything
+    else does, because a pass that actually reached the API is the newer
+    fact. Note this deliberately keeps an entry whose `value` the analyst
+    has since corrected — `origin_for` is what refuses to apply it to a
+    number it no longer describes, and the two are separate so that
+    forgetting the second cannot silently delete the first.
+    """
+    merged = dict(prior or {})
+    for field_name, entry in (later or {}).items():
+        kept = merged.get(field_name)
+        if (isinstance(kept, dict) and kept.get("tier") == MEASURED_TIER
+                and isinstance(entry, dict) and entry.get("tier") == 1):
+            continue
+        merged[field_name] = entry
+    return merged
+
+
+def origin_for(source_log: dict, field_name: str, value) -> Optional[dict]:
+    """The log entry that describes THIS value, or None.
+
+    An entry records where one particular number came from. When the number
+    in use is no longer that number — the analyst typed a population over
+    the measured one on the assumptions page — the entry stops describing
+    it, and reporting it anyway credits the Census with an analyst's
+    figure. Every surface that discloses an origin asks through here, so
+    they cannot disagree about when a log entry still applies.
+    """
+    entry = (source_log or {}).get(field_name)
+    if not isinstance(entry, dict):
+        return None
+    logged = entry.get("value")
+    if logged is value:
+        return entry
+    try:
+        return entry if float(logged) == float(value) else None
+    except (TypeError, ValueError):
+        return entry if logged == value else None
+
+
 # ── Geocoding (Census Bureau — free, no API key) ─────────────────
 
 def _geocode_address(address: str, city: str, state: str) -> Optional[dict]:

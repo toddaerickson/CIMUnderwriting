@@ -350,17 +350,24 @@ def stage_gates_and_risks(ctx: AnalysisContext):
     # and for the same reason. No `config_deltas`, `deal_overrides` or
     # `cim_snapshot` are passed because a CLI run HAS none — there is no
     # settings table and no assumptions page here — so every number
-    # resolves to the model default, the CIM, or a logged fallback. That
-    # is the honest answer for this entry point, and
-    # `test_a_cli_register_never_claims_a_settings_or_deal_override`
+    # resolves to the model default, the CIM, a logged fallback, or an
+    # external measurement. That is the honest answer for this entry
+    # point, and `test_a_cli_register_never_claims_a_settings_or_deal_override`
     # pins it so a later edit cannot quietly invent a provenance the CLI
     # cannot have.
+    #
+    # The enrichment log IS available here and needs no storage: the CLI
+    # enriches exactly once, in `stage_enrich` above, so the log it built
+    # still describes the values on `ctx.cim_data`. It is the web path
+    # that has to persist one, because there the pass that measures and
+    # the pass that reports are separated by a database round trip.
     from analysis import assumptions as model_assumptions
     ctx.assumption_register = model_assumptions.to_dicts(
         model_assumptions.collect(
             cim_data=ctx.cim_data,
             fill_log=ctx.assumption_fill_log,
-            market_cap=ctx.market_cap))
+            market_cap=ctx.market_cap,
+            enrichment_log=source_log))
 
 
 def stage_output(ctx: AnalysisContext, comp_db):

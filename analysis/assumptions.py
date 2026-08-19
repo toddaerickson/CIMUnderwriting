@@ -71,6 +71,14 @@ DEAL = "deal"
 SETTINGS = "settings"
 FALLBACK = "fallback"
 CIM = "cim"
+# Measured by this system from public data, for THIS property's location —
+# the Census ACS demographics `extract.enrichment` fetches. It sits after
+# CIM because that is the precedence the model actually runs: the resolver
+# takes a CIM-stated population over a measured one (tier 1 beats tier 2)
+# and only measures what the document left empty. It sits before CONFIG
+# because a measurement is evidence about this deal, not a shipped
+# default. It is NOT in `CHOSEN` — see that constant.
+EXTERNAL = "external"
 CONFIG = "config"
 
 #: What each provenance means, in one clause, for the memo legend and the
@@ -82,6 +90,7 @@ PROVENANCE_LABELS = {
     SETTINGS: "settings override",
     FALLBACK: "filled from a default",
     CIM: "stated in the CIM",
+    EXTERNAL: "measured from public data",
     CONFIG: "model default",
 }
 PROVENANCE_KEYS = tuple(PROVENANCE_LABELS)
@@ -89,6 +98,13 @@ PROVENANCE_KEYS = tuple(PROVENANCE_LABELS)
 #: The provenances that mean a human or a fallback — not the shipped
 #: model — produced this number. This is the first memo table and the
 #: results-page summary line: what is unusual about THIS run.
+#:
+#: `EXTERNAL` is deliberately NOT here (operator, 2026-08-18). This tuple
+#: answers "did a human or a fallback produce this number?", and a
+#: measurement is neither; widening it to "anything but the CIM and the
+#: defaults" would change what B.1 promises a reader. The measurement
+#: still discloses itself wherever the full register renders — which is
+#: the memo's B.2, the workbook's Inputs sheet and the results panel.
 CHOSEN = (DEAL, SETTINGS, FALLBACK)
 
 # ── Groups, in render order ─────────────────────────────────────────
@@ -518,14 +534,21 @@ def collect(*, cim_data=None, cim_snapshot=None, config_deltas=None,
             hold_years=None, transaction_costs=None, market_cap=None,
             capital_structure=None, debt_terms=None, waterfall_terms=None,
             am_fee_pct=None, mgmt_fee_target_pct=None,
-            solver_target_irr=None) -> list[Assumption]:
+            solver_target_irr=None, enrichment_log=None) -> list[Assumption]:
     """The run's whole assumption register, ordered and de-duplicated.
 
     Callers pass whatever they have; a missing section contributes nothing
     rather than raising. The CLI passes neither `config_deltas` nor
     `deal_overrides` because it HAS neither — it has no `ConfigOverride`
     table and no assumptions page — so its register is `config` / `cim` /
-    `fallback`, which is the truth about a CLI run and is tested as such.
+    `fallback` / `external`, which is the truth about a CLI run and is
+    tested as such.
+
+    `enrichment_log` is `extract.enrichment`'s own source log for this run,
+    and like `config_deltas` and `cim_snapshot` it is PROVENANCE ONLY: it
+    changes no arithmetic and can move no value, because the numbers it
+    describes are already on `cim_data`. A caller that has none loses the
+    `external` provenance and nothing else.
     """
     from analysis.financials import resolve_mgmt_fee_target
     from analysis.valuation import resolve_hold_years, resolve_transaction_costs
@@ -534,7 +557,7 @@ def collect(*, cim_data=None, cim_snapshot=None, config_deltas=None,
 
     reg = _Register(config_deltas, config_defaults, deal_overrides)
 
-    _add_cim_rows(reg, cim_data, cim_snapshot)
+    _add_cim_rows(reg, cim_data, cim_snapshot, enrichment_log)
     _add_fill_rows(reg, fill_log)
 
     reg.add_dict("GATES", cfg.GATES, G_GATES)
@@ -608,7 +631,7 @@ def collect(*, cim_data=None, cim_snapshot=None, config_deltas=None,
     return out
 
 
-def _add_cim_rows(reg, cim_data, cim_snapshot):
+def _add_cim_rows(reg, cim_data, cim_snapshot, enrichment_log=None):
     """The deal's own numbers, and whether the analyst corrected one.
 
     `cim_snapshot` is the PRISTINE extraction (`Deal.cim_json`), so a field
@@ -618,22 +641,66 @@ def _add_cim_rows(reg, cim_data, cim_snapshot):
 
     A field with no value contributes NOTHING: it moved no output, and a
     fallback that stood in for it is already a row of its own.
+
+    **Not everything in the snapshot came out of the document.** Census
+    enrichment runs BEFORE the snapshot is saved, so a measured population
+    sits inside `cim_json` looking exactly like an extracted one — and this
+    filed it as "stated in the CIM", a claim the document never made, on
+    the very number Gate 1 is decided by. That is the same defect
+    `_add_ocr_row` below exists to close, arriving from the other side: one
+    is a `cim` claim that overstates how the figure was read, this is a
+    `cim` claim about a figure the CIM does not contain at all.
+
+    `enrichment_log` is the only witness to the difference; with none, every
+    stated field is `cim`, which is exactly what a run that never enriched
+    means. WHICH fields can be measured is read from the log and never
+    listed here: a field list would be a second answer to a question
+    `extract.enrichment` already answers, and it goes stale the first time
+    that module learns to measure one more thing.
     """
     if cim_data is None:
         return
+    from extract.enrichment import MEASURED_TIER, origin_for
+
     _add_ocr_row(reg, cim_data)
     snapshot = cim_snapshot or {}
+    log = enrichment_log or {}
     for field, label, unit in CIM_FIELDS:
         value = getattr(cim_data, field, None)
         if value is None or value == "":
             continue
         prior = snapshot.get(field)
         edited = bool(snapshot) and prior is not None and prior != value
+        entry = origin_for(log, field, value)
+        if edited:
+            # An analyst correction wins over a measurement for the same
+            # reason it wins over the CIM: they typed the number knowing
+            # what it replaced. `origin_for` has already refused the stale
+            # entry, so this branch cannot credit the Census with it.
+            provenance, detail = DEAL, "corrected on the assumptions page"
+        elif entry is not None and entry.get("tier") == MEASURED_TIER:
+            provenance, detail = EXTERNAL, _measurement_detail(log, entry)
+        else:
+            provenance, detail = CIM, ""
         reg.add_row(Assumption(
             key=f"cim.{field}", label=label, group=G_DEAL, value=value,
-            provenance=DEAL if edited else CIM, unit=unit,
-            was=prior if edited else None,
-            detail=("corrected on the assumptions page" if edited else "")))
+            provenance=provenance, unit=unit,
+            was=prior if edited else None, detail=detail))
+
+
+def _measurement_detail(log, entry):
+    """How the measurement was taken, in one clause.
+
+    The ring's CENTRE is half the claim and it is logged separately: a
+    3-mile ring drawn around a matched building and one drawn around a ZIP
+    code's centroid are different statements about the same property, which
+    is why `extract.enrichment` stamps the centre's origin beside the
+    coordinates in the first place. A row naming the API and staying silent
+    about the centre would disclose the easier half.
+    """
+    source = str(entry.get("source") or "external source").strip()
+    centre = str((log.get("lat") or {}).get("source") or "").strip()
+    return f"{source} — ring centred on the {centre}" if centre else source
 
 
 def _add_ocr_row(reg, cim_data):

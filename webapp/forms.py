@@ -833,8 +833,9 @@ def model_rows(form, pairs, snapshot, source_log=None, extras=None):
     source: 'you' when the bound/initial value differs from snapshot;
     'Census' when the snapshot value was tier-2 enrichment (extract-time
     enrichment runs BEFORE the snapshot is saved, so Census fills live
-    inside cim_json — the run payload's enrichment.source_log is the
-    only way to tell them from CIM-extracted values).
+    inside cim_json — `Deal.enrichment_log`, recorded by the same worker
+    that saved the snapshot, is the only way to tell them from
+    CIM-extracted values).
 
     Percent fields (physical_occupancy etc.) are stored as decimals
     (0.92) in the snapshot but displayed/submitted as whole numbers (92)
@@ -851,6 +852,8 @@ def model_rows(form, pairs, snapshot, source_log=None, extras=None):
     rate, so printing them side by side invites a comparison between two
     different units.
     """
+    from extract.enrichment import MEASURED_TIER, origin_for
+
     source_log = source_log or {}
     extras = extras or {}
     rows = []
@@ -867,8 +870,12 @@ def model_rows(form, pairs, snapshot, source_log=None, extras=None):
         if cur not in (None, "", snap):
             src = "you"
         elif snap is not None:
-            src = ("Census" if source_log.get(name, {}).get("tier") == 2
-                   else "CIM")
+            # Through the same `origin_for` the gates and the register use,
+            # against the RAW snapshot value rather than the display form
+            # above: three surfaces asking "did we measure this?" three
+            # different ways is how they come to disagree on one deal.
+            entry = origin_for(source_log, name, snapshot.get(name)) or {}
+            src = "Census" if entry.get("tier") == MEASURED_TIER else "CIM"
         else:
             src = ""
         rows.append({"label": label, "bf": bf, "extra_bf": extra_bf,

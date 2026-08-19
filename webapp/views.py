@@ -228,11 +228,20 @@ def deal_assumptions(request, pk):
     for row in benchmark_rows:
         row["bf"] = form[f"exp_{row['key']}"]
 
+    # The deal's own extract-time log FIRST, then anything the latest run
+    # re-measured on top. Reading only the run — which is what this did —
+    # left the "Census" label unreachable on the ordinary path twice over:
+    # a deal with no run yet has no log to read, and a run that found the
+    # demographics already filled never re-enriches, so it stores no
+    # enrichment block at all. Both cases showed a measured population as
+    # "CIM", which is the same wrong claim the memo was making.
+    from extract.enrichment import merge_source_logs
     latest_run = deal.runs.first()
-    source_log = {}
+    run_log = {}
     if latest_run is not None:
-        source_log = ((latest_run.result_json or {}).get("enrichment") or {}
-                      ).get("source_log", {})
+        run_log = ((latest_run.result_json or {}).get("enrichment") or {}
+                   ).get("source_log", {})
+    source_log = merge_source_logs(deal.enrichment_log or {}, run_log)
 
     f = assumptions_forms
     ctx = {
