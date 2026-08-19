@@ -627,7 +627,8 @@ def test_a_saved_mgmt_fee_target_actually_reaches_the_run(monkeypatch,
               market_cap_rate=None, market_cap=None,
               debt_terms=None, waterfall_terms=None, am_fee_pct=None,
               mgmt_fee_target_pct=None, config_deltas=None,
-              config_defaults=None, deal_overrides=None, cim_snapshot=None):
+              config_defaults=None, deal_overrides=None, cim_snapshot=None,
+              source_log=None):
         seen["mgmt_fee_target_pct"] = mgmt_fee_target_pct
         result.gate_results = []
         result.gate_summary = {"passed": 0, "failed": 0, "tbd": 0, "total": 0,

@@ -71,6 +71,13 @@ DEAL = "deal"
 SETTINGS = "settings"
 FALLBACK = "fallback"
 CIM = "cim"
+# After CIM, mirroring the resolver's own tier order — tier 1 (the CIM's
+# stated value) beats tier 2 (a Census measurement) in
+# `extract.enrichment.DataResolver.resolve`. Per field the row is MEASURED
+# xor CIM and never both (tier 1 holds exactly when the value was already
+# present), so the order decides nothing at runtime; it is written this way
+# so the vocabulary reads in the same direction as the thing it describes.
+MEASURED = "measured"
 CONFIG = "config"
 
 #: What each provenance means, in one clause, for the memo legend and the
@@ -82,6 +89,7 @@ PROVENANCE_LABELS = {
     SETTINGS: "settings override",
     FALLBACK: "filled from a default",
     CIM: "stated in the CIM",
+    MEASURED: "measured externally (Census)",
     CONFIG: "model default",
 }
 PROVENANCE_KEYS = tuple(PROVENANCE_LABELS)
@@ -89,7 +97,37 @@ PROVENANCE_KEYS = tuple(PROVENANCE_LABELS)
 #: The provenances that mean a human or a fallback — not the shipped
 #: model — produced this number. This is the first memo table and the
 #: results-page summary line: what is unusual about THIS run.
+#:
+#: MEASURED is deliberately NOT here. A Census ring measurement is neither a
+#: human choice nor an invention, so it fails this tuple's stated meaning —
+#: and memo B.1's headline ENUMERATES its own components ("… 10 came from
+#: something other than the shipped defaults: 0 entered for this deal, 0 from
+#: a settings override, and 10 filled in"), so adding a fourth member here
+#: would make `chosen` disagree with the three numbers printed beside it.
+#: Use `not_from_defaults` (below) for the "is anything unusual here?"
+#: question — that is what the surfaces actually want.
 CHOSEN = (DEAL, SETTINGS, FALLBACK)
+
+def is_measured(source_log, field) -> bool:
+    """Did an external measurement supply `field`, per an enrichment log?
+
+    Tier 2 MEANS externally measured — that is the whole content of this
+    function, and naming it is the point: three call sites were digging the
+    same magic `2` out of the same dict shape by hand.
+
+    Lives here rather than beside `DataResolver`, which writes the shape,
+    because `analysis/` imports nothing from `extract/` and a three-line
+    pure-dict predicate is not worth the first such edge — it would drag an
+    HTTP client and a module-scope API-key read into `webapp.forms`. There is
+    a pointer comment at the writer.
+
+    `or {}` twice, not `.get(field, {})`: the log round-trips through a
+    JSONField, which can store an explicit `null` under an existing key. (The
+    resolver's own "not available" entry is a truthy dict and needs no guard —
+    an earlier version of this comment claimed otherwise.)
+    """
+    return ((source_log or {}).get(field) or {}).get("tier") == 2
+
 
 # ── Groups, in render order ─────────────────────────────────────────
 
@@ -433,6 +471,14 @@ def summarize(rows) -> dict:
             counts[row.provenance] += 1
     counts["total"] = len(rows)
     counts["chosen"] = sum(counts[k] for k in CHOSEN)
+    # Everything the shipped model did not choose on its own — CHOSEN plus
+    # any provenance that is neither a config default nor a CIM statement.
+    # Derived by SUBTRACTION so a seventh provenance is included the day it
+    # is declared: three surfaces were using `chosen == 0` as a proxy for
+    # "nothing unusual here", and that proxy broke the moment a provenance
+    # sat outside CHOSEN. One definition, several readers.
+    counts["not_from_defaults"] = (
+        counts["total"] - counts[CONFIG] - counts[CIM])
     return counts
 
 
@@ -513,7 +559,8 @@ def _scenario_value(custom, scenario, param, default):
 
 
 def collect(*, cim_data=None, cim_snapshot=None, config_deltas=None,
-            config_defaults=None, deal_overrides=None, fill_log=None,
+            config_defaults=None, deal_overrides=None, source_log=None,
+            fill_log=None,
             scenarios=None, va_scenarios=None, expense_line_overrides=None,
             hold_years=None, transaction_costs=None, market_cap=None,
             capital_structure=None, debt_terms=None, waterfall_terms=None,
@@ -524,8 +571,10 @@ def collect(*, cim_data=None, cim_snapshot=None, config_deltas=None,
     Callers pass whatever they have; a missing section contributes nothing
     rather than raising. The CLI passes neither `config_deltas` nor
     `deal_overrides` because it HAS neither — it has no `ConfigOverride`
-    table and no assumptions page — so its register is `config` / `cim` /
-    `fallback`, which is the truth about a CLI run and is tested as such.
+    table and no assumptions page — so `settings` and `deal` are unreachable
+    there, which is the truth about a CLI run and is tested as such. It DOES
+    reach `measured`: `run.stage_enrich` enriches in-process and hands its own
+    log straight through.
     """
     from analysis.financials import resolve_mgmt_fee_target
     from analysis.valuation import resolve_hold_years, resolve_transaction_costs
@@ -534,7 +583,7 @@ def collect(*, cim_data=None, cim_snapshot=None, config_deltas=None,
 
     reg = _Register(config_deltas, config_defaults, deal_overrides)
 
-    _add_cim_rows(reg, cim_data, cim_snapshot)
+    _add_cim_rows(reg, cim_data, cim_snapshot, source_log)
     _add_fill_rows(reg, fill_log)
 
     reg.add_dict("GATES", cfg.GATES, G_GATES)
@@ -608,13 +657,18 @@ def collect(*, cim_data=None, cim_snapshot=None, config_deltas=None,
     return out
 
 
-def _add_cim_rows(reg, cim_data, cim_snapshot):
-    """The deal's own numbers, and whether the analyst corrected one.
+def _add_cim_rows(reg, cim_data, cim_snapshot, source_log=None):
+    """The deal's own numbers, and who actually produced each one.
 
-    `cim_snapshot` is the PRISTINE extraction (`Deal.cim_json`), so a field
-    that differs from it was edited on the assumptions page. The CLI passes
-    no snapshot and edits nothing, so every stated field is `cim` there —
-    which is true, not a degraded mode.
+    `cim_snapshot` is the extraction as persisted (`Deal.cim_json`), so a
+    field that differs from it was edited on the assumptions page.
+
+    `source_log` is the EXTRACTION-time enrichment log, merged with the run's
+    own by the engine. It is what separates "stated in the CIM" from
+    "measured externally": the snapshot is taken AFTER enrichment has written
+    Census values onto `cim_data`, so without the log a Census-measured
+    population is indistinguishable from one the broker printed — and it was
+    rendered as the latter, on a gate input, for the life of the register.
 
     A field with no value contributes NOTHING: it moved no output, and a
     fallback that stood in for it is already a row of its own.
@@ -623,17 +677,37 @@ def _add_cim_rows(reg, cim_data, cim_snapshot):
         return
     _add_ocr_row(reg, cim_data)
     snapshot = cim_snapshot or {}
+    # Deltas by construction (`forms.build_overrides`), so membership IS
+    # "the analyst set this" — which is the only available signal when the
+    # snapshot holds nothing to compare against.
+    entered_by_analyst = reg.deal_section("cim_overrides") or {}
     for field, label, unit in CIM_FIELDS:
         value = getattr(cim_data, field, None)
         if value is None or value == "":
             continue
         prior = snapshot.get(field)
-        edited = bool(snapshot) and prior is not None and prior != value
+        # Hoisted out of the constructor: three parallel ternaries on one
+        # condition do not survive a third and fourth arm.
+        if bool(snapshot) and prior is not None and prior != value:
+            provenance, was = DEAL, prior
+            detail = "corrected on the assumptions page"
+        elif field in entered_by_analyst and prior is None:
+            # An analyst typing a value the extraction never produced. The
+            # comparison above cannot see this — it needs a `prior` to differ
+            # from — so it used to render as `cim`: "stated in the CIM" for a
+            # number the analyst invented. Reachable exactly when enrichment
+            # failed, which is also when it matters most.
+            provenance, was = DEAL, None
+            detail = "entered on the assumptions page"
+        elif is_measured(source_log, field):
+            # Cannot collide with either arm above: a tier-2 stamp means
+            # extraction filled the field, which means `prior is not None`.
+            provenance, was, detail = MEASURED, None, ""
+        else:
+            provenance, was, detail = CIM, None, ""
         reg.add_row(Assumption(
             key=f"cim.{field}", label=label, group=G_DEAL, value=value,
-            provenance=DEAL if edited else CIM, unit=unit,
-            was=prior if edited else None,
-            detail=("corrected on the assumptions page" if edited else "")))
+            provenance=provenance, unit=unit, was=was, detail=detail))
 
 
 def _add_ocr_row(reg, cim_data):

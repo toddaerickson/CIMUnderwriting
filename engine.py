@@ -193,7 +193,8 @@ def run_analysis(result: AnalysisResult, progress: Callable = None,
                   config_deltas: dict = None,
                   config_defaults: dict = None,
                   deal_overrides: dict = None,
-                  cim_snapshot: dict = None) -> AnalysisResult:
+                  cim_snapshot: dict = None,
+                  source_log: dict = None) -> AnalysisResult:
     """
     Run full analysis pipeline on an already-extracted CIMData.
 
@@ -274,6 +275,15 @@ def run_analysis(result: AnalysisResult, progress: Callable = None,
             default and a deliberate entry.
         cim_snapshot: the pristine pre-analyst extraction (`Deal.cim_json`),
             so a corrected input can report what the CIM itself said.
+        source_log: the EXTRACTION-time enrichment source log
+            (`Deal.enrichment_source_log`), so a Census-measured demographic
+            can be told from one the CIM stated. Provenance only, like the
+            four above. It has to be passed in because it cannot be
+            re-derived here: the re-enrichment below only touches fields
+            that are still None, and `DataResolver.resolve` stamps tier 1
+            for anything already present — an analysis-time tier is evidence
+            of PRESENCE, not of ORIGIN. The CLI passes nothing; it keeps its
+            own log in-process and merges nothing.
 
     Returns:
         Updated AnalysisResult with all analysis fields populated
@@ -614,10 +624,36 @@ def run_analysis(result: AnalysisResult, progress: Callable = None,
     from analysis.value_add import identify_value_add
     from analysis.risks import identify_risks
 
-    source_log = result.enrichment.source_log if result.enrichment else {}
+    run_source_log = result.enrichment.source_log if result.enrichment else {}
+    # The register reads a MERGED log; the gates keep the run-time one.
+    #
+    # Two logs because provenance is captured at extraction and the values
+    # outlive it: `run_source_log` above describes only what THIS run measured,
+    # which for a fully-enriched deal is nothing at all (the re-enrichment
+    # gate above never fires). A field is externally measured if EITHER log
+    # says so, and the run-time log can only ADD — never demote — because
+    # its tier 1 means "already on cim_data", which says nothing about where
+    # the value came from.
+    #
+    # That direction is safe only because tier 1 is never re-measured:
+    # `DataResolver.resolve` returns `tier1_value` untouched when it is not
+    # None, and the gate above fires only on None fields. If re-enrichment is
+    # ever widened to re-measure filled fields, a persisted tier-2 stamp
+    # would silently attach to a fresh value — see
+    # `test_a_re_enrichment_never_rewrites_a_value_it_already_had`.
+    #
+    # A SEPARATE name, not a merge in place: `run_source_log` is handed to
+    # `evaluate_gates` and lands on gate 1's `source` string
+    # (`analysis.filters`), which this change deliberately leaves alone. The
+    # local was renamed off `source_log` for the same reason — the parameter
+    # now owns that name, and a local reassignment would silently discard it.
+    register_source_log = dict(source_log or {})
+    for field, entry in (run_source_log or {}).items():
+        if (entry or {}).get("tier") == 2:
+            register_source_log[field] = entry
     result.gate_results = evaluate_gates(
         cim_data, result.scenario_results, result.va_results,
-        source_log=source_log)
+        source_log=run_source_log)
     result.gate_summary = summarize_gates(result.gate_results)
     result.value_add = identify_value_add(
         cim_data, result.financial_analysis, result.rent_analysis,
@@ -672,6 +708,7 @@ def run_analysis(result: AnalysisResult, progress: Callable = None,
             config_deltas=config_deltas,
             config_defaults=config_defaults,
             deal_overrides=deal_overrides,
+            source_log=register_source_log,
             fill_log=result.assumption_fill_log,
             scenarios=custom_scenarios,
             va_scenarios=custom_va_scenarios,

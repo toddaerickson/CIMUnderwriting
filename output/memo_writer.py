@@ -384,13 +384,22 @@ def _add_assumption_register(doc, assumption_register):
 
     doc.add_page_break()
     doc.add_heading("Appendix B. Assumption Register", level=1)
+    # The measured clause renders only when there is one. Every fixture
+    # runs with `enrich` off and so produces zero measured rows, which is
+    # what keeps the three characterization snapshots byte-identical — this
+    # sentence is stored verbatim in them, counts and all. A deliberate
+    # break from the sentence's own style, which does print its zeros.
+    measured_clause = (
+        f" A further {counts['measured']} were measured externally rather "
+        f"than stated in the CIM." if counts.get("measured") else "")
     doc.add_paragraph(
         f"Every number this analysis used, with its source. Of "
         f"{counts['total']} assumptions, {counts['chosen']} came from "
         f"something other than the model's shipped defaults: "
         f"{counts['deal']} entered for this deal, {counts['settings']} from "
         f"a dated settings override, and {counts['fallback']} filled in "
-        f"because the CIM did not state a value. Those are listed first. "
+        f"because the CIM did not state a value. Those are listed first."
+        f"{measured_clause} "
         f"The full register follows — nothing is omitted from it, so an "
         f"assumption absent below is an assumption this run did not use."
     )
@@ -410,9 +419,17 @@ def _add_assumption_register(doc, assumption_register):
     doc.add_heading("B.1 Assumptions not taken from the model defaults",
                     level=2)
     if not chosen:
+        # Keyed on `not_from_defaults`, not on `chosen`: a measured value is
+        # outside CHOSEN by design, and saying "every input came from the CIM
+        # as stated" on a page whose B.2 lists "measured externally (Census)"
+        # is the same self-contradiction this register exists to end.
         doc.add_paragraph(
             "None. Every number below is the model's shipped default, and "
-            "every input came from the CIM as stated.")
+            "every input came from the CIM as stated."
+            if not counts.get("not_from_defaults") else
+            "None entered by hand, overridden in settings, or filled from a "
+            "default. The externally measured inputs noted above are listed "
+            "in B.2 with their source.")
     else:
         table = doc.add_table(rows=1, cols=4)
         table.style = "Light Grid Accent 1"

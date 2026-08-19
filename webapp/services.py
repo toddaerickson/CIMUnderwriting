@@ -477,6 +477,20 @@ def _extract_worker(deal_pk, pdf_path, stamp):
         updates = {
             "cim_json": cim_to_dict(cim),
             "extraction_report": result.extraction_report,
+            # Persisted in the SAME dict as `cim_json` deliberately: the two
+            # are applied by one `.update(**updates)` below, so a value and
+            # the provenance describing it land together or not at all.
+            #
+            # `if result.enrichment else {}` is not defensive padding —
+            # `engine.extract_pdf_data` leaves `enrichment` None whenever the
+            # enrichment step RAISES (its except only appends to
+            # result.errors). An unguarded `.source_log` would raise inside
+            # this worker's try, whose except sets extract_status="failed"
+            # and writes no cim_json at all — turning a Census outage into a
+            # discarded extraction, which is strictly worse than the
+            # mislabelling this column exists to fix.
+            "enrichment_source_log": (result.enrichment.source_log
+                                      if result.enrichment else {}),
             "extract_warnings": list(result.errors),
             "extract_status": "done",
             "extract_error": "",
@@ -1041,6 +1055,7 @@ def _analysis_worker(run_pk):
                     config_defaults=config_defaults,
                     deal_overrides=overrides,
                     cim_snapshot=deal.cim_json,
+                    source_log=deal.enrichment_source_log,
                 )
 
         meta = build_deal_meta(cim, result, deal.deal_dir,

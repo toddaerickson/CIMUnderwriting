@@ -77,7 +77,12 @@ class EnrichmentResult:
 
 
 class DataResolver:
-    """Resolve a field value through the tier hierarchy."""
+    """Resolve a field value through the tier hierarchy.
+
+    This class WRITES the `source_log` shape that
+    `analysis.assumptions.is_measured` reads. The reader lives there rather
+    than here so `analysis/` need not import `extract/`; keep the two in step.
+    """
 
     def __init__(self, source_log: dict):
         self.source_log = source_log

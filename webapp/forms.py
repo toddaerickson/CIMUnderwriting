@@ -16,6 +16,7 @@ from django.utils import timezone
 
 import config as cfg
 from analysis import checks
+from analysis.assumptions import is_measured
 from analysis.checks import noi_recon_tolerance      # noqa: F401 (re-export)
 from model import waterfall as wf_mod
 from model.debt import resolve_debt_terms
@@ -867,8 +868,7 @@ def model_rows(form, pairs, snapshot, source_log=None, extras=None):
         if cur not in (None, "", snap):
             src = "you"
         elif snap is not None:
-            src = ("Census" if source_log.get(name, {}).get("tier") == 2
-                   else "CIM")
+            src = ("Census" if is_measured(source_log, name) else "CIM")
         else:
             src = ""
         rows.append({"label": label, "bf": bf, "extra_bf": extra_bf,

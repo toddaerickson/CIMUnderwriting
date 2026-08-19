@@ -350,8 +350,8 @@ def stage_gates_and_risks(ctx: AnalysisContext):
     # and for the same reason. No `config_deltas`, `deal_overrides` or
     # `cim_snapshot` are passed because a CLI run HAS none — there is no
     # settings table and no assumptions page here — so every number
-    # resolves to the model default, the CIM, or a logged fallback. That
-    # is the honest answer for this entry point, and
+    # resolves to the model default, the CIM, an external measurement, or a
+    # logged fallback. That is the honest answer for this entry point, and
     # `test_a_cli_register_never_claims_a_settings_or_deal_override`
     # pins it so a later edit cannot quietly invent a provenance the CLI
     # cannot have.
@@ -359,6 +359,10 @@ def stage_gates_and_risks(ctx: AnalysisContext):
     ctx.assumption_register = model_assumptions.to_dicts(
         model_assumptions.collect(
             cim_data=ctx.cim_data,
+            # No merge here, unlike the engine: the CLI enriches in-process
+            # (`stage_enrich`) and still holds that log, so there is no
+            # persisted second copy to reconcile it with.
+            source_log=source_log,
             fill_log=ctx.assumption_fill_log,
             market_cap=ctx.market_cap))
 

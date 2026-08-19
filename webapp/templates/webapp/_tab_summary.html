@@ -103,7 +103,7 @@
       Assumption Register —
       <span class="text-slate-700">{{ register_counts.total }} assumption{{ register_counts.total|pluralize }}</span>
       <span class="font-normal text-slate-500">
-        ({% if register_counts.chosen %}{{ register_counts.chosen }} not from the model defaults{% else %}all model defaults{% endif %})
+        ({% if register_counts.not_from_defaults %}{{ register_counts.not_from_defaults }} not from the model defaults{% else %}all model defaults{% endif %})
       </span>
     </summary>
 

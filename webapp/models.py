@@ -33,6 +33,21 @@ class Deal(models.Model):
     extract_warnings = models.JSONField(default=list, blank=True)
     cim_json = models.JSONField(null=True, blank=True)
     extraction_report = models.JSONField(null=True, blank=True)
+    # Which tier supplied each demographic, captured at EXTRACTION time and
+    # persisted beside the values it describes. Analysis time cannot re-derive
+    # it: `engine.run_analysis` only re-enriches fields that are still None,
+    # and `DataResolver.resolve` stamps tier 1 ("CIM/override") for anything
+    # already on `cim_data` — so an analysis-time tier is evidence of PRESENCE,
+    # not of ORIGIN. Without this column a Census-measured population is
+    # indistinguishable from one the CIM stated.
+    #
+    # NULL and {} mean different things and the distinction is load-bearing:
+    # {} is "enrichment ran and had nothing to say"; NULL is "this Deal was
+    # extracted before this column existed". Do not "tidy" this to
+    # default=dict — that destroys the distinction for every existing row at
+    # migration time, and those rows are exactly the ones that keep the old
+    # `cim` label (see CLAUDE.md decision 11).
+    enrichment_source_log = models.JSONField(null=True, blank=True)
     assumption_overrides = models.JSONField(default=dict, blank=True)
 
     # Portfolio detection. A CIM describing more than one property must be
