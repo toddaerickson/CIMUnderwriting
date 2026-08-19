@@ -363,10 +363,21 @@ def _add_assumption_register(doc, assumption_register):
     """Appendix B — every number that moved an output, and who chose it.
 
     Two tables, because they answer to two readers. The first lists only
-    the rows something other than the shipped model produced — a deal
-    entry, a dated settings row, a fallback — which is what is unusual
-    about THIS run and is typically ten to twenty lines. The second is the
-    whole register, grouped by subject, for the auditor.
+    the rows a human or a fallback produced — a deal entry, a dated
+    settings row, a fallback — which is what is unusual about THIS run and
+    is typically ten to twenty lines. The second is the whole register,
+    grouped by subject, for the auditor.
+
+    **B.1 is not "everything that is not a default", and the prose here
+    used to say it was.** A measured figure is neither a default nor
+    something a human chose, so it belongs in neither B.1 nor a sentence
+    calling the run all-defaults — on a deal where the Census supplied the
+    population and nothing else was overridden, this appendix opened with
+    "0 came from something other than the model's shipped defaults" and
+    B.1 read "every input came from the CIM as stated", both false about
+    the one number Gate 1 turns on. It gets its own sentence instead, the
+    shape `_add_ocr_row`'s note already established for a fact that is not
+    a chosen assumption but must not be left for the reader to find.
 
     Neither table omits anything. A "defaults suppressed for brevity"
     register asks the reader to trust that absence means default, which is
@@ -376,8 +387,8 @@ def _add_assumption_register(doc, assumption_register):
     if not assumption_register:
         return
 
-    from analysis.assumptions import (CHOSEN, PROVENANCE_LABELS, format_value,
-                                      from_dicts, summarize)
+    from analysis.assumptions import (CHOSEN, EXTERNAL, PROVENANCE_LABELS,
+                                      format_value, from_dicts, summarize)
 
     rows = from_dicts(assumption_register)
     counts = summarize(rows)
@@ -386,14 +397,29 @@ def _add_assumption_register(doc, assumption_register):
     doc.add_heading("Appendix B. Assumption Register", level=1)
     doc.add_paragraph(
         f"Every number this analysis used, with its source. Of "
-        f"{counts['total']} assumptions, {counts['chosen']} came from "
-        f"something other than the model's shipped defaults: "
-        f"{counts['deal']} entered for this deal, {counts['settings']} from "
-        f"a dated settings override, and {counts['fallback']} filled in "
-        f"because the CIM did not state a value. Those are listed first. "
-        f"The full register follows — nothing is omitted from it, so an "
-        f"assumption absent below is an assumption this run did not use."
+        f"{counts['total']} assumptions, {counts['chosen']} came from a "
+        f"human or a fallback rather than from the CIM or the model's "
+        f"shipped defaults: {counts['deal']} entered for this deal, "
+        f"{counts['settings']} from a dated settings override, and "
+        f"{counts['fallback']} filled in because the CIM did not state a "
+        f"value. Those are listed first. The full register follows — "
+        f"nothing is omitted from it, so an assumption absent below is an "
+        f"assumption this run did not use."
     )
+
+    # Measured figures are in neither count above: not shipped defaults,
+    # not chosen by anyone. Same treatment as the transcription note below
+    # and for the same reason — a fact about where a gate-critical number
+    # came from must not be reachable only by reading B.2 in full.
+    external = [r for r in rows if r.provenance == EXTERNAL]
+    if external:
+        named = ", ".join(r.label for r in external)
+        doc.add_paragraph(
+            f"Note on external data: "
+            f"{len(external)} of the figures below — {named} — "
+            f"{'was' if len(external) == 1 else 'were'} measured by this "
+            f"system from public data rather than stated in the CIM. B.2 "
+            f"names the source and the ring's centre for each.")
 
     # A transcribed page is not a "chosen" assumption, so it lands in B.2
     # among a hundred and forty others — and it is exactly the kind of fact
@@ -407,9 +433,14 @@ def _add_assumption_register(doc, assumption_register):
             f"layer.")
 
     chosen = [r for r in rows if r.provenance in CHOSEN]
-    doc.add_heading("B.1 Assumptions not taken from the model defaults",
+    doc.add_heading("B.1 Assumptions a human entered or a fallback supplied",
                     level=2)
-    if not chosen:
+    if not chosen and external:
+        doc.add_paragraph(
+            "None. Every number below is the model's shipped default or "
+            "came from the CIM as stated, apart from the measured figures "
+            "noted above.")
+    elif not chosen:
         doc.add_paragraph(
             "None. Every number below is the model's shipped default, and "
             "every input came from the CIM as stated.")

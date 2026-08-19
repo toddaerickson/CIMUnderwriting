@@ -686,6 +686,34 @@ output/
     (operator's call): that tuple answers "did a human or a fallback
     produce this?", so the measurement discloses itself in B.2, the
     workbook and the results panel, and B.1 keeps its promise.
+    **`chosen == 0` therefore does NOT mean "all model defaults", and
+    three surfaces said it did** (fixed 2026-08-19). The memo's Appendix B
+    headline, its empty-B.1 sentence and the results tab all read a zero
+    `chosen` as an all-defaults run — on a deal whose population came off
+    the Census API, which is precisely the deal this decision exists for.
+    The fix is a dedicated sentence naming the measured figures, the shape
+    `_add_ocr_row`'s note established for a fact that is not a chosen
+    assumption but must not be reachable only by reading B.2 in full. NOT
+    a widened `CHOSEN` (it would change what B.1 promises) and NOT a
+    second `not_from_defaults` count (two counts on one panel is a
+    question about which one a surface should have used).
+    **The `cim` catch-all had three more exits, and all three claimed the
+    document said something it did not** (same date). `edited` needs a
+    `prior` to differ FROM, so a value an analyst typed into a field
+    extraction left EMPTY rendered "stated in the CIM" — a human's number
+    credited to the seller; `cim_overrides` is the witness, checked before
+    the measurement arm so a human's entry can never be attributed to a
+    machine. And `DataResolver` tiers 3 (comp DB) and 4 (static default)
+    fell through to `cim` as well, which is the WORSE half — a measurement
+    is at least evidence about this property and a tier-4 default is
+    invention. Both are `fallback` now, which is what `fills.py` already
+    calls a value the CIM never supplied, so no vocabulary widened; an
+    unrecognised tier degrades the same way rather than raising, because
+    `enrichment_log` is PERSISTED and a memo regenerated for an old deal
+    must not 500 on a row a later version wrote. Neither tier has a call
+    site today and `test_no_call_site_supplies_tier_3_or_tier_4` fails the
+    day one appears, so whoever wires the comp DB decides the provenance
+    deliberately instead of inheriting `cim` in silence.
     **It resolves nothing.** Every value is read from live `config` —
     patched in place for the duration of a run, so a live read IS the
     effective value — or through THE resolver the model itself calls

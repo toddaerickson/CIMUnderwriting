@@ -394,7 +394,7 @@ def test_the_register_reaches_the_memo_appendix(tmp_path):
     assert result.assumption_register, "the engine assembled no register"
     text = _memo_text(result.memo_path)
     assert "Appendix B. Assumption Register" in text
-    assert "B.1 Assumptions not taken from the model defaults" in text
+    assert "B.1 Assumptions a human entered or a fallback supplied" in text
     assert "B.2 Full register" in text
     # Not a sample of it — the whole register, which is the claim the
     # appendix makes in its own opening sentence.
