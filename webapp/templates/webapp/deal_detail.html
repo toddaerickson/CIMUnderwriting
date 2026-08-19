@@ -23,6 +23,27 @@
         <button type="submit" class="bg-accent-700 text-white text-sm px-3 py-1.5 rounded">
           {% if done_run %}Re-run Analysis{% else %}Run Analysis{% endif %}</button>
       </form>
+      {% comment %} Re-extraction had NO route out of a successful
+         extraction: the retry control lives in _extract_status.html
+         behind {% if failed %}, so a deal whose parse succeeded but
+         succeeded WRONGLY — deal 13's $115 asking price, parsed before
+         MIN_PLAUSIBLE_ASKING_PRICE existed — could only be re-read from
+         a shell. Every parser fix since is unreachable for exactly the
+         deals that need it most.
+
+         Confirmed because it discards the snapshot and re-reads the PDF;
+         analyst overrides survive (different field), but a hand-checked
+         extraction is worth a deliberate click.
+      {% endcomment %}
+      {% if deal.input_files %}
+      <form method="post" action="{% url 'extract-retry' deal.pk %}"
+            onsubmit="return confirm('Re-read the PDF and replace this deal&rsquo;s extraction snapshot? Your saved assumption overrides are kept.')">
+        {% csrf_token %}
+        <button type="submit"
+                class="text-sm px-3 py-1.5 rounded border border-slate-300 text-slate-700 hover:bg-slate-50"
+                title="Re-run extraction against the current parser">Re-extract</button>
+      </form>
+      {% endif %}
       {% endif %}
       {% endif %}
     </div>
