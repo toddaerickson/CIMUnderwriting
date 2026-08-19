@@ -297,6 +297,20 @@ def test_form_blocks_when_egr_exceeds_gpr():
     assert [f.id for f in form.blocking_findings] == ["egr_le_gpr"]
 
 
+def test_form_blocks_a_ten_times_revenue_line_the_other_checks_miss():
+    """The gap `revenue_vs_egr_plausible` exists for, proved on the form
+    path: expenses and NOI are mis-scaled to match, so the income
+    identity holds exactly, and the form carries no NRSF and no asking
+    price so both derived tripwires skip."""
+    form = _income_form(ttm_total_revenue=4_410_000,
+                        ttm_total_expenses=200_050, ttm_noi=4_209_950,
+                        ttm_egr=441_536)
+    assert not form.is_valid()
+    assert [f.id for f in form.blocking_findings] == [
+        "revenue_vs_egr_plausible"]
+    assert "RE-READ TOTAL REVENUE FIRST" in str(form.non_field_errors())
+
+
 def test_form_reports_every_blocking_finding_at_once():
     form = _income_form(ttm_total_revenue=560_000, ttm_total_expenses=220_000,
                         ttm_noi=400_000, ttm_gpr=720_000, ttm_egr=800_000,
