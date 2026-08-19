@@ -312,7 +312,15 @@ def assumptions_preview(request, pk):
         # population field) — is_valid()'s return was previously discarded
         # entirely, so nothing on screen could ever tell the analyst the
         # numbers they're looking at didn't fully absorb their last edit.
-        strip_ctx["stale"] = not ok
+        # FIELD errors only. `clean()` also raises a non-field
+        # ValidationError for any unaccepted blocking check finding, and
+        # counting that as staleness lit this warning permanently on every
+        # deal carrying one — saying "an input could not be read" about
+        # inputs that were read perfectly well, on the one indicator whose
+        # job is to tell the analyst the preview is degraded. The blocking
+        # findings have their own surface: the check panel right below.
+        strip_ctx["stale"] = bool(ok is False and
+                                  any(k != "__all__" for k in form.errors))
     except Exception:
         logger.exception("preview financials failed for deal %s", deal.pk)
         strip_ctx = {
@@ -419,6 +427,27 @@ def deal_run(request, pk):
     if _run_state(deal.runs.first()) == "running":
         messages.error(request, "An analysis is already running for this deal.")
         return redirect("deal-detail", pk=deal.pk)
+    # The assumptions form refuses a blocking finding unless the analyst
+    # accepts it; this button posts no form, so it has to ask the same
+    # question or the gate only guards one of the two ways to start a run.
+    # Fail-open on an assembly error, deliberately: an internal fault means
+    # we do not KNOW the inputs are inconsistent, and refusing to run on a
+    # bug we cannot see would be worse than the disclosure banner that
+    # backs this up on the results page.
+    try:
+        findings = services.unaccepted_blocking_findings(deal)
+    except Exception:
+        logger.exception("re-run check gate failed for deal %s", deal.pk)
+        findings = []
+    if findings:
+        messages.error(
+            request,
+            "Not re-run — %d blocking model check%s failed on the saved "
+            "inputs: %s Open Assumptions to fix the inputs, or tick "
+            "“Accept the flagged discrepancies” to proceed with them "
+            "recorded." % (len(findings), "" if len(findings) == 1 else "s",
+                           " ".join(r.message for r in findings)))
+        return redirect("deal-assumptions", pk=deal.pk)
     run = AnalysisRun.objects.create(deal=deal)
     services.start_analysis(run)
     return redirect("deal-detail", pk=deal.pk)
@@ -469,6 +498,13 @@ def deal_detail(request, pk):
         # register is also the run that predates the levered lens, and
         # the reader who needs telling is on whichever tab they opened.
         ctx.update(results_ctx.legacy_context(r))
+        # Same reasoning as the staleness line above, and the tiles make it
+        # sharper: the header row renders on EVERY tab, so the banner that
+        # marks its figures untrustworthy has to be fed outside the
+        # per-tab branches below. `checks_context` re-sets this key from
+        # the same `r["check_summary"]` on the summary tab; identical
+        # value, so the two can never disagree.
+        ctx["check_summary"] = r.get("check_summary") or {}
 
         # A settings override this run REFUSED, surfaced where the numbers
         # it changed are read. `build_config_patch` skips a stored row
@@ -567,6 +603,29 @@ def deal_download(request, pk, kind):
 
 # ── Phase 5: comps browser ──────────────────────────────────────────
 
+def _money(v):
+    """`$1,234` / `($1,234)` / `""`. Accounting parentheses because a
+    leading minus inside a dollar sign renders as `$-1,234`, which reads
+    as a typo rather than as a negative."""
+    if v is None:
+        return ""
+    try:
+        v = float(v)
+    except (TypeError, ValueError):
+        return ""
+    return f"(${abs(v):,.0f})" if v < 0 else f"${v:,.0f}"
+
+
+def _short_date(v):
+    """The date out of a stored timestamp, in whatever shape it arrives.
+    The comp DB holds SQLite TEXT written by `datetime.isoformat()`, so
+    the column carried microseconds straight to the page."""
+    if not v:
+        return ""
+    text = v.isoformat() if hasattr(v, "isoformat") else str(v)
+    return text[:10]
+
+
 COMP_COLUMNS = ["property_name", "city", "state", "nrsf", "total_units",
                 "occupancy", "adjusted_noi", "revenue_per_sf",
                 "noi_per_sf", "analysis_date", "pdf_filename"]
@@ -600,9 +659,22 @@ def comps(request):
             {k: r.get(k) for k in COMP_COLUMNS} for r in rows)
         return resp
 
+    # Display-only keys, added beside the raw ones rather than replacing
+    # them: the CSV export above rebuilds each row from COMP_COLUMNS, so
+    # the file keeps machine-readable values while the table stops showing
+    # `$4258203`, `$-46382` and a microsecond ISO timestamp.
+    for r in rows:
+        r["display_noi"] = _money(r.get("adjusted_noi"))
+        r["display_date"] = _short_date(r.get("analysis_date"))
+
     return render(request, "webapp/comps.html", {
         "rows": rows,
-        "total": len(all_rows),
+        # The FILTERED count, beside the filtered table. `len(all_rows)`
+        # told an analyst who had narrowed the set to three rows that
+        # there were ten, which is the one number on the page they cannot
+        # check against the rows in front of them.
+        "total": len(rows),
+        "unfiltered_total": len(all_rows),
         "state": state,
         "min_nrsf": min_nrsf_raw,
         "state_options": sorted({(r["state"] or "").upper()

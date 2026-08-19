@@ -34,6 +34,7 @@
             <th class="py-1.5 pr-3 text-right">CIM</th>
             <th class="py-1.5 pr-3 text-right">Low</th>
             <th class="py-1.5 pr-3 text-right">High</th>
+            <th class="py-1.5 pr-3 whitespace-nowrap">Flag</th>
           </tr>
         </thead>
         <tbody>
@@ -43,6 +44,13 @@
             <td class="py-1.5 pr-3 text-right">{% if row.cim_per_sf is not None %}${{ row.cim_per_sf|floatformat:2 }}{% else %}—{% endif %}</td>
             <td class="py-1.5 pr-3 text-right">${{ row.low|floatformat:2 }}</td>
             <td class="py-1.5 pr-3 text-right">${{ row.high|floatformat:2 }}</td>
+            {% comment %} The rows already carry flag/flag_class from
+               services.expense_benchmark_rows — the same list the
+               Assumptions page renders WITH this column. Omitting it here
+               left the one read-only surface an analyst reviews showing
+               an out-of-range line as if it were in range.
+            {% endcomment %}
+            <td class="py-1.5 pr-3 whitespace-nowrap {{ row.flag_class }}">{{ row.flag|default:"" }}</td>
           </tr>
           {% endfor %}
         </tbody>

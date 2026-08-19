@@ -10,9 +10,9 @@
     to underwrite it again.
   </div>
   {% else %}
-  {# aria-live belongs on this STABLE wrapper — the partial replaces
+  {% comment %} aria-live belongs on this STABLE wrapper — the partial replaces
      itself with hx-swap="outerHTML", so a live region declared inside it
-     is torn down and rebuilt each poll and never announces. #}
+     is torn down and rebuilt each poll and never announces. {% endcomment %}
   <div aria-live="polite" aria-atomic="true">
     {% include "webapp/_extract_status.html" %}
   </div>

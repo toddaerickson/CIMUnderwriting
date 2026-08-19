@@ -679,6 +679,38 @@ def build_preview_cim(deal, cleaned, post):
     return cim, ov
 
 
+def unaccepted_blocking_findings(deal) -> list:
+    """Blocking check failures on the deal's SAVED inputs that no analyst
+    has accepted — the assumptions form's gate, re-asked on the paths that
+    never touch the form.
+
+    `webapp.forms.AssumptionsForm.clean` refuses a submission carrying a
+    blocking finding unless the analyst ticks the accept control, which
+    records the waiver in `assumption_overrides["accepted_checks"]`. The
+    Re-run Analysis button posts no form, so before this existed it walked
+    straight past that gate: a deal saved with an accepted finding and one
+    saved with a never-examined one re-ran identically, and the published
+    IRR, Max Offer and recommendation carried no trace of either.
+
+    Matching is by check id, so a waiver accepted for one finding does not
+    silently cover a DIFFERENT check that started failing later.
+
+    The CIM is assembled exactly as `_analysis_worker` assembles it, not
+    re-derived, so the gate can never test inputs the run will not use.
+    """
+    from analysis import checks
+
+    overrides = deal.assumption_overrides or {}
+    cim = cim_from_dict(deal.cim_json or {})
+    cim_o = overrides.get("cim_overrides")
+    if cim_o:
+        _apply_overrides(cim, copy.deepcopy(cim_o))
+    results = checks.run_checks(checks.input_from_cim(cim))
+    accepted = {a.get("id") for a in overrides.get("accepted_checks") or []}
+    return [r for r in checks.blocking_failures(results)
+            if r.id not in accepted]
+
+
 def flag_class(flag: str | None) -> str:
     """Single-source flag→colour rule for the Income & Expenses table AND
     the preview partial's OOB spans (webapp/templates/webapp/

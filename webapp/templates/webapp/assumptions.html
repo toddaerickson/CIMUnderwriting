@@ -47,11 +47,11 @@
         hx-post="{% url 'deal-assumptions-preview' deal.pk %}"
         hx-trigger="change delay:400ms" hx-target="#model-strip" hx-swap="outerHTML">
     {% csrf_token %}
-    {# Single, always-visible action bar — the form is long and analysts
+    {% comment %} Single, always-visible action bar — the form is long and analysts
        save/run from any scroll position; buttons live here and only here.
        top-14 clears the fixed mobile hamburger; the error banner lives
        INSIDE the sticky wrapper so validation failures stay visible at
-       any scroll position instead of sliding under the bar. #}
+       any scroll position instead of sliding under the bar. {% endcomment %}
     <div class="sticky top-14 md:top-0 z-20 -mx-1 px-1 py-2 bg-slate-50/95 backdrop-blur border-b border-slate-200 space-y-2">
       <div class="flex items-center justify-end gap-2">
         <button type="submit" class="border border-slate-300 text-slate-700 hover:bg-slate-50 text-sm px-4 py-1.5 rounded bg-white">Save Assumptions</button>
@@ -66,9 +66,9 @@
       {% endif %}
     </div>
 
-    {# Live model strip — first paint from the render context, htmx
+    {% comment %} Live model strip — first paint from the render context, htmx
        replaces #model-strip in place (outerHTML) on every field change.
-       Inputs never live inside this wrapper, so focus is never stolen. #}
+       Inputs never live inside this wrapper, so focus is never stolen. {% endcomment %}
     <div class="bg-white border border-slate-200 rounded-lg px-4 py-2">
       {% include "webapp/_model_preview.html" %}
     </div>
@@ -85,10 +85,10 @@
       </div>
     </details>
 
-    {# Drivers sits right after Property (not after Size/Demographics) so
+    {% comment %} Drivers sits right after Property (not after Size/Demographics) so
        the fields that actually move the IRR outcome are the first thing an
        analyst edits — matches SECTION_DRIVERS' intent in forms.py, which
-       the original section order didn't. #}
+       the original section order didn't. {% endcomment %}
     <details open class="bg-white border border-slate-200 rounded-lg">
       <summary class="cursor-pointer select-none px-4 py-2 text-sm font-semibold">Drivers</summary>
       <div class="px-4 pb-3 overflow-x-auto">
@@ -137,12 +137,12 @@
       </div>
     </details>
 
-    {# Same vertical Extracted|Value|Source shape as Drivers (model_rows) —
+    {% comment %} Same vertical Extracted|Value|Source shape as Drivers (model_rows) —
        not a label/input grid — so the one provenance an analyst actually
        needs here (CIM vs Census-filled) is on screen, and the section
        can never hit the rigid-label-track legibility failure the other
        sections had, since a table scrolls (overflow-x-auto) instead of
-       squeezing its inputs. #}
+       squeezing its inputs. {% endcomment %}
     <details open class="bg-white border border-slate-200 rounded-lg">
       <summary class="cursor-pointer select-none px-4 py-2 text-sm font-semibold">Demographics</summary>
       <div class="px-4 pb-3 overflow-x-auto">

@@ -819,6 +819,13 @@ def run_analysis(result: AnalysisResult, progress: Callable = None,
         )
     except Exception as e:
         result.errors.append(f"Template generation failed: {e}")
+        # The banner gets the actionable sentence; the log gets the
+        # cell-by-cell diagnostic that would otherwise have to be printed
+        # to the analyst to avoid losing it.
+        logger.warning("Template generation failed: %s", e, exc_info=True)
+        detail = getattr(e, "detail", "")
+        if detail:
+            logger.warning("Template shape detail: %s", detail)
 
     # Save to comp database
     try:

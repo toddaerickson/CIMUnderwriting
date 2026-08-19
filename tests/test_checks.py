@@ -719,3 +719,67 @@ def test_memo_and_excel_are_unchanged_when_no_checks_are_supplied(tmp_path):
         financial_analysis=fin, scenario_results={}, sensitivity={},
         max_offer={}, output_dir=str(tmp_path))
     assert "Checks" not in load_workbook(path).sheetnames
+
+
+# ── The modelled NOI, not the entered one ───────────────────────────
+# The order-of-magnitude tripwires were written for a four-property
+# portfolio CIM (see this module's header comment in analysis/checks.py)
+# and did not fire on it, because they read `ttm_noi` while
+# analysis.financials._compute_adjusted_noi discards `ttm_noi` outright
+# whenever total revenue is present and prices the deal on
+# `revenue − adjusted_expenses`. These pin the number under test.
+
+# The real Abilene figures, as published: an entered NOI that looks
+# healthy ($4.95/SF, a 6.9% cap) sitting beside a 10x-too-large revenue
+# line that drives every return in the model.
+ABILENE_10X_REVENUE = {
+    "ttm_total_revenue": 4_410_000.0, "ttm_total_expenses": 200_050.0,
+    "ttm_noi": 241_491.0, "nrsf": 48_762.0, "asking_price": 3_500_000.0}
+
+
+def test_noi_per_nrsf_fails_on_the_noi_the_model_prices_on():
+    r = _run("noi_per_nrsf_plausible", **ABILENE_10X_REVENUE)
+    assert r.blocks
+    # Entered NOI alone is a perfectly plausible $4.95/SF — the check must
+    # not be answering about that number.
+    entered = ABILENE_10X_REVENUE["ttm_noi"] / ABILENE_10X_REVENUE["nrsf"]
+    assert abs(entered - 4.95) < 0.01
+    assert r.values["modelled_noi"] == 4_209_950.0
+    assert "$86.34/SF" in r.message
+
+
+def test_entry_cap_fails_on_the_noi_the_model_prices_on():
+    r = _run("entry_cap_plausible", **ABILENE_10X_REVENUE)
+    assert r.blocks
+    # 6.900% is what the check used to report as "a plausible going-in
+    # yield" for this deal; it must now appear only as the contrast.
+    assert "120.284%" in r.message
+    assert r.values["modelled_entry_cap"] > 1.0
+
+
+def test_a_consistent_triple_reports_the_entered_noi_unchanged():
+    """The regression guard that matters: when the identity holds, the
+    modelled NOI is the entered NOI and no message may move."""
+    ok = {**ABILENE_10X_REVENUE, "ttm_total_revenue": 441_536.0, "ttm_noi": 241_486.0}
+    assert _run("noi_per_nrsf_plausible", **ok).message == (
+        "TTM NOI of $4.95/SF is a plausible figure for 48,762 SF.")
+    assert _run("entry_cap_plausible", **ok).message == (
+        "Entry cap of 6.900% is a plausible going-in yield.")
+
+
+def test_the_engine_figure_beats_the_derived_one():
+    """`input_from_cim` passes the exact adjusted NOI; the form path has
+    no expense analysis and derives revenue − expenses instead."""
+    r = _run("noi_per_nrsf_plausible", **ABILENE_10X_REVENUE, modelled_noi=4_258_203.0)
+    assert r.values["modelled_noi"] == 4_258_203.0
+    assert "$87.33/SF" in r.message
+
+
+def test_an_implausible_entered_noi_still_fails_when_the_triple_agrees():
+    """Coverage the fix must not trade away: the original check still
+    fires on its own axis."""
+    r = _run("noi_per_nrsf_plausible", ttm_total_revenue=4_410_000.0,
+             ttm_total_expenses=200_050.0, ttm_noi=4_209_950.0,
+             nrsf=48_762.0)
+    assert r.blocks
+    assert "above the $30.00/SF ceiling" in r.message
