@@ -153,6 +153,14 @@ class CheckInput:
     ttm_total_expenses: float | None = None
     ttm_noi: float | None = None
     ttm_months: int | None = None   # months of actuals behind the TTM figures
+    # The NOI the projection will ACTUALLY capitalize, which is not always
+    # `ttm_noi`: analysis.financials._compute_adjusted_noi discards the
+    # entered NOI outright whenever total revenue is present and prices the
+    # deal on `revenue − adjusted_expenses` instead. The engine passes the
+    # figure it computed; the form path, which has no expense analysis yet,
+    # derives `revenue − expenses` (see _modelled_noi). None means "no
+    # second figure exists", not "zero".
+    modelled_noi: float | None = None
     # Pricing. Carried for `entry_cap_plausible` only — no other check
     # reads it, and the register deliberately does not evaluate whether a
     # price is GOOD (that is the gates' and the solvers' job), only
@@ -200,6 +208,35 @@ def _band(inp: CheckInput, key: str):
     if inp.benchmarks and key in inp.benchmarks:
         return inp.benchmarks[key]
     return EXPENSE_BENCHMARKS[key]
+
+
+def _modelled_noi(inp: CheckInput):
+    """The NOI the model will price on, when that is a different number
+    from the one the analyst entered.
+
+    Returns None when there is no second figure to test — either the
+    caller supplied none and the income triple is incomplete, or the two
+    agree within the identity tolerance, in which case testing both would
+    only report the same verdict twice.
+
+    The form path's `revenue − expenses` is an UPPER BOUND on what the
+    engine ultimately capitalizes, since analyst-adjusted expenses are the
+    max of the CIM line and its benchmark and so only ever rise. That is
+    the conservative direction for the ceiling these tripwires exist to
+    enforce, and the engine passes its exact figure anyway.
+    """
+    modelled = inp.modelled_noi
+    if modelled is None:
+        rev, exp = inp.ttm_total_revenue, inp.ttm_total_expenses
+        if rev is None or exp is None:
+            return None
+        modelled = rev - exp
+    if inp.ttm_noi is None:
+        return modelled
+    if abs(modelled - inp.ttm_noi) <= noi_recon_tolerance(
+            inp.ttm_total_revenue or inp.ttm_noi):
+        return None
+    return modelled
 
 
 def _psf(v) -> str:
@@ -414,6 +451,25 @@ def _noi_per_nrsf_plausible(inp):
     per_sf = (noi / nrsf) if (noi is not None and nrsf) else None
     values = {"noi_per_nrsf": per_sf, "ttm_noi": noi, "nrsf": nrsf,
               "low": low, "high": high}
+    # The modelled NOI is tested FIRST and on its own terms. When it
+    # differs from the entered one it is the number every return is
+    # computed from, so an entered NOI that looks fine cannot be allowed
+    # to answer for it — that is precisely how the portfolio CIM in this
+    # module's header comment passed both tripwires written to catch it.
+    modelled = _modelled_noi(inp)
+    if modelled is not None and nrsf:
+        m_per_sf = modelled / nrsf
+        values = {**values, "modelled_noi": modelled,
+                  "modelled_noi_per_nrsf": m_per_sf}
+        if not (low <= m_per_sf <= high):
+            return (FAIL, f"The NOI this model prices on is ${modelled:,.0f} "
+                          f"— {_psf(m_per_sf)} against {nrsf:,.0f} SF, "
+                          f"outside the {_psf(low)}–{_psf(high)} plausible "
+                          f"range. That figure is revenue minus expenses, "
+                          f"NOT the ${noi:,.0f} TTM NOI entered, which the "
+                          f"projection discards whenever total revenue is "
+                          f"present. Every return in this model is computed "
+                          f"from ${modelled:,.0f}.", values)
     if per_sf is None:
         return (SKIPPED, "Needs both TTM NOI and NRSF.", values)
     if low <= per_sf <= high:
@@ -455,6 +511,26 @@ def _entry_cap_plausible(inp):
     cap = (noi / price) if (noi is not None and price) else None
     values = {"entry_cap": cap, "ttm_noi": noi, "asking_price": price,
               "low": low, "high": high}
+    # Tested first, and for the reason given in noi_per_nrsf_plausible:
+    # the exit-cap floor this docstring warns about is applied to the
+    # MODELLED entry cap, so validating the entered one reports a
+    # plausible yield for a deal whose exit was repriced at 121%.
+    modelled = _modelled_noi(inp)
+    if modelled is not None and price:
+        m_cap = modelled / price
+        values = {**values, "modelled_noi": modelled,
+                  "modelled_entry_cap": m_cap}
+        if not (low <= m_cap <= high):
+            return (FAIL, f"The NOI this model prices on is ${modelled:,.0f} "
+                          f"— an entry cap of {_cap(m_cap)} against an "
+                          f"asking price of ${price:,.0f}, outside the "
+                          f"{_cap(low)}–{_cap(high)} plausible range. That "
+                          f"figure is revenue minus expenses, NOT the "
+                          f"${noi:,.0f} TTM NOI entered, which yields a "
+                          f"reassuring {_cap(cap)} the projection never "
+                          f"uses. The exit cap is floored at this entry "
+                          f"cap, so every scenario is repriced by it.",
+                    values)
     if cap is None:
         return (SKIPPED, "Needs both TTM NOI and an asking price.", values)
     if low <= cap <= high:
@@ -973,6 +1049,11 @@ def input_from_cim(cim, financial_analysis=None, physical_analysis=None,
         ttm_total_expenses=cim.ttm_total_expenses,
         ttm_noi=cim.ttm_noi,
         ttm_months=cim.ttm_months,
+        # The engine knows the exact figure the projection capitalizes, so
+        # it passes that rather than letting _modelled_noi re-derive an
+        # approximation of it from the income triple.
+        modelled_noi=(fin.get("adjusted_ttm_noi") or {}).get(
+            "analyst_adjusted_noi"),
         asking_price=cim.asking_price,
         nrsf=cim.nrsf,
         unit_mix=_unit_mix_dicts(cim.unit_mix),

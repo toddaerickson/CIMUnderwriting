@@ -1298,3 +1298,108 @@ def test_the_summary_tab_renders_the_bridge_and_foots_to_the_total(
     assert "Developer Profit @ 12.5%" in body
     assert body.count(fmt_money(repl["total_replacement"])) >= 2  # foot + line
     assert f"{fmt_money(repl['replacement_per_sf'])}/SF" in body
+
+
+# ── The re-run button and the assumptions form's blocking gate ───────
+# `AssumptionsForm.clean` refuses a submission carrying a blocking check
+# finding unless the analyst ticks the accept control. Re-run Analysis
+# posts no form, so it walked straight past that gate: the Abilene deal
+# re-ran with a 10x revenue line and published an IRR, a Max Offer and a
+# recommendation computed from it.
+
+def _deal_with_blocking_finding(deals_dir, slug="broken"):
+    """Revenue an order of magnitude too large beside a plausible NOI —
+    the shape the published Abilene run actually had."""
+    deal = _make_extracted_deal(deals_dir, slug=slug)
+    deal.cim_json = {**deal.cim_json, "ttm_total_revenue": 4_410_000.0,
+                     "ttm_total_expenses": 200_050.0, "ttm_noi": 241_491.0}
+    deal.save()
+    return deal
+
+
+@pytest.mark.django_db
+def test_rerun_refuses_an_unaccepted_blocking_finding(
+        client, operator, deals_dir, monkeypatch):
+    from webapp import services
+    deal = _deal_with_blocking_finding(deals_dir)
+    monkeypatch.setattr(services, "start_analysis",
+                        lambda run: pytest.fail("must not start the run"))
+    resp = client.post(f"/deals/{deal.pk}/run/")
+    assert resp.status_code == 302
+    assert resp.url == f"/deals/{deal.pk}/assumptions/"
+    assert deal.runs.count() == 0
+
+
+@pytest.mark.django_db
+def test_rerun_proceeds_once_the_finding_is_accepted(
+        client, operator, deals_dir, fake_run):
+    """The waiver the form records is honoured here, by check id — the
+    gate re-asks the question, it does not override the answer."""
+    deal = _deal_with_blocking_finding(deals_dir, slug="accepted")
+    deal.assumption_overrides = {"accepted_checks": [
+        {"id": "income_identity", "message": "waived"},
+        {"id": "noi_per_nrsf_plausible", "message": "waived"},
+        {"id": "entry_cap_plausible", "message": "waived"}]}
+    deal.save()
+    resp = client.post(f"/deals/{deal.pk}/run/")
+    assert resp.status_code == 302
+    assert resp.url == f"/deals/{deal.pk}/"
+    assert deal.runs.count() == 1
+
+
+@pytest.mark.django_db
+def test_a_waiver_does_not_cover_a_different_check(
+        client, operator, deals_dir, monkeypatch):
+    from webapp import services
+    deal = _deal_with_blocking_finding(deals_dir, slug="partial")
+    deal.assumption_overrides = {"accepted_checks": [
+        {"id": "income_identity", "message": "waived"}]}
+    deal.save()
+    monkeypatch.setattr(services, "start_analysis",
+                        lambda run: pytest.fail("must not start the run"))
+    client.post(f"/deals/{deal.pk}/run/")
+    assert deal.runs.count() == 0
+
+
+@pytest.mark.django_db
+def test_a_clean_deal_still_reruns(client, operator, deals_dir, fake_run):
+    """The gate must not become a wall: the standard fixture is clean."""
+    deal = _make_extracted_deal(deals_dir, slug="clean")
+    resp = client.post(f"/deals/{deal.pk}/run/")
+    assert resp.url == f"/deals/{deal.pk}/"
+    assert deal.runs.count() == 1
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize("tab", ["summary", "returns", "financials", "risks"])
+def test_a_blocking_failure_is_disclosed_beside_the_headline_tiles(
+        client, operator, deals_dir, fake_run, tab):
+    """The Model Checks panel is a collapsed section on ONE tab; the
+    Recommendation / IRR / Max Offer tiles render on all four. A reader
+    who takes the recommendation off that row never scrolls to the panel,
+    so the disclosure has to sit with the numbers it qualifies.
+
+    Parameterised across the tabs because `check_summary` used to be
+    added only inside the `tab == "summary"` branch — the same trap the
+    staleness notice beside it already carries a comment about.
+    """
+    deal = _make_extracted_deal(deals_dir, slug=f"blocked-{tab}")
+    run = _start_run(deal)
+    run.result_json = {**run.result_json,
+                       "check_summary": {"total": 16, "passed": 2,
+                                         "failed": 4, "skipped": 10,
+                                         "blocking_failed": 3,
+                                         "advisory_failed": 1}}
+    run.save()
+    content = client.get(f"/deals/{deal.pk}/?tab={tab}").content.decode()
+    assert "3 blocking model checks failed" in content
+    assert "read them as untrustworthy" in content
+
+
+@pytest.mark.django_db
+def test_a_clean_run_shows_no_blocking_banner(client, operator, deals_dir,
+                                              fake_run):
+    deal = _make_extracted_deal(deals_dir, slug="cleanbanner")
+    _start_run(deal)   # fake_run stamps blocking_failed = 0
+    content = client.get(f"/deals/{deal.pk}/").content.decode()
+    assert "blocking model check" not in content

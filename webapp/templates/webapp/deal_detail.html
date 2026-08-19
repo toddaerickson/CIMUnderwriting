@@ -28,6 +28,20 @@
     </div>
   </div>
 
+  {% comment %} Above the tiles, not inside the Model Checks panel further
+     down the Summary tab: a blocking integrity failure means the tiles
+     themselves are computed from an input the register could not
+     reconcile, and a reader who takes the recommendation off this row
+     never scrolls to the panel that would have told them. Red, because
+     unlike the slate "predates" notice below, something here IS wrong.
+  {% endcomment %}
+  {% if done_run and check_summary.blocking_failed %}
+  <div class="my-3 rounded-md border border-red-300 bg-red-50 px-4 py-3 text-sm text-red-900">
+    <span class="font-semibold">{{ check_summary.blocking_failed }} blocking model check{{ check_summary.blocking_failed|pluralize }} failed on this run&rsquo;s inputs.</span>
+    The figures below are computed from inputs the model could not reconcile &mdash; read them as untrustworthy until the checks pass. See Model Checks on the Summary tab for the detail.
+  </div>
+  {% endif %}
+
   {% if done_run %}
   <div class="grid grid-cols-2 sm:grid-cols-4 gap-2 my-3">
     <div class="rounded-md border border-slate-200 bg-white px-3 py-2">
@@ -50,11 +64,11 @@
   {% endif %}
 
   {% if show_progress %}
-  {# aria-live sits on this STABLE wrapper, not on the polled div: the
+  {% comment %} aria-live sits on this STABLE wrapper, not on the polled div: the
      partial swaps itself via hx-swap="outerHTML", so a live region
      declared inside it is destroyed and recreated on every poll and
      announces nothing. The wrapper survives, so its subtree mutations
-     are what a screen reader reads out. #}
+     are what a screen reader reads out. {% endcomment %}
   <div class="my-3" aria-live="polite" aria-atomic="true">{% include "webapp/_run_status.html" with failed=run_failed %}</div>
   {% endif %}
 
