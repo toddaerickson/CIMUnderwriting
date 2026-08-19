@@ -368,6 +368,12 @@ def _add_assumption_register(doc, assumption_register):
     about THIS run and is typically ten to twenty lines. The second is the
     whole register, grouped by subject, for the auditor.
 
+    The prose around them is not decoration: with `external` outside
+    `CHOSEN`, a run whose only unusual input was MEASURED reaches B.1 with
+    an empty table, and the sentence that filled it used to read "every
+    input came from the CIM as stated" — a claim about a Census figure the
+    CIM never printed. Whatever the tables cannot hold, a sentence must.
+
     Neither table omits anything. A "defaults suppressed for brevity"
     register asks the reader to trust that absence means default, which is
     the same act of faith item T exists to end — so the bulk goes to the
@@ -387,13 +393,30 @@ def _add_assumption_register(doc, assumption_register):
     doc.add_paragraph(
         f"Every number this analysis used, with its source. Of "
         f"{counts['total']} assumptions, {counts['chosen']} came from "
-        f"something other than the model's shipped defaults: "
+        f"something other than the model's shipped defaults and the CIM's "
+        f"own figures: "
         f"{counts['deal']} entered for this deal, {counts['settings']} from "
         f"a dated settings override, and {counts['fallback']} filled in "
         f"because the CIM did not state a value. Those are listed first. "
         f"The full register follows — nothing is omitted from it, so an "
         f"assumption absent below is an assumption this run did not use."
     )
+
+    # A measurement belongs to neither table's promise: B.1 lists what a
+    # human or a fallback produced, and a Census figure is neither, while
+    # calling it "from the CIM" in B.2's eyes would be the very claim the
+    # `external` provenance exists to refuse. So it gets a sentence, on the
+    # same rule as the OCR note below — rendered only when it happened.
+    measured = counts["external"]
+    if measured:
+        doc.add_paragraph(
+            f"A further {measured} "
+            f"{'assumption was' if measured == 1 else 'assumptions were'} "
+            f"measured from public data for this location — stated nowhere in "
+            f"the CIM, and not a model default either. "
+            f"{'It is' if measured == 1 else 'They are'} in the full register "
+            f"below, with the source and the point the measurement was "
+            f"centred on.")
 
     # A transcribed page is not a "chosen" assumption, so it lands in B.2
     # among a hundred and forty others — and it is exactly the kind of fact
@@ -412,7 +435,10 @@ def _add_assumption_register(doc, assumption_register):
     if not chosen:
         doc.add_paragraph(
             "None. Every number below is the model's shipped default, and "
-            "every input came from the CIM as stated.")
+            "every input came from the CIM as stated."
+            if not measured else
+            "None. Every number below is the model's shipped default or a "
+            "figure the CIM stated, apart from the measurements noted above.")
     else:
         table = doc.add_table(rows=1, cols=4)
         table.style = "Light Grid Accent 1"

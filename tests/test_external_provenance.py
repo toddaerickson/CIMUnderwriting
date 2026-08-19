@@ -21,6 +21,11 @@ tests here, because fixing any two still leaves the memo lying:
 The surface assertions are the point (this file's siblings learned that
 the hard way: a register that records perfectly and renders nowhere
 delivers nothing). Each names the deliberate break that turns it red.
+
+Section 6 is the follow-up: two more ways the same sentence — "stated in
+the CIM" — got said about a number the CIM never stated, plus a guard on
+the next one. Fixing the measurement left both standing, and one of them
+was CAUSED by the fix.
 """
 
 import pytest
@@ -351,3 +356,168 @@ def test_the_assumptions_page_labels_a_measured_demographic(tmp_path):
     by_label = {r["label"]: r["source"] for r in rows}
     assert by_label["3-Mile Population"] == "Census"
     assert by_label["Rentable SF"] == "CIM"
+
+
+# ── 6. The two the first pass left behind ───────────────────────────
+#
+# Both were reproduced against merged `main` before being fixed, and both
+# are the SAME defect as the one above wearing different clothes: a number
+# the document does not contain, credited to the document. The first is
+# older than the measurement work — an analyst typing into an empty field
+# has always read as "stated in the CIM". The second is the price of
+# keeping `EXTERNAL` out of `CHOSEN`, which is still the right call: the
+# tables were fine, the SENTENCES around them were counting the wrong set.
+# Found independently in PR #102, verified here rather than taken on its
+# word.
+
+def test_a_number_the_analyst_typed_into_an_empty_field_is_not_the_cims():
+    """Extraction found no market rent; the analyst supplied one. That is
+    an act of judgement by a human — the whole thing `CHOSEN` exists to
+    surface — and it rendered as "stated in the CIM".
+
+    MUTATION: restore `edited = ... and prior is not None and ...` as the
+    only route to `DEAL`. The row silently re-acquires the CIM's name.
+    """
+    cim, snapshot = _measured_deal()
+    cim.market_rent_psf = 1.35
+    snapshot["market_rent_psf"] = None       # extraction found nothing
+
+    row = _row(A.collect(cim_data=cim, cim_snapshot=snapshot),
+               "cim.market_rent_psf")
+    assert row.provenance == A.DEAL
+    assert row.provenance_label != A.PROVENANCE_LABELS[A.CIM]
+    assert row.detail, "a filled-in field must say where it came from"
+    # Nothing was displaced, so nothing may be reported as replaced —
+    # "Replaced: —" and "Replaced: 0" are different claims.
+    assert row.was is None
+
+
+def test_a_field_the_snapshot_never_carried_stays_cim():
+    """Schema drift, not an analyst. `Deal.cim_json` is `asdict`, so a
+    field of that snapshot's vintage is a KEY even when its value is None;
+    a field missing entirely means the deal was stored before the parser
+    knew the field, and its origin is simply unknowable.
+
+    MUTATION: test `prior is None` alone, without `field in snapshot` —
+    every deal stored before a given field existed starts claiming the
+    analyst typed it.
+    """
+    cim, snapshot = _measured_deal()
+    cim.market_rent_psf = 1.35
+    snapshot.pop("market_rent_psf", None)
+
+    row = _row(A.collect(cim_data=cim, cim_snapshot=snapshot),
+               "cim.market_rent_psf")
+    assert row.provenance == A.CIM
+
+
+def test_a_field_measured_after_the_analyst_fixed_the_address_reads_measured():
+    """Why the measured branch is tested FIRST. Extraction's enrichment
+    pass failed (no geocode), so the snapshot carries None; the analyst
+    corrected the ZIP and the analysis-time pass really measured the
+    population. Nobody typed that number.
+
+    MUTATION: move the `EXTERNAL` branch below the FILLED-AN-EMPTY-FIELD
+    branch — the Census's figure is reported as one the analyst entered,
+    which is the mislabel of this whole module with the credit reversed.
+    (Below the CORRECTION branch is harmless and does not turn this red:
+    a correction needs a prior to differ from, and this case has none.
+    The measured branch has to clear the branch above it, not both.)
+    """
+    cim, snapshot = _measured_deal()
+    snapshot["population_3mi"] = None
+
+    row = _row(A.collect(cim_data=cim, cim_snapshot=snapshot,
+                         enrichment_log=MEASURED_LOG),
+               "cim.population_3mi")
+    assert row.provenance == A.EXTERNAL
+    assert "Census API" in row.detail
+
+
+def test_a_measured_only_run_is_not_headlined_as_all_model_defaults():
+    """The results panel, rendered. With `chosen` driving the headline, a
+    run whose population was measured said "all model defaults" over a
+    Census figure — every row of it correct, and the one line most readers
+    stop at false.
+
+    MUTATION: put `register_counts.chosen` back in the summary line.
+    """
+    from django.template.loader import render_to_string
+
+    from webapp.results import register_context
+
+    cim, snapshot = _measured_deal()
+    rows = A.collect(cim_data=cim, cim_snapshot=snapshot,
+                     enrichment_log=MEASURED_LOG)
+    ctx = register_context({"assumption_register": A.to_dicts(rows)})
+    assert ctx["register_counts"]["chosen"] == 0, "the case that broke it"
+    assert ctx["register_counts"]["not_from_defaults"] == 2
+
+    html = render_to_string("webapp/_tab_summary.html", ctx)
+    assert "all model defaults" not in html
+    assert "2 not from the CIM or the model defaults" in html
+
+
+def test_the_memo_does_not_tell_a_measured_run_it_read_everything_in_the_cim():
+    """Appendix B's B.1 empty case, which is reachable exactly when the
+    headline above is: no deal entry, no settings row, no fallback — and a
+    measurement. It read "every input came from the CIM as stated".
+
+    MUTATION: drop the `measured` branch in `_add_assumption_register`.
+    """
+    from docx import Document
+
+    from output.memo_writer import _add_assumption_register
+
+    cim, snapshot = _measured_deal()
+    rows = A.collect(cim_data=cim, cim_snapshot=snapshot,
+                     enrichment_log=MEASURED_LOG)
+    doc = Document()
+    _add_assumption_register(doc, A.to_dicts(rows))
+    text = "\n".join(p.text for p in doc.paragraphs)
+
+    assert "every input came from the CIM as stated" not in text
+    assert "measured from public data for this location" in text
+    # The count the lead sentence quotes is the one B.1 actually lists,
+    # so the two cannot contradict each other.
+    assert "0 came from something other than the model's shipped defaults" \
+        in text
+
+
+def test_no_caller_wires_a_tier_the_register_cannot_name():
+    """Green today; red the day enrichment learns a third source.
+
+    `_add_cim_rows` maps exactly ONE tier to a provenance — 2, the
+    measurement. Tiers 3 (the comp DB) and 4 (a static default) are
+    implemented in `DataResolver.resolve` and wired by NOBODY, so every
+    other tier falling through to "stated in the CIM" is unreachable
+    today. That is a fact about the call sites, and nothing in the
+    register would notice it changing: wire `tier3_fn` for a demographic
+    and a comp-database figure starts reporting itself as the seller's.
+    A comp-DB value is not `external` by default either — it is this
+    system's own prior data, and #93 is a whole PR about how stale that
+    can be — so the mapping is a decision, not a default, and this test
+    exists to force it to be made once rather than discovered later.
+    """
+    import ast
+    import inspect
+
+    from extract.enrichment import DataResolver
+
+    params = inspect.signature(DataResolver.resolve).parameters
+    assert {"tier3_fn", "tier4_default"} <= set(params), \
+        "the tiers were renamed — this guard is watching nothing"
+
+    src = inspect.getsource(inspect.getmodule(DataResolver))
+    calls = [n for n in ast.walk(ast.parse(src))
+             if isinstance(n, ast.Call)
+             and isinstance(n.func, ast.Attribute)
+             and n.func.attr == "resolve"]
+    assert calls, "no `resolve` call sites found — the walk missed them"
+
+    wired = {kw.arg for c in calls for kw in c.keywords} & {"tier3_fn",
+                                                            "tier4_default"}
+    assert not wired, (
+        f"{sorted(wired)} is now wired for a CIMData field. Give the tier a "
+        f"provenance in `analysis.assumptions._add_cim_rows` first — "
+        f"unmapped, it renders as 'stated in the CIM'.")

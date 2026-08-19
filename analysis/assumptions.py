@@ -107,6 +107,22 @@ PROVENANCE_KEYS = tuple(PROVENANCE_LABELS)
 #: the memo's B.2, the workbook's Inputs sheet and the results panel.
 CHOSEN = (DEAL, SETTINGS, FALLBACK)
 
+#: Neither the CIM's own figures nor the shipped defaults produced these.
+#: A HEADLINE counts from this; the tables count from `CHOSEN`.
+#:
+#: Keeping `EXTERNAL` out of `CHOSEN` is right (above), but `chosen == 0`
+#: was also standing in for "then there is nothing here but the CIM and the
+#: defaults" — and a run whose population was MEASURED makes that false.
+#: The results panel printed "all model defaults" over a Census figure, and
+#: memo B.1 printed "every input came from the CIM as stated" about a
+#: number the CIM never stated. Two different questions were being asked
+#: through one constant, and the surfaces that asked the second one got a
+#: wrong answer the day a sixth provenance existed. `CIM` stays out of this
+#: tuple for the same reason it stays out of `CHOSEN`: both sentences name
+#: the CIM explicitly, so a CIM row is disclosed by the wording, not by the
+#: count.
+NOT_FROM_DEFAULTS = CHOSEN + (EXTERNAL,)
+
 # ── Groups, in render order ─────────────────────────────────────────
 
 G_DEAL = "Deal Inputs"
@@ -442,6 +458,10 @@ def summarize(rows) -> dict:
     render "0 entered for this deal" rather than reasoning about a missing
     key — a count silently absent reads as a count of none anyway, and
     only one of those two is true on purpose.
+
+    Two derived keys ride along, and they are NOT interchangeable:
+    `chosen` is what the highlighted tables list, `not_from_defaults` is
+    what a headline may claim. See both constants.
     """
     counts = {k: 0 for k in PROVENANCE_KEYS}
     for row in rows:
@@ -449,6 +469,7 @@ def summarize(rows) -> dict:
             counts[row.provenance] += 1
     counts["total"] = len(rows)
     counts["chosen"] = sum(counts[k] for k in CHOSEN)
+    counts["not_from_defaults"] = sum(counts[k] for k in NOT_FROM_DEFAULTS)
     return counts
 
 
@@ -635,9 +656,10 @@ def _add_cim_rows(reg, cim_data, cim_snapshot, enrichment_log=None):
     """The deal's own numbers, and whether the analyst corrected one.
 
     `cim_snapshot` is the PRISTINE extraction (`Deal.cim_json`), so a field
-    that differs from it was edited on the assumptions page. The CLI passes
-    no snapshot and edits nothing, so every stated field is `cim` there —
-    which is true, not a degraded mode.
+    that differs from it was edited on the assumptions page — and a field
+    the snapshot carried as EMPTY was typed in there, which is the same act
+    and reads the same way. The CLI passes no snapshot and edits nothing, so
+    every stated field is `cim` there — which is true, not a degraded mode.
 
     A field with no value contributes NOTHING: it moved no output, and a
     fallback that stood in for it is already a row of its own.
@@ -670,22 +692,39 @@ def _add_cim_rows(reg, cim_data, cim_snapshot, enrichment_log=None):
         if value is None or value == "":
             continue
         prior = snapshot.get(field)
-        edited = bool(snapshot) and prior is not None and prior != value
         entry = origin_for(log, field, value)
-        if edited:
-            # An analyst correction wins over a measurement for the same
-            # reason it wins over the CIM: they typed the number knowing
-            # what it replaced. `origin_for` has already refused the stale
-            # entry, so this branch cannot credit the Census with it.
-            provenance, detail = DEAL, "corrected on the assumptions page"
-        elif entry is not None and entry.get("tier") == MEASURED_TIER:
-            provenance, detail = EXTERNAL, _measurement_detail(log, entry)
+        if entry is not None and entry.get("tier") == MEASURED_TIER:
+            # Measured is tested FIRST, and the order is load-bearing. When
+            # extraction's enrichment pass fails and the analyst then fixes
+            # the address, re-enrichment measures the field at ANALYSIS time
+            # — so the snapshot holds None and the "analyst filled it" branch
+            # below would otherwise claim a number the analyst never typed.
+            # `origin_for` has already refused any entry whose logged value
+            # is not this one, so an overtyped figure cannot reach here.
+            provenance, was, detail = EXTERNAL, None, _measurement_detail(log, entry)
+        elif prior is not None and prior != value:
+            provenance, was, detail = DEAL, prior, "corrected on the assumptions page"
+        elif prior is None and field in snapshot:
+            # The analyst filled a field extraction left EMPTY. This read as
+            # `cim` — "stated in the CIM" — for as long as the register has
+            # existed, because `edited` needed a prior to differ from and
+            # None differs from nothing. It is the same lie the measured
+            # population told, arriving from the third side: a number the
+            # document does not contain, credited to the document.
+            #
+            # `field in snapshot` is what separates it from schema drift.
+            # The snapshot is `dataclasses.asdict`, so every CIMData field
+            # of that vintage is a key even when its value is None; a field
+            # ABSENT means the snapshot predates it and the origin is simply
+            # unknowable — testing `prior is None` alone would relabel every
+            # such field on every deal stored before it existed.
+            provenance, was, detail = (
+                DEAL, None, "entered on the assumptions page; extraction found none")
         else:
-            provenance, detail = CIM, ""
+            provenance, was, detail = CIM, None, ""
         reg.add_row(Assumption(
             key=f"cim.{field}", label=label, group=G_DEAL, value=value,
-            provenance=provenance, unit=unit,
-            was=prior if edited else None, detail=detail))
+            provenance=provenance, unit=unit, was=was, detail=detail))
 
 
 def _measurement_detail(log, entry):

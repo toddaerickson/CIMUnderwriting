@@ -96,14 +96,22 @@
      findings above it. And the chosen rows get their own table INSIDE the
      disclosure rather than a filter control — a filter is state the reader
      has to notice they are in, and "4 of 130" is the whole story here.
-     {% endcomment %}
+
+     The headline counts `not_from_defaults` while the table below lists
+     `chosen`, so the two can differ by the measured rows — deliberately.
+     The count answers "is there anything here the model did not ship and
+     the CIM did not state?", which a measurement answers YES to; the table
+     answers "what did a human or a fallback put here?", which a
+     measurement is not. Reading the table's length off the headline is the
+     one thing this costs, and the alternative was a headline that said
+     "all model defaults" over a Census population. {% endcomment %}
   {% if register_rows %}
   <details>
     <summary class="cursor-pointer select-none text-sm font-semibold mb-1.5">
       Assumption Register —
       <span class="text-slate-700">{{ register_counts.total }} assumption{{ register_counts.total|pluralize }}</span>
       <span class="font-normal text-slate-500">
-        ({% if register_counts.chosen %}{{ register_counts.chosen }} not from the model defaults{% else %}all model defaults{% endif %})
+        ({% if register_counts.not_from_defaults %}{{ register_counts.not_from_defaults }} not from the CIM or the model defaults{% else %}all from the CIM or the model defaults{% endif %})
       </span>
     </summary>
 

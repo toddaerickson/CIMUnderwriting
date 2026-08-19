@@ -686,6 +686,29 @@ output/
     (operator's call): that tuple answers "did a human or a fallback
     produce this?", so the measurement discloses itself in B.2, the
     workbook and the results panel, and B.1 keeps its promise.
+    **Two more of the same sentence were left standing, fixed 2026-08-18
+    in the same day's follow-up.** (1) `_add_cim_rows` needed a stored
+    value to DIFFER from before it would say the analyst supplied one, so
+    a field extraction left EMPTY and the analyst then filled read "stated
+    in the CIM" — older than the measurement work, and reached whenever
+    the parser misses something. `field in snapshot` is what separates
+    that from schema drift (the snapshot is `asdict`, so a field of its
+    vintage is a key even at None; a field ABSENT predates the parser
+    knowing it, and its origin is unknowable). The measured branch is
+    tested FIRST for the same reason: when extraction's enrichment failed
+    and the analyst fixed the address, the analysis-time pass measures
+    into a field the snapshot carries as None, and nobody typed it.
+    (2) Keeping `external` out of `CHOSEN` is right, but `chosen == 0` was
+    ALSO standing in for "nothing here but the CIM and the defaults" —
+    false the day a run's population was measured, and the two surfaces
+    that asked it said "all model defaults" and "every input came from the
+    CIM as stated" over a Census figure. `NOT_FROM_DEFAULTS` is the second
+    question's own constant: headlines count from it, tables from `CHOSEN`,
+    and they legitimately differ. Tiers 3 and 4 of the resolver map to no
+    provenance and are wired by nobody, so
+    `test_no_caller_wires_a_tier_the_register_cannot_name` fails the day
+    one is — unmapped, a comp-DB figure would report itself as the
+    seller's.
     **It resolves nothing.** Every value is read from live `config` —
     patched in place for the duration of a run, so a live read IS the
     effective value — or through THE resolver the model itself calls
