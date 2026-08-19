@@ -193,7 +193,8 @@ def run_analysis(result: AnalysisResult, progress: Callable = None,
                   config_deltas: dict = None,
                   config_defaults: dict = None,
                   deal_overrides: dict = None,
-                  cim_snapshot: dict = None) -> AnalysisResult:
+                  cim_snapshot: dict = None,
+                  enrichment_log: dict = None) -> AnalysisResult:
     """
     Run full analysis pipeline on an already-extracted CIMData.
 
@@ -274,6 +275,15 @@ def run_analysis(result: AnalysisResult, progress: Callable = None,
             default and a deliberate entry.
         cim_snapshot: the pristine pre-analyst extraction (`Deal.cim_json`),
             so a corrected input can report what the CIM itself said.
+        enrichment_log: the source log from the EXTRACT-time enrichment
+            pass, which ran before that snapshot was saved and so put its
+            measured demographics inside it. Provenance only, like the
+            three above. It has to be handed in rather than recovered
+            here: this call cannot tell a Census-measured population from
+            a CIM-stated one by looking, and the re-enrichment below is no
+            help — it resolves an already-filled field at tier 1 and
+            reports "CIM/override", which is true of what it was handed
+            and false about where the number came from.
 
     Returns:
         Updated AnalysisResult with all analysis fields populated
@@ -614,7 +624,15 @@ def run_analysis(result: AnalysisResult, progress: Callable = None,
     from analysis.value_add import identify_value_add
     from analysis.risks import identify_risks
 
-    source_log = result.enrichment.source_log if result.enrichment else {}
+    # The stored extract-time log and this run's own, as ONE log — and
+    # merged rather than concatenated, because the two passes disagree
+    # about the same fields on purpose (see `merge_source_logs`). Every
+    # surface that discloses where a demographic came from reads this one
+    # dict: the gates below, and the register further down.
+    from extract.enrichment import merge_source_logs
+    source_log = merge_source_logs(
+        enrichment_log or {},
+        result.enrichment.source_log if result.enrichment else {})
     result.gate_results = evaluate_gates(
         cim_data, result.scenario_results, result.va_results,
         source_log=source_log)
@@ -684,7 +702,8 @@ def run_analysis(result: AnalysisResult, progress: Callable = None,
             waterfall_terms=waterfall_terms,
             am_fee_pct=am_fee_pct,
             mgmt_fee_target_pct=mgmt_fee_target_pct,
-            solver_target_irr=solver_target_irr))
+            solver_target_irr=solver_target_irr,
+            enrichment_log=source_log))
 
     # Step 9: Generate output files
     _progress(9, 9, "Generating memo & model...")

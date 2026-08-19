@@ -476,6 +476,14 @@ def _extract_worker(deal_pk, pdf_path, stamp):
         cim = result.cim_data
         updates = {
             "cim_json": cim_to_dict(cim),
+            # Saved in the same breath as the snapshot it describes, and by
+            # the same worker, because THIS is the pass whose measurements
+            # went into it. Nothing downstream can reconstruct the log
+            # afterwards (see `Deal.enrichment_log`), so a save that
+            # dropped it here would silently relabel every Census-measured
+            # demographic as CIM-stated for the life of the deal.
+            "enrichment_log": json_safe(result.enrichment.source_log
+                                        if result.enrichment else {}),
             "extraction_report": result.extraction_report,
             "extract_warnings": list(result.errors),
             "extract_status": "done",
@@ -1041,6 +1049,11 @@ def _analysis_worker(run_pk):
                     config_defaults=config_defaults,
                     deal_overrides=overrides,
                     cim_snapshot=deal.cim_json,
+                    # Its companion: the snapshot says what the pre-analyst
+                    # extraction held, this says which of it the CIM never
+                    # actually stated. Passing one without the other is how
+                    # a measured population reads as a broker's claim.
+                    enrichment_log=deal.enrichment_log,
                 )
 
         meta = build_deal_meta(cim, result, deal.deal_dir,

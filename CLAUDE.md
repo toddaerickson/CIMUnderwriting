@@ -655,14 +655,37 @@ output/
       settings file, not the response headers.
 11. **Every number discloses its provenance** (item T Category 6).
     `analysis/assumptions.py` is the register: every value that moved an
-    output, with the one of five provenances that produced it — `deal`
+    output, with the one of six provenances that produced it — `deal`
     (entered on the assumptions page), `settings` (a dated
     `ConfigOverride` row), `fallback` (invented; the Category 4 fill log),
-    `cim` (stated in the CIM), `config` (the shipped default). Precedence
+    `cim` (stated in the CIM), `external` (measured by us from public
+    data), `config` (the shipped default). Precedence
     is the model's own and each assumption yields exactly ONE row carrying
     the winner, with `was` holding what it displaced; printing both the
     superseded and the applied value is how a reader ends up auditing a
     number the engine never used.
+    **`external` arrived 2026-08-18 and its absence was a live defect, not
+    a gap**: Census enrichment fills the demographics BEFORE `Deal.cim_json`
+    is saved, so a measured `population_3mi` sat in the pristine snapshot
+    looking exactly like an extracted one, and the memo told an IC reader
+    the seller had stated the number Gate 1 turns on. Three things had to
+    change, and any two alone still ship the lie. (a) The vocabulary above.
+    (b) `Deal.enrichment_log` — the extract-time source log, saved by the
+    same worker that saves the snapshot, because NOTHING can rebuild it
+    afterwards; a deal extracted before that column existed still reports
+    `cim`, which is the honest answer for a run whose origin nobody kept.
+    (c) `extract.enrichment.merge_source_logs` — the analysis-time pass
+    re-enriches, finds the field already filled, and resolves it at tier 1
+    "CIM/override", which is true of what it was handed and false about
+    where the number came from; a later tier-1 entry therefore never
+    displaces a stored measurement, while a later tier-2 one does.
+    All three surfaces ask `extract.enrichment.origin_for` — never the log
+    directly — so an entry whose value the analyst has since overtyped
+    stops describing the number in use rather than crediting the Census
+    with an analyst's figure. `external` is deliberately NOT in `CHOSEN`
+    (operator's call): that tuple answers "did a human or a fallback
+    produce this?", so the measurement discloses itself in B.2, the
+    workbook and the results panel, and B.1 keeps its promise.
     **It resolves nothing.** Every value is read from live `config` —
     patched in place for the duration of a run, so a live read IS the
     effective value — or through THE resolver the model itself calls

@@ -340,12 +340,14 @@ def fake_run(monkeypatch):
               market_cap_rate=None, market_cap=None,
               debt_terms=None, waterfall_terms=None, am_fee_pct=None,
               mgmt_fee_target_pct=None, config_deltas=None,
-              config_defaults=None, deal_overrides=None, cim_snapshot=None):
+              config_defaults=None, deal_overrides=None, cim_snapshot=None,
+              enrichment_log=None):
         calls["cim_data"] = result.cim_data
         calls["config_deltas"] = config_deltas
         calls["config_defaults"] = config_defaults
         calls["deal_overrides"] = deal_overrides
         calls["cim_snapshot"] = cim_snapshot
+        calls["enrichment_log"] = enrichment_log
         calls["output_dir"] = output_dir
         calls["custom_scenarios"] = custom_scenarios
         calls["custom_va_scenarios"] = custom_va_scenarios
@@ -523,6 +525,29 @@ def test_worker_success_updates_run_and_deal(deals_dir, fake_run):
     assert deal.analysis_date is not None
     assert deal.memo_filename == "Expo_Storage_memo.docx"
     assert deal.excel_filename == "Expo_Storage_model.xlsx"
+
+
+@pytest.mark.django_db
+def test_the_stored_enrichment_log_reaches_the_engine(deals_dir, fake_run):
+    """`cim_json`'s companion. The snapshot says what the pre-analyst
+    extraction held; the log says which of it the CIM never actually
+    stated, and only the pass that measured could record it — a second
+    enrichment finds the field filled and reports tier 1. Handing the
+    engine one without the other is how a Census-measured population reads
+    as a broker's claim in Appendix B (design decision 11).
+
+    MUTATION: drop `enrichment_log=deal.enrichment_log` from the
+    `run_analysis` call in `webapp.services._analysis_worker`.
+    """
+    deal = _make_extracted_deal(deals_dir, slug="expo-measured")
+    deal.enrichment_log = {"population_3mi": {"tier": 2,
+                                              "source": "Census API",
+                                              "value": 87_450}}
+    deal.save()
+    _start_run(deal)
+
+    assert fake_run["enrichment_log"] == deal.enrichment_log
+    assert fake_run["cim_snapshot"] == deal.cim_json
 
 
 @pytest.mark.django_db

@@ -35,6 +35,18 @@ class Deal(models.Model):
     extraction_report = models.JSONField(null=True, blank=True)
     assumption_overrides = models.JSONField(default=dict, blank=True)
 
+    # `extract.enrichment`'s source log for the pass that produced
+    # `cim_json`. It lives beside the snapshot because it describes the
+    # snapshot: Census enrichment runs BEFORE the save, so a measured
+    # 3-mile population is sitting in `cim_json` indistinguishable from an
+    # extracted one, and this column is the only record that it was
+    # measured rather than stated. It cannot be recovered later — the
+    # analysis-time enrichment pass finds the field already filled and
+    # reports it at tier 1 — so a deal extracted before this column
+    # existed keeps disclosing its demographics as CIM-stated, which is
+    # the honest answer for a run whose origin nobody kept.
+    enrichment_log = models.JSONField(null=True, blank=True)
+
     # Portfolio detection. A CIM describing more than one property must be
     # flagged, not silently underwritten as a single asset. Set at
     # extraction from CIMData.portfolio_signal; evidence is a list of the

@@ -85,7 +85,15 @@ def evaluate_gates(cim_data, scenario_results=None, va_results=None,
             pop, pop_problem = None, "population is negative — fix the value in assumptions"
     except (TypeError, ValueError):
         pop, pop_problem = None, "population is not numeric — fix the value in assumptions"
-    pop_source = source_log.get("population_3mi", {}).get("source", "")
+    # Through `origin_for`, not a direct lookup: the entry records where ONE
+    # number came from, and an analyst who typed a population over the
+    # measured one leaves it describing a figure this gate is no longer
+    # reading. Crediting the Census with an analyst's number is the same
+    # class of defect as the register's, on the same value.
+    from extract.enrichment import origin_for
+    pop_entry = origin_for(source_log, "population_3mi",
+                           cim_data.population_3mi) or {}
+    pop_source = pop_entry.get("source", "")
     gates.append({
         "gate": 1,
         "name": "Population (3-mi ≥ 50K)",
