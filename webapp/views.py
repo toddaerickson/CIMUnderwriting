@@ -22,6 +22,31 @@ from webapp.models import AnalysisRun, Deal
 
 logger = logging.getLogger("cim_analyst.web")
 
+# Free-space percentage below which /health/ logs a warning. Percent and
+# not an absolute floor: the question worth answering is "how many more
+# runs fit", and that scales with the disk. On Render's 1 GB disk this is
+# ~100 MB — several deals' worth of headroom, since every run writes a
+# .docx, an .xlsx and an .xlsm beside the source PDF. Resize the disk and
+# the threshold keeps its meaning; an absolute floor would not.
+HEALTH_DISK_WARN_PCT = 10
+
+
+def _mount_free(mount):
+    """(free_mb, free_pct) for a mount, or (None, None) if unreadable.
+
+    Never raises. A health endpoint that 500s tells you strictly less
+    than one that omits a field, and the path can legitimately vanish
+    between the ismount check above and this call.
+    """
+    try:
+        usage = shutil.disk_usage(mount)
+    except OSError:
+        logger.warning("health check: cannot read free space on %s", mount)
+        return None, None
+    if usage.total <= 0:
+        return None, None
+    return int(usage.free / (1024 * 1024)), int(usage.free * 100 / usage.total)
+
 
 def health(request):
     """Public health + version endpoint (same contract as managertools).
@@ -29,6 +54,11 @@ def health(request):
     Reports git SHA so /verify-deploy gets a definitive match answer,
     and proves the DB is reachable — a booted-but-dead process must
     not report healthy.
+
+    503 is reserved for the two conditions a restart can plausibly fix
+    or that make the process useless: an unreachable DB and a missing
+    data mount. Free space is reported alongside them and never fails
+    the check; see the comment on that block for why.
     """
     db_ok = True
     try:
@@ -53,20 +83,50 @@ def health(request):
     # disk mount must — an unmounted disk has no /data mount point, so
     # this still 503s on a lost or misrouted mount.
     disk_ok = True
+    mounts = []
     if os.environ.get("CIM_DEALS_DIR"):
         mount = os.path.dirname(str(settings.CIM_DEALS_DIR).rstrip("/"))
+        mounts.append(mount)
         disk_ok = os.path.ismount(mount)
     if disk_ok and os.environ.get("COMP_DB_PATH"):
         mount = os.path.dirname(os.environ["COMP_DB_PATH"].rstrip("/"))
+        mounts.append(mount)
         disk_ok = os.path.ismount(mount)
     if not disk_ok:
         logger.error("health check: data disk missing or env misrouted")
+
+    # Free space is REPORTED, never a 503 — a full disk and a missing
+    # mount are different failures whose remedies point opposite ways.
+    # Render pulls an instance that 503s and restarts it, and a restart
+    # frees no bytes, so failing the check on low space buys a restart
+    # loop against an app that still reads fine and fails only on the
+    # next WRITE. Reporting the number is the whole point: QA pass 2
+    # filed "all downloads 503" and this endpoint answered `disk: true`,
+    # because ismount says whether something is mounted there and never
+    # whether there is room on it. The keys are OMITTED rather than
+    # nulled when the probe is skipped (dev/CI, no env) — a null free
+    # count reads like zero free to a hurried eye.
+    free_mb = free_pct = None
+    if disk_ok and mounts:
+        measured = [m for m in (_mount_free(x) for x in mounts)
+                    if m[1] is not None]
+        if measured:
+            free_mb, free_pct = min(measured, key=lambda pair: pair[1])
+            if free_pct < HEALTH_DISK_WARN_PCT:
+                logger.warning(
+                    "health check: data disk %d%% free (%d MB) — below the "
+                    "%d%% warning floor; runs write a .docx, .xlsx and .xlsm "
+                    "each and will start failing on write",
+                    free_pct, free_mb, HEALTH_DISK_WARN_PCT,
+                )
+
     ok = db_ok and disk_ok
-    return JsonResponse(
-        {"status": "ok" if ok else "degraded", "db": db_ok,
-         "disk": disk_ok, "git_sha": sha[:12]},
-        status=200 if ok else 503,
-    )
+    payload = {"status": "ok" if ok else "degraded", "db": db_ok,
+               "disk": disk_ok, "git_sha": sha[:12]}
+    if free_pct is not None:
+        payload["disk_free_mb"] = free_mb
+        payload["disk_free_pct"] = free_pct
+    return JsonResponse(payload, status=200 if ok else 503)
 
 
 @login_required

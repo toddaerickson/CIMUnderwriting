@@ -192,3 +192,132 @@ def test_security_headers_present_in_production_branch():
     assert dj.X_FRAME_OPTIONS == "DENY"
     assert ("django.middleware.clickjacking.XFrameOptionsMiddleware"
             in dj.MIDDLEWARE)
+
+
+# ── /health/ free-space reporting ───────────────────────────────────
+#
+# QA pass 2 (2026-08-18) filed "all downloads 503" against a deploy whose
+# /health/ answered `disk: true`. It was not lying: the probe above is
+# os.path.ismount, which reports whether something is mounted and never
+# whether there is room on it, and Render provisions 1 GB for the deal
+# PDFs plus the .docx/.xlsx/.xlsm every run writes. These pin the number
+# that makes the next occurrence a one-curl diagnosis.
+
+
+@pytest.mark.django_db
+def test_health_reports_free_space_when_the_disk_is_probed(
+        client, monkeypatch, settings):
+    monkeypatch.setenv("CIM_DEALS_DIR", "/deals")
+    settings.CIM_DEALS_DIR = "/deals"  # parent "/" is always a mount
+    resp = client.get("/health/")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["disk"] is True
+    assert body["disk_free_mb"] > 0
+    assert 0 <= body["disk_free_pct"] <= 100
+
+
+@pytest.mark.django_db
+def test_health_omits_free_space_when_the_probe_is_skipped(client):
+    """Dev and CI declare no file locations, so nothing is measured. The
+    keys are absent rather than null: a null free count reads like zero
+    free, which is the opposite of what a skipped probe means."""
+    resp = client.get("/health/")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["disk"] is True
+    assert "disk_free_mb" not in body
+    assert "disk_free_pct" not in body
+
+
+@pytest.mark.django_db
+def test_a_nearly_full_disk_warns_but_stays_200(
+        client, monkeypatch, settings, caplog):
+    """The behavioural decision, asserted because it looks like a bug:
+    a full disk does NOT 503. Render pulls and restarts an instance that
+    fails its health check, a restart frees no bytes, and the app still
+    serves every read — so a 503 here buys a restart loop and takes down
+    a partly-working app. The warning is what carries the signal."""
+    from collections import namedtuple
+
+    from webapp import views
+
+    # A local namedtuple, not shutil._ntuple_diskusage: that name is
+    # private CPython and would make this test a version bet.
+    usage = namedtuple("usage", "total used free")
+
+    monkeypatch.setenv("CIM_DEALS_DIR", "/deals")
+    settings.CIM_DEALS_DIR = "/deals"
+    monkeypatch.setattr(
+        views.shutil, "disk_usage",
+        lambda _p: usage(total=1024 ** 3, used=1020 * 1024 ** 2,
+                         free=4 * 1024 ** 2))
+
+    with caplog.at_level("WARNING", logger="cim_analyst.web"):
+        resp = client.get("/health/")
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["status"] == "ok"
+    assert body["disk"] is True
+    assert body["disk_free_mb"] == 4
+    assert body["disk_free_pct"] == 0
+    assert any("free" in r.message for r in caplog.records)
+
+
+@pytest.mark.django_db
+def test_an_unreadable_mount_omits_the_numbers_and_never_500s(
+        client, monkeypatch, settings):
+    """The path can vanish between the ismount check and the stat. A
+    health endpoint that 500s tells you strictly less than one missing
+    a field, so the failure degrades to silence on those two keys."""
+    from webapp import views
+
+    def boom(_path):
+        raise OSError("mount went away")
+
+    monkeypatch.setenv("CIM_DEALS_DIR", "/deals")
+    settings.CIM_DEALS_DIR = "/deals"
+    monkeypatch.setattr(views.shutil, "disk_usage", boom)
+    resp = client.get("/health/")
+    assert resp.status_code == 200
+    assert resp.json()["disk"] is True
+    assert "disk_free_mb" not in resp.json()
+
+
+@pytest.mark.django_db
+def test_free_space_is_not_measured_when_the_mount_is_missing(
+        client, monkeypatch, settings):
+    """A missing mount is already a 503; statting it would only add a
+    second failure to the log for one cause."""
+    monkeypatch.setenv("CIM_DEALS_DIR", "/data/deals")
+    settings.CIM_DEALS_DIR = "/nonexistent/deals"
+    resp = client.get("/health/")
+    assert resp.status_code == 503
+    assert resp.json()["disk"] is False
+    assert "disk_free_mb" not in resp.json()
+
+
+@pytest.mark.django_db
+def test_a_comfortable_disk_reports_but_does_not_warn(
+        client, monkeypatch, settings, caplog):
+    """The inverse of the test above, because a warning that fires on
+    every request is the same as no warning at all."""
+    from collections import namedtuple
+
+    from webapp import views
+
+    usage = namedtuple("usage", "total used free")
+
+    monkeypatch.setenv("CIM_DEALS_DIR", "/deals")
+    settings.CIM_DEALS_DIR = "/deals"
+    monkeypatch.setattr(
+        views.shutil, "disk_usage",
+        lambda _p: usage(total=1024 ** 3, used=512 * 1024 ** 2,
+                         free=512 * 1024 ** 2))
+
+    with caplog.at_level("WARNING", logger="cim_analyst.web"):
+        resp = client.get("/health/")
+
+    assert resp.json()["disk_free_pct"] == 50
+    assert not [r for r in caplog.records if "free" in r.message]

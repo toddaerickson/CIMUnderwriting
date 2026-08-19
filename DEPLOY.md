@@ -22,10 +22,21 @@
   zero-downtime deploys — fine at 1 user.
 - **Neon Postgres** — deal/run/override rows via `DATABASE_URL` (pooled string).
   Free tier autosuspends when idle; first request after idle takes ~1s extra.
-- **`/health/`** — returns `{"status", "db", "disk", "git_sha"}`. The disk probe
+- **`/health/`** — returns `{"status", "db", "disk", "git_sha"}`, plus
+  `disk_free_mb` and `disk_free_pct` wherever the disk probe ran. The probe
   activates only when `CIM_DEALS_DIR` / `COMP_DB_PATH` are set (i.e. on Render);
-  dev/CI skip it. A missing mount 503s instead of silently fabricating an empty
-  comps DB on the ephemeral container filesystem.
+  dev/CI skip it and the two free-space keys are then ABSENT, not null. A
+  missing mount 503s instead of silently fabricating an empty comps DB on the
+  ephemeral container filesystem.
+  **Low free space does NOT 503** — it logs a warning below
+  `views.HEALTH_DISK_WARN_PCT` (10%) and reports the number. Restarting an
+  instance frees no bytes, so failing the health check on a full disk would
+  only loop Render's restart against an app that still serves every read.
+  `disk: true` answers "is something mounted there", never "is there room" —
+  which is why QA pass 2 could file "all downloads 503" against a deploy this
+  endpoint called healthy. **When a write-shaped failure appears (downloads,
+  run outputs, uploads), read `disk_free_mb` FIRST**: the disk is 1 GB and
+  every run writes a .docx, an .xlsx and an .xlsm beside the source PDF.
 
 ## Environment
 
@@ -57,7 +68,7 @@ Ship-dark ended here. Railway kept serving Streamlit until step 8; nothing below
 
 1. ⚑ **Neon**: create project `cim-analyst` (Postgres 16+); copy the **pooled** connection string. (Free tier is fine at this scale; note autosuspend means the first request after idle takes ~1s extra.)
 2. ⚑ **Render**: New → Blueprint → point at the GitHub repo; Render reads `render.yaml`. Paste `sync: false` values: `DATABASE_URL` (from step 1), `CENSUS_API_KEY` (from the Railway env at the time), `ALLOWED_HOSTS` = the assigned host (e.g. `cim-analyst.onrender.com`), `CSRF_TRUSTED_ORIGINS` = `https://<that host>`. First deploy runs migrate against Neon automatically.
-3. **Verify boot**: `curl https://<host>/health/` → `{"status": "ok", "db": true, "disk": true, "git_sha": "<HEAD>"}`. The git_sha must match origin/main HEAD; `disk: true` proves the mount and env routing before any data lands on it.
+3. **Verify boot**: `curl https://<host>/health/` → `{"status": "ok", "db": true, "disk": true, "git_sha": "<HEAD>"}`. The git_sha must match origin/main HEAD; `disk: true` proves the mount and env routing before any data lands on it. The response also carries `disk_free_mb` / `disk_free_pct` once the probe is active.
 4. **Operator account** — Render Shell tab on the service:
    ```bash
    OPERATOR_PASSWORD='<one-time password from your manager>' python manage.py bootstrap_operator
