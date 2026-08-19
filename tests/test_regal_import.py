@@ -379,3 +379,136 @@ def test_resaving_a_deal_strands_no_child_rows(tmp_path, mock_cim_data,
             f"SELECT COUNT(*) FROM {table} WHERE property_id NOT IN "
             "(SELECT id FROM properties)",
         ) == [(0,)], table
+
+
+# ── prune_comp: the maintenance path that is not a hand-written DELETE ──
+
+def _seeded_db(tmp_path, mock_cim_data, base_financial_analysis, name):
+    """One property with a child row in each of the three child tables."""
+    path = str(tmp_path / name)
+    db = CompDatabase(path)
+    financials = dict(base_financial_analysis)
+    financials["expense_analysis"] = {
+        "total_adjusted_expenses": 220_000,
+        "lines": [{"category": "Property Taxes", "cim_value": 60_000,
+                   "adjusted_value": 65_000, "per_nrsf": 1.2, "flag": None}],
+    }
+    rent = {"unit_mix_summary": [{"size_label": "10x10", "unit_sf": 100,
+                                  "count": 40, "monthly_rate": 95.0,
+                                  "rate_per_sf": 0.95,
+                                  "climate_controlled": False}]}
+    db.save_analysis(mock_cim_data, financials, rent, "doomed.pdf",
+                     source_log={"nrsf": {"tier": 1, "source": "CIM p.4",
+                                          "value": 50_000}})
+    return path
+
+
+def _prune(path, monkeypatch, **opts):
+    from django.core.management import call_command
+    monkeypatch.setattr("data.comp_db.COMP_DB_PATH", path)
+    call_command("prune_comp", **opts)
+
+
+def test_prune_comp_takes_the_children_with_it(tmp_path, monkeypatch,
+                                               mock_cim_data,
+                                               base_financial_analysis):
+    """The whole reason the command exists: `DELETE FROM properties`
+    alone strands every child row, because nothing enables the
+    `foreign_keys` pragma and no constraint cascades."""
+    path = _seeded_db(tmp_path, mock_cim_data, base_financial_analysis, "p.db")
+    _prune(path, monkeypatch, pdf="doomed.pdf")
+
+    assert rows_of(path, "SELECT COUNT(*) FROM properties") == [(0,)]
+    for table in ("unit_mix", "expense_lines", "data_sources"):
+        assert rows_of(path, f"SELECT COUNT(*) FROM {table}") == [(0,)], table
+
+
+def test_prune_comp_dry_run_changes_nothing(tmp_path, monkeypatch,
+                                            mock_cim_data,
+                                            base_financial_analysis):
+    path = _seeded_db(tmp_path, mock_cim_data, base_financial_analysis, "d.db")
+    _prune(path, monkeypatch, pdf="doomed.pdf", dry_run=True)
+
+    assert rows_of(path, "SELECT COUNT(*) FROM properties") == [(1,)]
+    for table in ("unit_mix", "expense_lines", "data_sources"):
+        assert rows_of(path, f"SELECT COUNT(*) FROM {table}") == [(1,)], table
+
+
+def test_prune_comp_sweeps_orphans_already_in_the_db(tmp_path, monkeypatch,
+                                                     mock_cim_data,
+                                                     base_financial_analysis):
+    """Rows stranded by the historical bug, which the fix to
+    `save_analysis` stopped creating but never cleaned up."""
+    import sqlite3
+    path = _seeded_db(tmp_path, mock_cim_data, base_financial_analysis, "o.db")
+    with sqlite3.connect(path) as conn:      # strand them the old way
+        conn.execute("DELETE FROM properties")
+    assert rows_of(path, "SELECT COUNT(*) FROM unit_mix") == [(1,)]
+
+    _prune(path, monkeypatch, orphans=True)
+    for table in ("unit_mix", "expense_lines", "data_sources"):
+        assert rows_of(path, f"SELECT COUNT(*) FROM {table}") == [(0,)], table
+
+
+def test_prune_comp_refuses_an_ambiguous_invocation(tmp_path, monkeypatch,
+                                                    mock_cim_data,
+                                                    base_financial_analysis):
+    from django.core.management.base import CommandError
+    path = _seeded_db(tmp_path, mock_cim_data, base_financial_analysis, "a.db")
+    with pytest.raises(CommandError):
+        _prune(path, monkeypatch, pdf="doomed.pdf", orphans=True)
+    with pytest.raises(CommandError):
+        _prune(path, monkeypatch)
+    with pytest.raises(CommandError):
+        _prune(path, monkeypatch, pdf="never-analysed.pdf")
+    assert rows_of(path, "SELECT COUNT(*) FROM properties") == [(1,)]
+
+
+# ── The gate above both writers: a bad run seeds nothing ────────────
+
+def _run_engine(cim, tmp_path):
+    from engine import AnalysisResult, run_analysis
+    result = AnalysisResult(pdf_path=str(tmp_path / "subject.pdf"),
+                            cim_data=cim)
+    run_analysis(result, output_dir=str(tmp_path))
+    return result
+
+
+def test_a_run_with_a_blocking_failure_seeds_no_comp_row(tmp_path, monkeypatch,
+                                                        mock_cim_data):
+    """A comp row is reference data OTHER deals are benchmarked against.
+
+    The Abilene run seeded one at $90.44 revenue/SF and $87.33 NOI/SF
+    beside genuine neighbours at 4-9, because a 10x revenue line drove
+    it. The gate holds even for an accepted finding: that hatch is a
+    decision about publishing ONE deal's numbers, made by someone looking
+    at that deal, and nobody is looking at the benchmark set when they
+    tick it.
+    """
+    path = str(tmp_path / "gated.db")
+    monkeypatch.setattr("data.comp_db.COMP_DB_PATH", path)
+    CompDatabase(path)                       # create the schema
+
+    cim = mock_cim_data
+    cim.ttm_total_revenue = 5_600_000        # 10x, identity now broken
+    result = _run_engine(cim, tmp_path)
+
+    assert result.check_summary["blocking_failed"] > 0
+    assert rows_of(path, "SELECT COUNT(*) FROM properties") == [(0,)]
+    assert any("Not saved to the comp database" in e for e in result.errors)
+
+
+def test_a_clean_run_still_seeds_its_comp_row(tmp_path, monkeypatch,
+                                              mock_cim_data):
+    """The gate must not become a wall — the shared fixture is
+    self-consistent (560,000 - 220,000 = 340,000)."""
+    path = str(tmp_path / "clean.db")
+    monkeypatch.setattr("data.comp_db.COMP_DB_PATH", path)
+    CompDatabase(path)
+
+    result = _run_engine(mock_cim_data, tmp_path)
+
+    assert result.check_summary["blocking_failed"] == 0
+    assert rows_of(path, "SELECT COUNT(*) FROM properties") == [(1,)]
+    assert not any("Not saved to the comp database" in e
+                   for e in result.errors)

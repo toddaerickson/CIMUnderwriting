@@ -827,17 +827,47 @@ def run_analysis(result: AnalysisResult, progress: Callable = None,
         if detail:
             logger.warning("Template shape detail: %s", detail)
 
-    # Save to comp database
-    try:
-        pdf_filename = os.path.basename(result.pdf_path)
-        comp_db.save_analysis(
-            cim_data=cim_data,
-            financial_analysis=result.financial_analysis,
-            rent_analysis=result.rent_analysis,
-            pdf_filename=pdf_filename,
-        )
-    except Exception as e:
-        result.errors.append(f"Comp DB save failed: {e}")
+    # Save to comp database — but NEVER from a run whose inputs the
+    # register could not reconcile.
+    #
+    # A comp row is not this deal's output; it is REFERENCE DATA other
+    # deals are measured against, and `query_rent_comps` / the benchmark
+    # queries read it with no idea which run produced it. The Abilene run
+    # seeded a row at $90.44 revenue/SF and $87.33 NOI/SF beside genuine
+    # neighbours at 4-9, because a 10x revenue line drove it.
+    #
+    # This gate holds even when the analyst ACCEPTED the finding. That
+    # hatch scopes to "publish THIS deal's numbers with the discrepancy
+    # recorded" — a decision about one deal, made by someone looking at
+    # it. Seeding the set every other deal is compared against is a
+    # different permission, and nobody is looking at that consequence
+    # when they tick the box (operator's call 2026-08-18).
+    #
+    # Read off `check_summary`, computed once above: recomputing here is
+    # how the row written and the findings reported drift apart.
+    blocking_failed = (result.check_summary or {}).get("blocking_failed") or 0
+    if blocking_failed:
+        result.errors.append(
+            f"Not saved to the comp database: {blocking_failed} blocking "
+            f"model check(s) failed on this run's inputs, and a comp row is "
+            f"reference data other deals are benchmarked against. Fix the "
+            f"flagged inputs and re-run to contribute this deal.")
+        logger.warning("comp DB save skipped for %s: %d blocking failure(s)",
+                       result.pdf_path, blocking_failed)
+    else:
+        # An `else`, not an early return: the comp save happens to be the
+        # last step today, and a `return` here would silently skip
+        # whatever the next person appends below it.
+        try:
+            pdf_filename = os.path.basename(result.pdf_path)
+            comp_db.save_analysis(
+                cim_data=cim_data,
+                financial_analysis=result.financial_analysis,
+                rent_analysis=result.rent_analysis,
+                pdf_filename=pdf_filename,
+            )
+        except Exception as e:
+            result.errors.append(f"Comp DB save failed: {e}")
 
     return result
 
