@@ -51,8 +51,11 @@ config.py               # Investment criteria, benchmarks, scenario defaults
 
 ## Configuration
 
-Copy `.env.example` to `.env` and fill in values. See `DEPLOY.md` for the
-Render/Neon deployment architecture and cutover runbook.
+Create a `.env` file and set the values below. There is deliberately no
+committed template: `.gitignore` covers `.env` but not a `.env.example`, and
+a template carrying a real-looking key is one `git add -A` away from being
+permanent — which has already happened once here (`9eb83fb`). See `DEPLOY.md`
+for the Render/Neon deployment architecture and cutover runbook.
 
 Key environment variables:
 - `CENSUS_API_KEY` — demographic enrichment (optional)
@@ -116,7 +119,7 @@ git clone https://github.com/toddaerickson/CIMUnderwriting.git
 cd CIMUnderwriting
 python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
-cp .env.example .env  # fill in CENSUS_API_KEY (optional) and GP_NAME
+touch .env             # set CENSUS_API_KEY (optional) and GP_NAME — see Configuration
 python manage.py migrate
 OPERATOR_PASSWORD='<choose one>' python manage.py bootstrap_operator
 ```
