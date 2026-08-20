@@ -84,6 +84,12 @@ class CIMData:
     cc_pct: Optional[float] = None        # % of NRSF that is CC
     physical_occupancy: Optional[float] = None
     economic_occupancy: Optional[float] = None
+    # The occupancy the CIM states its INCOME at, when it labels that
+    # figure pro forma on the income line itself — Huntsville's
+    # `522 Units $60,137 $721,644 Occupancy 85% (Pro Forma)` beside a
+    # stated physical 76%. Never inferred: absent means the CIM did not
+    # qualify its income line that way, NOT that the income is actual.
+    income_basis_occupancy: Optional[float] = None
 
     # Facility-type SF breakdowns (for replacement cost)
     ss_driveup_sf: Optional[float] = None      # self-storage drive-up SF
@@ -678,6 +684,32 @@ _OCC_PCT_RE = re.compile(r"\d(?:\.\d+)?\s*%")
 #: digit after "year"), which one stat-block deck depends on.
 _OCC_PROJECTION_RE = re.compile(r"year\s+\d", re.IGNORECASE)
 
+#: A pro-forma marker QUALIFYING an occupancy: `Occupancy 85% (Pro Forma)`.
+#: Such a figure is a projection, so it is vetoed from the physical and
+#: economic candidates exactly as `_OCC_PROJECTION_RE` vetoes `Year 4 92%`
+#: — and it is the ONE veto that also keeps what it refuses, because when
+#: the same line carries the income the number is a disclosure about that
+#: income rather than noise.
+#:
+#: `pro forma`/`proforma` ONLY, and the omissions are measured rather than
+#: an oversight, the bar `_PROJECTION_RE` sets: across all 15 local decks
+#: exactly ONE line matches this pattern beside an occupancy and a percent
+#: — Huntsville's — so `projected`, `stabilized`, `budgeted` and `proposed`
+#: have no witness here at all. A marker this list lacks is a future deck's
+#: problem to demonstrate, not this list's to anticipate.
+_OCC_PROFORMA_RE = re.compile(r"pro[\s\-]?forma", re.IGNORECASE)
+
+#: The income line's own signature. Requiring money on the SAME segment is
+#: what separates the field this captures from a generic "is this deck
+#: pro forma?" flag — and that distinction is the whole design, because
+#: TEN of the 15 local decks state `PRO FORMA END OF YEAR N NOI $X` beside
+#: an honest trailing statement. Those decks disclose a projection
+#: correctly; a flag keyed on "a pro-forma marker sits near money" would
+#: fire on two thirds of the corpus and mean nothing. What is anomalous
+#: about Huntsville is narrower: the marker qualifies the OCCUPANCY its
+#: in-place income is stated at, and no other statement exists.
+_OCC_MONEY_RE = re.compile(r"\$\s?\d")
+
 #: What may sit between an occupancy label and its value, on ONE line: an
 #: optional parenthetical (the basis — `(SQ. FT.)`, `(UNITS)`, `(%)`), an
 #: optional `AS OF`/`THRU` date run, then connective junk. The `%` anchor
@@ -808,8 +840,14 @@ def _occupancy_candidates(text):
     not a generalization of it: that function's falsy value-drop is right
     for sizes and lethal here, where a stated 0 must survive to the demand
     gate — and leaving it untouched keeps the size tests as machine proof
-    that NRSF/units did not move."""
-    phys_cands, econ_cands = [], []
+    that NRSF/units did not move.
+
+    Returns THREE lists. The third is the income-basis occupancy — a
+    pro-forma-qualified figure on a line that also states money — and it
+    is populated from the values the first two REFUSE, which is the point:
+    the same evidence that disqualifies a number as an in-place occupancy
+    is what makes it a disclosure about the income beside it."""
+    phys_cands, econ_cands, basis_cands = [], [], []
     for line in text.split("\n"):
         dm = _OCC_DUAL_RE.search(line)
         if dm:
@@ -836,6 +874,13 @@ def _occupancy_candidates(text):
                 if value_first and banner:
                     continue
                 seg = _segment(line, m.start())
+                if _OCC_PROFORMA_RE.search(seg):
+                    # Vetoed as an in-place figure, KEPT as the income
+                    # basis when the line states the income it qualifies.
+                    val = float(m.group("v")) / 100.0
+                    if _OCC_MONEY_RE.search(line) and 0.0 <= val <= 1.0:
+                        basis_cands.append((_OCC_RANK_PHYS_LABEL, val))
+                    continue
                 if (_PROJECTION_RE.search(seg)
                         or _OCC_PROJECTION_RE.search(seg)):
                     continue
@@ -849,7 +894,7 @@ def _occupancy_candidates(text):
                     rank += _OCC_RANK_STATEMENT_ROW
                 _occ_add(field, rank, float(m.group("v")) / 100.0,
                          phys_cands, econ_cands)
-    return phys_cands, econ_cands
+    return phys_cands, econ_cands, basis_cands
 
 
 def _parse_size_occupancy(text: str, data: CIMData):
@@ -886,13 +931,16 @@ def _parse_size_occupancy(text: str, data: CIMData):
     # a basis parenthetical it could not cross parsed the whole stat-block
     # family to None, and `[:\s]*` crossing newlines let a stat-card label
     # adopt the next line's number.
-    phys_cands, econ_cands = _occupancy_candidates(text)
+    phys_cands, econ_cands, basis_cands = _occupancy_candidates(text)
     phys = _pick_ranked(phys_cands)
     if phys is not None:
         data.physical_occupancy = phys
     econ = _pick_ranked(econ_cands)
     if econ is not None:
         data.economic_occupancy = econ
+    basis = _pick_ranked(basis_cands)
+    if basis is not None:
+        data.income_basis_occupancy = basis
 
 
 #: Below this, a "price" is a price PER something — per SF, per unit, per

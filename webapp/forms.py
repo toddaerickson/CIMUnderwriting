@@ -83,7 +83,8 @@ STREET_RATE_TREND_CHOICES = [
     ("flat", "Flat"),
     ("falling", "Falling"),
 ]
-CIM_PCT_FIELDS = ["cc_pct", "physical_occupancy", "economic_occupancy", "mgmt_fee_pct"]
+CIM_PCT_FIELDS = ["cc_pct", "physical_occupancy", "economic_occupancy",
+                  "income_basis_occupancy", "mgmt_fee_pct"]
 CIM_SCALAR_FIELDS = CIM_CHAR_FIELDS + CIM_INT_FIELDS + CIM_FLOAT_FIELDS + CIM_PCT_FIELDS
 
 # Timing & transaction costs (item B). Both percentages are per-deal
@@ -235,6 +236,11 @@ SECTION_DRIVERS = [
     ("asking_price", "Asking Price ($)"), ("capex_estimate", "CapEx Estimate"),
     ("physical_occupancy", "Physical Occupancy (%)"),
     ("economic_occupancy", "Economic Occupancy (%)"),
+    # A CIM that states its income "at 85% (Pro Forma)" needs somewhere to
+    # say so when the parser cannot see it — the contradiction is often
+    # only in prose. Blank means the CIM did not qualify its income line,
+    # never that the income is actual.
+    ("income_basis_occupancy", "Income Stated At Occupancy (%)"),
     ("market_rent_psf", "Street Rate ($/SF/mo)"),
     ("in_place_avg_rent_psf", "In-Place Rent ($/SF/mo)"),
     ("street_rate_trend", "Street-Rate Trend"),
@@ -282,6 +288,8 @@ def check_input_from_cleaned(cleaned, unit_mix=None) -> checks.CheckInput:
         unit_mix=tuple(unit_mix or ()),
         physical_occupancy=_pct_decimal(cleaned.get("physical_occupancy")),
         economic_occupancy=_pct_decimal(cleaned.get("economic_occupancy")),
+        income_basis_occupancy=_pct_decimal(
+            cleaned.get("income_basis_occupancy")),
     )
 
 
