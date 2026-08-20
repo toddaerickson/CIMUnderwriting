@@ -5,8 +5,8 @@
     "blocking_failed": 0,
     "failed": 6,
     "passed": 10,
-    "skipped": 1,
-    "total": 17
+    "skipped": 2,
+    "total": 18
   },
   "checks": [
     [
@@ -28,6 +28,11 @@
       "expense_line_floor",
       "advisory",
       "fail"
+    ],
+    [
+      "income_basis_vs_physical_occupancy",
+      "blocking",
+      "skipped"
     ],
     [
       "income_identity",
@@ -929,10 +934,13 @@
           "v": "Total revenue vs EGR is the right order of magnitude"
         },
         "A19": {
-          "v": "TTM annualization basis"
+          "v": "Income basis vs physical occupancy"
         },
         "A2": {
           "v": "Check"
+        },
+        "A20": {
+          "v": "TTM annualization basis"
         },
         "A3": {
           "fill": "00FFD9D9",
@@ -999,10 +1007,13 @@
           "v": "Blocking"
         },
         "B19": {
-          "v": "Advisory"
+          "v": "Blocking"
         },
         "B2": {
           "v": "Severity"
+        },
+        "B20": {
+          "v": "Advisory"
         },
         "B3": {
           "fill": "00FFD9D9",
@@ -1074,6 +1085,9 @@
         "C2": {
           "v": "Status"
         },
+        "C20": {
+          "v": "SKIPPED"
+        },
         "C3": {
           "fill": "00FFD9D9",
           "v": "FAIL"
@@ -1139,10 +1153,13 @@
           "v": "Total revenue $1,098,000 is 1.03x EGR $1,062,000, the expected order of magnitude."
         },
         "D19": {
-          "v": "The CIM does not state how many months of actuals its TTM figures cover."
+          "v": "The CIM does not state an income basis occupancy, or physical occupancy is absent."
         },
         "D2": {
           "v": "Finding"
+        },
+        "D20": {
+          "v": "The CIM does not state how many months of actuals its TTM figures cover."
         },
         "D3": {
           "fill": "00FFD9D9",
@@ -1209,10 +1226,13 @@
           "v": "ttm_total_revenue, ttm_egr"
         },
         "E19": {
-          "v": "ttm_months"
+          "v": "income_basis_occupancy, physical_occupancy"
         },
         "E2": {
           "v": "Source"
+        },
+        "E20": {
+          "v": "ttm_months"
         },
         "E3": {
           "fill": "00FFD9D9",
@@ -4799,7 +4819,7 @@
         "1. Investment Summary",
         "Occupancy check: economic occupancy of 90.0% vs physical of 93.0% (3-pt spread) \u2014 within normal operating range; upside must come from rate growth or expense control rather than collections recovery.",
         "Model Checks",
-        "6 of 17 integrity checks flagged. Blocking findings were accepted by the analyst with the discrepancy recorded; advisory findings do not stop the model but change how its outputs should be read.",
+        "6 of 18 integrity checks flagged. Blocking findings were accepted by the analyst with the discrepancy recorded; advisory findings do not stop the model but change how its outputs should be read.",
         "1 model input was not stated in the CIM and was filled from a default or a benchmark. Every one is listed with its source in Appendix A; the returns below are computed on them.",
         "Screening Gates",
         "Returns Snapshot (Unlevered)",
