@@ -168,6 +168,7 @@ CIM_FIELDS = (
     ("capex_estimate", "CapEx Estimate", UNIT_DOLLARS),
     ("physical_occupancy", "Physical Occupancy", UNIT_PCT),
     ("economic_occupancy", "Economic Occupancy", UNIT_PCT),
+    ("income_basis_occupancy", "Income Stated At Occupancy", UNIT_PCT),
     ("cc_pct", "Climate-Controlled Share", UNIT_PCT),
     ("ttm_gpr", "TTM Gross Potential Rent", UNIT_DOLLARS),
     ("ttm_egr", "TTM Effective Gross Revenue", UNIT_DOLLARS),

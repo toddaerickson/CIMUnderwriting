@@ -5,8 +5,8 @@
     "blocking_failed": 0,
     "failed": 5,
     "passed": 8,
-    "skipped": 4,
-    "total": 17
+    "skipped": 5,
+    "total": 18
   },
   "checks": [
     [
@@ -28,6 +28,11 @@
       "expense_line_floor",
       "advisory",
       "fail"
+    ],
+    [
+      "income_basis_vs_physical_occupancy",
+      "blocking",
+      "skipped"
     ],
     [
       "income_identity",
@@ -926,16 +931,19 @@
           "v": "EGR \u2264 GPR"
         },
         "A17": {
-          "v": "TTM annualization basis"
+          "v": "Income basis vs physical occupancy"
         },
         "A18": {
-          "v": "Total revenue vs EGR is the right order of magnitude"
+          "v": "TTM annualization basis"
         },
         "A19": {
-          "v": "Unit mix rents vs GPR"
+          "v": "Total revenue vs EGR is the right order of magnitude"
         },
         "A2": {
           "v": "Check"
+        },
+        "A20": {
+          "v": "Unit mix rents vs GPR"
         },
         "A3": {
           "fill": "00FFD9D9",
@@ -993,16 +1001,19 @@
           "v": "Blocking"
         },
         "B17": {
-          "v": "Advisory"
-        },
-        "B18": {
           "v": "Blocking"
         },
-        "B19": {
+        "B18": {
           "v": "Advisory"
+        },
+        "B19": {
+          "v": "Blocking"
         },
         "B2": {
           "v": "Severity"
+        },
+        "B20": {
+          "v": "Advisory"
         },
         "B3": {
           "fill": "00FFD9D9",
@@ -1071,6 +1082,9 @@
         "C2": {
           "v": "Status"
         },
+        "C20": {
+          "v": "SKIPPED"
+        },
         "C3": {
           "fill": "00FFD9D9",
           "v": "FAIL"
@@ -1127,16 +1141,19 @@
           "v": "GPR or EGR not present."
         },
         "D17": {
-          "v": "The CIM does not state how many months of actuals its TTM figures cover."
+          "v": "The CIM does not state an income basis occupancy, or physical occupancy is absent."
         },
         "D18": {
-          "v": "Total revenue or EGR not present."
+          "v": "The CIM does not state how many months of actuals its TTM figures cover."
         },
         "D19": {
-          "v": "No unit mix or no stated GPR \u2014 reconciliation not testable."
+          "v": "Total revenue or EGR not present."
         },
         "D2": {
           "v": "Finding"
+        },
+        "D20": {
+          "v": "No unit mix or no stated GPR \u2014 reconciliation not testable."
         },
         "D3": {
           "fill": "00FFD9D9",
@@ -1194,16 +1211,19 @@
           "v": "ttm_gpr, ttm_egr"
         },
         "E17": {
-          "v": "ttm_months"
+          "v": "income_basis_occupancy, physical_occupancy"
         },
         "E18": {
-          "v": "ttm_total_revenue, ttm_egr"
+          "v": "ttm_months"
         },
         "E19": {
-          "v": "unit_mix, ttm_gpr"
+          "v": "ttm_total_revenue, ttm_egr"
         },
         "E2": {
           "v": "Source"
+        },
+        "E20": {
+          "v": "unit_mix, ttm_gpr"
         },
         "E3": {
           "fill": "00FFD9D9",
@@ -4814,7 +4834,7 @@
         "1. Investment Summary",
         "Occupancy check: the CIM quotes physical occupancy only. Request economic occupancy (collected rent vs gross potential at street rates) before proceeding \u2014 a broker quoting a single occupancy figure is almost always quoting physical, and the spread between the two is where CIMs hide weakness.",
         "Model Checks",
-        "5 of 17 integrity checks flagged. Blocking findings were accepted by the analyst with the discrepancy recorded; advisory findings do not stop the model but change how its outputs should be read.",
+        "5 of 18 integrity checks flagged. Blocking findings were accepted by the analyst with the discrepancy recorded; advisory findings do not stop the model but change how its outputs should be read.",
         "10 model inputs were not stated in the CIM and were filled from a default or a benchmark. Every one is listed with its source in Appendix A; the returns below are computed on them.",
         "Screening Gates",
         "Returns Snapshot (Unlevered)",

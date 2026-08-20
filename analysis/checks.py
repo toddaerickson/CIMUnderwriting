@@ -61,6 +61,16 @@ TTM_FULL_MONTHS = 12
 # absorbs float representation error and nothing an analyst could type.
 OCCUPANCY_EPSILON = 1e-9
 
+# How far the income basis may sit above stated physical occupancy before
+# it is a different claim rather than a rounded one. One point: brokers
+# state both figures whole, so 85 vs 84.6 is the same number twice, while
+# Huntsville's 85 vs 76 is nine points of revenue the property has never
+# collected. Deliberately NOT `OCCUPANCY_EPSILON` — that guards 0..1 range
+# arithmetic, and reusing it would tie a disclosure threshold to a
+# floating-point one.
+INCOME_BASIS_OCCUPANCY_TOLERANCE = 0.01
+
+
 # An expense line below half its benchmark floor is not a cheap operator,
 # it is a wrong number.
 EXPENSE_FLOOR_FRACTION = 0.5
@@ -193,6 +203,7 @@ class CheckInput:
     unit_mix: tuple = ()            # dicts with count / sf / rate (monthly $)
     physical_occupancy: float | None = None   # decimal
     economic_occupancy: float | None = None   # decimal
+    income_basis_occupancy: float | None = None   # decimal
     # Analysis outputs (absent on the form path)
     expense_lines: tuple = ()       # financial_analysis expense_analysis lines
     opex_revenue_ratio: float | None = None
@@ -406,6 +417,37 @@ def _occupancy_sanity(inp):
                       + "; ".join(problems) + ".", values)
     return (PASS, "Occupancy inputs are in range and economic does not "
                   "exceed physical.", values)
+
+
+def _income_basis_vs_physical_occupancy(inp):
+    basis, phys = inp.income_basis_occupancy, inp.physical_occupancy
+    values = {"income_basis_occupancy": basis, "physical_occupancy": phys}
+    if basis is None or phys is None:
+        return (SKIPPED, "The CIM does not state an income basis occupancy, "
+                         "or physical occupancy is absent.", values)
+    gap = basis - phys
+    values["occupancy_gap"] = gap
+    if gap <= INCOME_BASIS_OCCUPANCY_TOLERANCE:
+        return (PASS, f"The income is stated at {_pct(basis)}, at or below "
+                      f"physical occupancy of {_pct(phys)}.", values)
+    # The revenue overstatement is the basis-to-physical RATIO, not the
+    # point gap: income stated at 85% of a building that is 76% full
+    # carries 85/76 of the rent the property collects.
+    overstatement = basis / phys - 1 if phys else None
+    tail = (f" That is roughly {overstatement:.0%} more revenue than the "
+            f"property currently collects, and every figure derived from "
+            f"it — NOI, the going-in cap rate, the IRR and the max offer — "
+            f"is overstated with it." if overstatement is not None else "")
+    return (FAIL, f"RE-READ THE INCOME STATEMENT. The CIM states its income "
+                  f"at {_pct(basis)} occupancy while stating physical "
+                  f"occupancy of {_pct(phys)} — a gap of "
+                  f"{gap * 100:.1f} points. An income statement labelled "
+                  f"pro forma at an occupancy the property has not reached "
+                  f"is a projection, whatever the line above it is called; "
+                  f"a figure headed \u201cActual\u201d on that basis is not "
+                  f"a trailing actual.{tail} Underwrite the income the "
+                  f"property earns at {_pct(phys)}, or source a real "
+                  f"trailing statement.", values)
 
 
 def _egr_le_gpr(inp):
@@ -976,6 +1018,10 @@ CHECKS = (
               _income_identity),
     CheckSpec("occupancy_sanity", "Occupancy coherence", BLOCKING,
               "physical_occupancy, economic_occupancy", _occupancy_sanity),
+    CheckSpec("income_basis_vs_physical_occupancy",
+              "Income basis vs physical occupancy", BLOCKING,
+              "income_basis_occupancy, physical_occupancy",
+              _income_basis_vs_physical_occupancy),
     CheckSpec("egr_le_gpr", "EGR ≤ GPR", BLOCKING,
               "ttm_gpr, ttm_egr", _egr_le_gpr),
     CheckSpec("revenue_vs_egr_plausible", "Total revenue vs EGR is the "
@@ -1123,6 +1169,7 @@ def input_from_cim(cim, financial_analysis=None, physical_analysis=None,
         unit_mix=_unit_mix_dicts(cim.unit_mix),
         physical_occupancy=cim.physical_occupancy,
         economic_occupancy=cim.economic_occupancy,
+        income_basis_occupancy=cim.income_basis_occupancy,
         expense_lines=tuple((fin.get("expense_analysis") or {}).get("lines")
                             or ()),
         opex_revenue_ratio=ratio_check.get("opex_revenue_ratio"),

@@ -560,3 +560,67 @@ def test_a_per_property_banner_is_not_the_offering():
               "/ Room to Trailer rentals")
     assert d.physical_occupancy is None
     assert d.economic_occupancy is None
+
+# ── occupancy: a pro-forma basis is not an in-place figure ───────────
+# The Huntsville CIM (MHP Brokerage) states its entire P&L at
+# `Occupancy 85% (Pro Forma)` while its offering page states physical
+# occupancy of 76%, and heads the result "Net Income (Actual)". Read
+# flat, those are two bare rank-6 candidates that disagree, so the
+# ranked regime REFUSED the deal's occupancy outright and
+# `require_underwritable` turned away a CIM that states the number
+# plainly. Vetoing the pro-forma figure resolves the real one AND keeps
+# the projection, which is the input the blocking check needs.
+#
+# The layout below is the real one; unlike the rest of this module the
+# FIGURES are real too, because the whole point is a document that
+# states two occupancies and means different things by them.
+
+HUNTSVILLE_PL = ("OCCUPANCY: 76% property\n"
+                 "522 Units $60,137 $721,644 Occupancy 85% (Pro Forma)")
+
+
+def test_a_proforma_occupancy_does_not_become_physical():
+    d = parse(HUNTSVILLE_PL)
+    assert d.physical_occupancy == pytest.approx(0.76)
+
+
+def test_the_proforma_occupancy_is_kept_as_the_income_basis():
+    d = parse(HUNTSVILLE_PL)
+    assert d.income_basis_occupancy == pytest.approx(0.85)
+
+
+def test_the_veto_is_what_resolves_the_stated_figure():
+    """Without the P&L line the 76% already reads; the regression this
+    guards is the pro-forma line ARRIVING and refusing it. Asserted as a
+    pair so a future change cannot satisfy one half by dropping both."""
+    assert parse("OCCUPANCY: 76% property").physical_occupancy == \
+        pytest.approx(0.76)
+    assert parse("OCCUPANCY: 76% property").income_basis_occupancy is None
+
+
+def test_a_proforma_occupancy_without_money_is_dropped_not_kept():
+    """The money on the line is what makes the figure a claim about the
+    income. A pro-forma occupancy stated alone is just a projection, and
+    booking it as an income basis would invent the connection."""
+    d = parse("Stabilized Occupancy 92% (Pro Forma) at year end")
+    assert d.physical_occupancy is None
+    assert d.income_basis_occupancy is None
+
+
+def test_an_economic_proforma_figure_does_not_land_in_physical():
+    d = parse("Economic Occupancy 88% (Pro Forma) $721,644")
+    assert d.physical_occupancy is None
+    assert d.economic_occupancy is None
+    assert d.income_basis_occupancy == pytest.approx(0.88)
+
+
+def test_a_plain_deck_is_untouched_by_the_proforma_veto():
+    """Ten of the 15 local decks state `PRO FORMA END OF YEAR N NOI $X`
+    beside an honest trailing statement. That marker is nowhere near an
+    occupancy, so nothing about those decks may move."""
+    d = parse("PHYSICAL OCCUPANCY (SQ. FT.): 91.5%\n"
+              "Economic Occupancy 78.2%\n"
+              "PRO FORMA END OF YEAR 2 NOI $755,651")
+    assert d.physical_occupancy == pytest.approx(0.915)
+    assert d.economic_occupancy == pytest.approx(0.782)
+    assert d.income_basis_occupancy is None

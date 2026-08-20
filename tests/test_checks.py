@@ -869,3 +869,79 @@ def test_a_missing_egr_skips_and_does_not_fall_back_to_gpr():
     r = _run("revenue_vs_egr_plausible", ttm_total_revenue=441_536.0,
              ttm_gpr=520_000.0)
     assert r.status == C.SKIPPED
+
+
+# ── The income basis. Same class as the revenue tripwire above: a figure
+# the model prices on that is not what it claims to be. Nothing else
+# catches it — `occupancy_sanity` compares physical to ECONOMIC (absent
+# on such a deck), and the "Year 1 NOI ≤ 115% of TTM actual" rule needs a
+# TTM actual that does not exist.
+
+HUNTSVILLE_BASIS = {"income_basis_occupancy": 0.85, "physical_occupancy": 0.76}
+
+
+def test_income_stated_above_physical_blocks():
+    r = _run("income_basis_vs_physical_occupancy", **HUNTSVILLE_BASIS)
+    assert r.blocks
+    assert r.message.startswith("RE-READ THE INCOME STATEMENT")
+    assert "9.0 points" in r.message
+    assert r.values["occupancy_gap"] == pytest.approx(0.09)
+
+
+def test_the_message_states_the_ratio_not_the_point_gap():
+    """Nine points on a 76%-full building is 12% more revenue, not 9%.
+    Quoting the point gap as the overstatement is the arithmetic error
+    this deal invites."""
+    r = _run("income_basis_vs_physical_occupancy", **HUNTSVILLE_BASIS)
+    assert "12% more revenue" in r.message
+
+
+def test_income_stated_at_physical_passes():
+    r = _run("income_basis_vs_physical_occupancy",
+             income_basis_occupancy=0.85, physical_occupancy=0.85)
+    assert not r.blocks
+    assert r.status == C.PASS
+
+
+def test_a_rounding_width_gap_is_not_a_different_claim():
+    """Brokers state both figures whole. 85 vs 84.6 is one number twice."""
+    r = _run("income_basis_vs_physical_occupancy",
+             income_basis_occupancy=0.85, physical_occupancy=0.846)
+    assert r.status == C.PASS
+
+
+def test_income_stated_below_physical_passes():
+    """A conservatively-stated income is not a defect."""
+    r = _run("income_basis_vs_physical_occupancy",
+             income_basis_occupancy=0.70, physical_occupancy=0.85)
+    assert r.status == C.PASS
+
+
+def test_either_side_absent_skips():
+    assert _run("income_basis_vs_physical_occupancy",
+                physical_occupancy=0.76).status == C.SKIPPED
+    assert _run("income_basis_vs_physical_occupancy",
+                income_basis_occupancy=0.85).status == C.SKIPPED
+
+
+def test_a_zero_physical_occupancy_still_blocks_without_dividing():
+    """Decision 9's `is None` rule: a stated 0% is an honestly-reported
+    pre-lease-up asset, and income booked at 85% against it is the most
+    extreme form of this defect — it must not be lost to a guard written
+    for a divisor."""
+    r = _run("income_basis_vs_physical_occupancy",
+             income_basis_occupancy=0.85, physical_occupancy=0.0)
+    assert r.blocks
+    assert "more revenue" not in r.message
+
+
+def test_both_adapters_carry_the_income_basis():
+    from extract.parser import CIMData
+    from webapp.forms import check_input_from_cleaned
+
+    assert C.input_from_cim(
+        CIMData(income_basis_occupancy=0.85)).income_basis_occupancy == 0.85
+    # The form path takes whole-number percents.
+    assert check_input_from_cleaned(
+        {"income_basis_occupancy": 85}).income_basis_occupancy == \
+        pytest.approx(0.85)
